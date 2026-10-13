@@ -1,5 +1,37 @@
-import type { TicketRecord } from '../types'
+import type { Project, Supplier, TicketRecord } from '../types'
+import { getBangkokDate } from './format'
 import { getProfit } from './stats'
+
+const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
+  Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
+
+export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Project[]; tickets: TicketRecord[] }, exportedAt = new Date().toISOString()) => {
+  const owners = new Set([...data.suppliers, ...data.projects, ...data.tickets].map((record) => record.userId))
+  if (owners.size > 1) throw new Error('账号正在切换，请稍后重新备份，避免混合不同账号的资料。')
+  return {
+    format: 'ticket-profit-ledger',
+    version: 1,
+    currency: 'THB',
+    timeZone: 'Asia/Bangkok',
+    exportedAt,
+    // Explicit fields exclude authentication sessions and any future secret fields.
+    suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus'])),
+    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
+    // Include deletion markers so a backup does not resurrect deleted tickets.
+    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+  }
+}
+
+export const downloadLedgerBackup = (backup: ReturnType<typeof createLedgerBackup>) => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `ticket-ledger-backup-${getBangkokDate()}.json`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
   const XLSX = await import('xlsx')

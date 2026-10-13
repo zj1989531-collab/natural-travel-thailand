@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { exportTicketsToXlsx } from './lib/export'
+import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth } from './lib/format'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
@@ -183,12 +183,13 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
   )
 }
 
-function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpdateProject, onClose }: {
+function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpdateProject, onBackup, onClose }: {
   suppliers: Supplier[]
   projects: Project[]
   onAddSupplier: (name: string) => Promise<void>
   onAddProject: (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
   onUpdateProject: (id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
+  onBackup: () => Promise<void>
   onClose: () => void
 }) {
   const [supplierName, setSupplierName] = useState('')
@@ -270,6 +271,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
           <button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
         </div>
         <p className="sheet-copy">先添加供货商，再为每个项目建立子项/套餐、成本和代理售价。出票时选择子项会自动带入这两个价格。</p>
+        <button className="secondary-button full-width" type="button" onClick={() => void onBackup()} disabled={saving !== null}>导出全部资料备份</button>
 
         <section className="management-section">
           <h3>1. 添加供货商</h3>
@@ -568,6 +570,18 @@ export default function App() {
     void synchronise()
   }
 
+  const backupAllData = async () => {
+    try {
+      const [backupSuppliers, backupProjects, backupTickets] = await Promise.all([
+        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets()
+      ])
+      downloadLedgerBackup(createLedgerBackup({ suppliers: backupSuppliers, projects: backupProjects, tickets: backupTickets }))
+      setToast('全部资料备份已导出，包含供货商、项目价格和出票记录，请妥善保管。')
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '备份未完成，请稍后重试。')
+    }
+  }
+
   const deleteTicket = async (ticket: TicketRecord) => {
     if (!window.confirm(`确认删除 ${formatDate(ticket.issueDate)} 的「${ticket.supplierName}」记录吗？删除后将不再计入统计。`)) return
     await ledgerRepository.deleteTicket(ticket)
@@ -697,7 +711,7 @@ export default function App() {
       </nav>
 
       {formOpen && <TicketForm ticket={selectedTicket} suppliers={suppliers} projects={projects} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
-      {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onClose={() => setSupplierSheetOpen(false)} />}
+      {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <button className="export-button" onClick={() => void exportTicketsToXlsx(tickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(tickets).length)}</button>
