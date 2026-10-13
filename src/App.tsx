@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount, MAX_PERSON_COUNT } from './lib/format'
+import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
+import { PersonCountField } from './components/PersonCountField'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
@@ -146,12 +147,7 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
             <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
             {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
           </label>
-          <label>
-            人数
-            <input inputMode="numeric" type="number" min="1" max={MAX_PERSON_COUNT} step="1" value={form.personCount ?? ''} onChange={(event) => update('personCount', event.target.value === '' ? null : Number(event.target.value))} required={!ticket || ticket.personCount != null} />
-            <span className="muted">仅记录人数，不自动倍增售价、成本或利润。</span>
-            {ticket && ticket.personCount == null && <span className="muted">旧记录未记录人数，可手动补填。</span>}
-          </label>
+          <PersonCountField value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null)} onChange={(value) => update('personCount', value)} />
           <label>
             项目
             <select value={form.projectName} onChange={(event) => {
