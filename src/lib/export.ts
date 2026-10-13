@@ -18,7 +18,7 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus'])),
     projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Include deletion markers so a backup does not resurrect deleted tickets.
-    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
   }
 }
 
@@ -33,14 +33,13 @@ export const downloadLedgerBackup = (backup: ReturnType<typeof createLedgerBacku
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
-  const XLSX = await import('xlsx')
-  const rows = tickets
+export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
     .filter((ticket) => !ticket.deletedAt)
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
     .map((ticket) => ({
       '出票日期': ticket.issueDate,
       '曼谷时间': ticket.issueTime || '',
+      '人数': ticket.personCount ?? '',
       '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
       '供应商': ticket.supplierName,
       '项目': ticket.projectName || '未分类项目',
@@ -50,10 +49,14 @@ export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
       '备注': ticket.note,
       '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
     }))
+
+export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
+  const XLSX = await import('xlsx')
+  const rows = buildTicketExportRows(tickets)
   const workbook = XLSX.utils.book_new()
   const worksheet = XLSX.utils.json_to_sheet(rows)
   worksheet['!cols'] = [
-    { wch: 14 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 32 }, { wch: 23 }
+    { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 24 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 32 }, { wch: 23 }
   ]
   XLSX.utils.book_append_sheet(workbook, worksheet, '出票记录')
   XLSX.writeFile(workbook, `票务盈利簿_${new Date().toISOString().slice(0, 10)}.xlsx`)

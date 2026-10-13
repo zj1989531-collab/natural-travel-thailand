@@ -29,6 +29,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  personCount?: number | null
   entryMode?: EntryMode
   manualProfitThb?: number | null
   issueTime?: string | null
@@ -50,6 +51,7 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  personCount?: number | null
   entryMode?: EntryMode
   manualProfitThb?: number | null
   issueTime?: string | null

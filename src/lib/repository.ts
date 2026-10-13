@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { db } from './db'
-import { createId, isValidIssueTime, normalizeSupplier } from './format'
+import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
 import type { AppSettings, EntryMode, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
@@ -17,6 +17,7 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  person_count?: number | null
   entry_mode?: EntryMode
   manual_profit_thb?: number | string | null
   issue_time?: string | null
@@ -114,6 +115,7 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  personCount: ticket.person_count ?? null,
   entryMode: ticket.entry_mode ?? 'standard',
   manualProfitThb: ticket.manual_profit_thb == null ? null : Number(ticket.manual_profit_thb),
   issueTime: ticket.issue_time?.slice(0, 5) ?? null,
@@ -135,6 +137,7 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  person_count: ticket.personCount ?? null,
   entry_mode: ticket.entryMode ?? 'standard',
   manual_profit_thb: ticket.entryMode === 'profit_only' ? ticket.manualProfitThb ?? null : null,
   issue_time: ticket.issueTime || null,
@@ -317,6 +320,9 @@ export const ledgerRepository = {
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
+    if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
+      throw new Error('人数必须是大于或等于1的整数。')
+    }
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
     const normalizedName = normalizeSupplier(input.supplierName)
@@ -351,6 +357,7 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
+      personCount: input.personCount ?? null,
       entryMode,
       issueTime: input.issueTime || null,
       manualProfitThb: entryMode === 'profit_only' ? input.manualProfitThb : null,

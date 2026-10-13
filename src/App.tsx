@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime } from './lib/format'
+import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount, MAX_PERSON_COUNT } from './lib/format'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
@@ -26,6 +26,7 @@ interface TicketFormProps {
 }
 
 const emptyForm = (): TicketInput => ({
+  personCount: 1,
   issueDate: getBangkokDate(),
   issueTime: getBangkokTime(),
   entryMode: 'standard',
@@ -71,6 +72,7 @@ function SummaryPanel({ title, subtitle, tickets, note }: { title: string; subti
 
 function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
+    personCount: ticket.personCount ?? null,
     issueDate: ticket.issueDate,
     issueTime: ticket.issueTime ?? '',
     entryMode: ticket.entryMode ?? 'standard',
@@ -99,6 +101,10 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
     }
     if ((!ticket && !form.issueTime) || (form.issueTime && !isValidIssueTime(form.issueTime))) {
       setError('请填写有效的曼谷时间（HH:mm）。')
+      return
+    }
+    if (form.personCount == null ? !ticket || ticket.personCount != null : !isValidPersonCount(form.personCount)) {
+      setError('人数必须是大于或等于1的整数。')
       return
     }
     if (form.entryMode === 'profit_only' ? typeof form.manualProfitThb !== 'number' || !Number.isFinite(form.manualProfitThb) || form.manualProfitThb < 0 : !Number.isFinite(form.agentPriceThb) || !Number.isFinite(form.costThb) || form.agentPriceThb < 0 || form.costThb < 0) {
@@ -139,6 +145,12 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
             时间（曼谷 UTC+7）
             <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
             {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
+          </label>
+          <label>
+            人数
+            <input inputMode="numeric" type="number" min="1" max={MAX_PERSON_COUNT} step="1" value={form.personCount ?? ''} onChange={(event) => update('personCount', event.target.value === '' ? null : Number(event.target.value))} required={!ticket || ticket.personCount != null} />
+            <span className="muted">仅记录人数，不自动倍增售价、成本或利润。</span>
+            {ticket && ticket.personCount == null && <span className="muted">旧记录未记录人数，可手动补填。</span>}
           </label>
           <label>
             项目
@@ -729,7 +741,7 @@ export default function App() {
                   <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
                   <strong className={getProfit(ticket) >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(getProfit(ticket))}</strong>
                 </div>
-                <div className="ticket-meta">{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>代理售价 {formatThb(ticket.agentPriceThb)}</span><span>成本 {formatThb(ticket.costThb)}</span></>}</div>
+                <div className="ticket-meta"><span>{ticket.personCount == null ? '人数未记录' : `${formatNumber(ticket.personCount)} 人`}</span>{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>代理售价 {formatThb(ticket.agentPriceThb)}</span><span>成本 {formatThb(ticket.costThb)}</span></>}</div>
                 {ticket.note && <p className="ticket-note">{ticket.note}</p>}
                 <div className="ticket-actions"><button type="button" onClick={() => { setSelectedTicket(ticket); setFormOpen(true) }}>编辑</button><button className="danger-action" type="button" onClick={() => void deleteTicket(ticket)}>删除</button></div>
               </article>

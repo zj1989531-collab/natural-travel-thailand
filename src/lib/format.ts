@@ -40,6 +40,9 @@ export const getBangkokTime = (date = new Date()): string =>
 
 export const isValidIssueTime = (time: string): boolean => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)
 
+export const MAX_PERSON_COUNT = 2147483647
+export const isValidPersonCount = (count: number): boolean => Number.isInteger(count) && count >= 1 && count <= MAX_PERSON_COUNT
+
 export const toNumber = (value: string): number => {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0

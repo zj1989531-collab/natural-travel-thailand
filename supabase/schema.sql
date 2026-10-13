@@ -14,6 +14,7 @@ create table if not exists public.tickets (
   entry_mode text not null default 'standard',
   manual_profit_thb numeric(14, 2),
   issue_time time without time zone,
+  person_count integer constraint tickets_person_count_valid check (person_count >= 1),
   user_id uuid not null references auth.users(id) on delete cascade,
   issue_date date not null,
   supplier_id uuid not null references public.suppliers(id),
