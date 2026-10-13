@@ -10,7 +10,7 @@ export function PersonCountField({ value, allowUnknown = false, onChange }: {
 }) {
   const [custom, setCustom] = useState(() => value != null && !COMMON_COUNTS.includes(value))
 
-  return <div>
+  return <div className="person-count-field">
     <label htmlFor="person-count">人数</label>
     <select id="person-count" aria-describedby="person-count-help" value={custom ? 'custom' : value ?? ''} required={!allowUnknown} onChange={(event) => {
       const selected = event.target.value

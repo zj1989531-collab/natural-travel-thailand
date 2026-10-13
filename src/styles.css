@@ -33,6 +33,7 @@ h1 { margin-bottom: 0; color: #19332d; font-size: clamp(25px, 7vw, 34px); letter
 h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .eyebrow { margin-bottom: 5px; color: #77837d; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .muted { color: #77837d; font-size: 12px; }
+.person-count-field { display: grid; gap: 7px; }
 .round-add, .nav-add {
   display: grid; place-items: center; color: #fff; background: #176a59; border: 0; font-weight: 400;
   box-shadow: 0 6px 18px #176a5959;
