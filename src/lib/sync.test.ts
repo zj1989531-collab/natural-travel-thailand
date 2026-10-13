@@ -1,5 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createSyncQueue, mergeRemoteRecord, needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
+import { canWriteLedger, createSyncQueue, mergeRemoteRecord, needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
+
+describe('cloud-first writes', () => {
+  it.each([
+    [false, null, true],
+    [true, null, false],
+    [true, '', false],
+    [true, 'user-1', true]
+  ] as const)('configured=%s, account=%s permits writes=%s', (configured, account, allowed) => {
+    expect(canWriteLedger(configured, account)).toBe(allowed)
+  })
+
+  it('still permits signed-in offline edits for automatic upload after reconnect', () => {
+    vi.stubGlobal('navigator', { onLine: false })
+    expect(canWriteLedger(true, 'user-1')).toBe(true)
+    vi.unstubAllGlobals()
+  })
+})
 
 const record = (updatedAt: string, syncStatus: VersionedRecord['syncStatus'] = 'pending') => ({
   id: 'ticket-1', userId: 'user-1', updatedAt, syncStatus, note: 'local'
