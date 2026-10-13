@@ -11,6 +11,7 @@
     "test": "vitest run && node --test scripts/pwa.test.mjs",
     "test:watch": "vitest",
     "sync:github": "node scripts/sync-github.mjs",
+    "github:login": "node scripts/login-github.mjs",
     "sync:watch": "node scripts/sync-github.mjs --watch",
     "dev:sync": "node scripts/sync-github.mjs --watch --dev"
   },

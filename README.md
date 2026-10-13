@@ -20,7 +20,7 @@ pnpm dev
 
 在仓库 Settings → Pages 将 Source 设为 GitHub Actions。每次推送 main，工作流会安装固定版本依赖、运行测试、构建并发布；失败的检查不会更新线上网站。Pages 项目路径和手机离线资源在构建时自动适配，打开或刷新线上页面可获得最新版本。
 
-本机完成 GitHub Git 登录并关联 origin 后，可以运行：
+本机先运行 `pnpm github:login`，按提示完成 GitHub Git 登录，然后可以运行：
 
 ```bash
 pnpm dev:sync

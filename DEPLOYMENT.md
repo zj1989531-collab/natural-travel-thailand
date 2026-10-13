@@ -37,7 +37,7 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 
 ## 4. 让电脑源码自动上传
 
-本机 Git 必须具备仓库写权限。可通过 GitHub CLI 完成 `gh auth login` 和 `gh auth setup-git`，或使用你现有的 Git 凭证。浏览器/GitHub 插件登录不等于本机 Git 登录。
+本机 Git 必须具备仓库写权限。运行 `pnpm github:login`：它会使用已有 GitHub CLI，或从官方发布下载、校验后安装到项目 `.tools/gh`，接着引导浏览器登录并配置 Git。浏览器/GitHub 插件登录不等于本机 Git 登录。账号授权由你本人完成；密码和 token 不需要发到聊天里。
 
 在项目目录运行 `pnpm dev:sync`。保持终端运行，保存源码后会自动检查、提交并推送；GitHub Actions 接着更新网站。`pnpm sync:watch` 只监听，`pnpm sync:github` 只执行一次。
 

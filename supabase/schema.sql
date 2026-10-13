@@ -50,6 +50,11 @@ alter table public.suppliers enable row level security;
 alter table public.projects enable row level security;
 alter table public.tickets enable row level security;
 
+-- Explicit API privileges; row-level policies still restrict each user's rows.
+grant usage on schema public to authenticated;
+grant select, insert, update on table public.suppliers, public.projects, public.tickets to authenticated;
+revoke all privileges on table public.suppliers, public.projects, public.tickets from anon;
+
 create policy "Users manage only their suppliers" on public.suppliers
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
