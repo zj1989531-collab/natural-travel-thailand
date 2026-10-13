@@ -22,8 +22,14 @@ describe('refund amounts, quantities and original-period accounting', () => {
     expect(ticket.refunds).toBeUndefined()
     expect(row.personCount).toBe(3)
     expect(getRefundState(row).full).toBe(false)
-    expect(defaultRefundAmounts(row, true, 1)).toEqual({ refundRevenueThb: 1300, returnedCostThb: 1250 })
+    expect(defaultRefundAmounts(row, true, 1)).toEqual({ refundRevenueThb: 1300, returnedCostThb: 1200 })
     expect(defaultRefundAmounts(row, false, 1)).toEqual({ refundRevenueThb: 650, returnedCostThb: 600 })
+  })
+  it('does not erase a previous supplier fee when refunding the remaining people at default prices', () => {
+    const defaults = defaultRefundAmounts(projected(), true, 1)
+    const row = projected([refund, { ...refund, id: 'r2', personCount: 2, isFull: true, ...defaults }])
+    expect(getRefundState(row).remainingPeople).toBe(0)
+    expect(getTicketAmounts(row)).toEqual({ agentPriceThb: 0, costThb: 50, profitThb: -50 })
   })
   it('keeps losses when every ticket is refunded but the supplier returns no cost', () => {
     const row = projected([{ ...refund, personCount: 3, isFull: true, refundRevenueThb: 1950, returnedCostThb: 0 }])

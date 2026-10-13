@@ -13,6 +13,11 @@ const query: ReportQuery = { mode: 'month', month: '2026-10', date: '2026-10-13'
 const render = (records: TicketRecord[], filter = query) => renderToStaticMarkup(<ReportPreview report={buildReport(records, filter)} supplierName="全部供货商" pendingCount={1} generatedAt="2026-10-13 22:00" />)
 
 describe('online formatted report preview', () => {
+  it('shows remaining ticket quantity and net profit after refund without leaking sales or costs', () => {
+    const html = render([{ ...record, refunds: [{ id: 'refund-test', userId: record.userId, ticketId: record.id, personCount: 1, isFull: false, refundRevenueThb: 650, returnedCostThb: 550, refundDate: '2026-10-14', refundTime: '10:00', note: '', cancelledAt: null, createdAt: record.createdAt, updatedAt: record.updatedAt, syncStatus: 'synced' }] }])
+    for (const text of ['已录 2 张', '已退1人', '฿50.00', '原出票日期']) expect(html).toContain(text)
+    for (const text of ['฿1,300.00', '฿1,250.00', '总成本', '总销售额']) expect(html).not.toContain(text)
+  })
   it('renders a named report, period, supplier summary, details, totals and sync warning', () => {
     const html = render([record])
     for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 成人票', '测试备注', '09:35 曼谷', '已录人数', '已录 3 张', '待同步', '฿150.00']) expect(html).toContain(text)

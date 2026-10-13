@@ -19,9 +19,13 @@ export const validateRefundInput = (ticket: TicketRecord, input: RefundInput) =>
 export const defaultRefundAmounts = (ticket: TicketRecord, isFull: boolean, quantity: number) => {
   const remaining = getTicketAmounts(ticket)
   const original = getOriginalTicketAmounts(ticket)
-  const ratio = ticket.personCount ? quantity / ticket.personCount : 0
+  const refundQuantity = isFull ? getRefundState(ticket).remainingPeople : quantity
+  // Refund only the remaining tickets at original prices. An earlier retained
+  // fee must not be silently returned when the rest of an order is refunded.
+  const ratio = ticket.personCount ? (refundQuantity ?? 0) / ticket.personCount : 0
+  const unknownFull = isFull && ticket.personCount == null
   return {
-    refundRevenueThb: isFull ? remaining.agentPriceThb : Math.min(remaining.agentPriceThb, Math.round(original.agentPriceThb * ratio * 100) / 100),
-    returnedCostThb: isFull ? remaining.costThb : Math.min(remaining.costThb, Math.round(original.costThb * ratio * 100) / 100)
+    refundRevenueThb: unknownFull ? remaining.agentPriceThb : Math.min(remaining.agentPriceThb, Math.round(original.agentPriceThb * ratio * 100) / 100),
+    returnedCostThb: unknownFull ? remaining.costThb : Math.min(remaining.costThb, Math.round(original.costThb * ratio * 100) / 100)
   }
 }
