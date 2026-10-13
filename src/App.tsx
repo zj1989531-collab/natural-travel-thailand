@@ -4,7 +4,8 @@ import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from '.
 import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth } from './lib/format'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
-import { createSyncQueue, type SyncQueue } from './lib/sync'
+import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
+import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, summarise, ticketsInMonth, ticketsOnDate } from './lib/stats'
 import type { Project, Supplier, TicketInput, TicketRecord } from './types'
 
@@ -17,8 +18,8 @@ interface InstallPromptEvent extends Event {
 
 interface TicketFormProps {
   ticket?: TicketRecord
-  suppliers: Supplier[]
   projects: Project[]
+  cloudLoginRequired: boolean
   onCancel: () => void
   onManageSuppliers: () => void
   onSave: (input: TicketInput) => Promise<void>
@@ -64,7 +65,7 @@ function SummaryPanel({ title, subtitle, tickets }: { title: string; subtitle: s
   )
 }
 
-function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     issueDate: ticket.issueDate,
     supplierName: ticket.supplierName,
@@ -86,7 +87,7 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
     event.preventDefault()
     const supplierName = form.supplierName.trim()
     if (!form.issueDate || !supplierName || !form.projectId) {
-      setError('请填写出票日期，并选择供货商和项目。')
+      setError('请填写出票日期，并选择项目及适用的套餐；供货商会自动带入。')
       return
     }
     if (!Number.isFinite(form.agentPriceThb) || !Number.isFinite(form.costThb) || form.agentPriceThb < 0 || form.costThb < 0) {
@@ -102,10 +103,8 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
     }
   }
 
-  const selectedSupplier = suppliers.find((supplier) => supplier.name === form.supplierName)
-  const availableProjects = projects.filter((project) => project.supplierId === selectedSupplier?.id)
-  const projectNames = [...new Set(availableProjects.map((project) => project.name))]
-  const availableSubItems = availableProjects.filter((project) => project.name === form.projectName)
+  const names = projectNames(projects)
+  const availableSubItems = projects.filter((project) => project.name === form.projectName)
   const profit = (Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : 0) - (Number.isFinite(form.costThb) ? form.costThb : 0)
 
   return (
@@ -119,41 +118,34 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
           </div>
           <button className="icon-button" type="button" onClick={onCancel} aria-label="关闭">×</button>
         </div>
+        {cloudLoginRequired && <p className="sheet-copy">保存前请登录云端账号，之后记录和价格修改会自动同步到电脑与手机。</p>}
         <form className="ticket-form" onSubmit={submit}>
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
           </label>
           <label>
-            供货商
-            <select value={form.supplierName} onChange={(event) => setForm((current) => ({ ...current, supplierName: event.target.value, projectId: '', projectName: '', subItemName: '', agentPriceThb: Number.NaN, costThb: Number.NaN }))} required>
-              <option value="">请选择供货商</option>
-              {suppliers.map((supplier) => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}
-            </select>
-          </label>
-          {suppliers.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有供货商？现在录入</button>}
-          <label>
             项目
-            <select value={form.projectName} disabled={!selectedSupplier} onChange={(event) => {
-              const nextProjectName = event.target.value
-              const noSubItem = availableProjects.find((project) => project.name === nextProjectName && !project.subItemName)
-              setForm((current) => noSubItem ? { ...current, projectId: noSubItem.id, projectName: noSubItem.name, subItemName: '', costThb: noSubItem.defaultCostThb, agentPriceThb: noSubItem.defaultAgentPriceThb } : { ...current, projectId: '', projectName: nextProjectName, subItemName: '', agentPriceThb: Number.NaN, costThb: Number.NaN })
+            <select value={form.projectName} onChange={(event) => {
+              const name = event.target.value
+              setForm((current) => chooseProject(current, projects, name))
             }} required>
-              <option value="">{selectedSupplier ? '请选择项目' : '请先选择供货商'}</option>
-              {projectNames.map((projectName) => <option key={projectName} value={projectName}>{projectName}</option>)}
+              <option value="">请选择项目</option>
+              {names.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
           <label>
             子项 / 套餐 <span className="muted">（可选）</span>
             <select value={form.projectId} disabled={!form.projectName} onChange={(event) => {
-              const selectedProject = availableSubItems.find((project) => project.id === event.target.value)
-              setForm((current) => selectedProject ? { ...current, projectId: selectedProject.id, projectName: selectedProject.name, subItemName: selectedProject.subItemName, costThb: selectedProject.defaultCostThb, agentPriceThb: selectedProject.defaultAgentPriceThb } : { ...current, projectId: '', subItemName: '' })
+              const id = event.target.value
+              setForm((current) => chooseProjectOption(current, projects, id))
             }} required>
               <option value="">{form.projectName ? '请选择子项/套餐' : '请先选择项目'}</option>
-              {availableSubItems.map((project) => <option key={project.id} value={project.id}>{project.subItemName || '不分套餐'}</option>)}
+              {availableSubItems.map((project) => <option key={project.id} value={project.id}>{projectOptionLabel(project, availableSubItems)}</option>)}
             </select>
           </label>
-          {selectedSupplier && availableProjects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>该供货商还没有项目价格，去录入</button>}
+          {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
+          {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
           <div className="form-grid">
             <label>
               代理售价（THB）
@@ -175,7 +167,7 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="sheet-actions">
             <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
-            <button className="primary-button" type="submit" disabled={saving}>{saving ? '保存中…' : '保存记录'}</button>
+            <button className="primary-button" type="submit" disabled={saving}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>
           </div>
         </form>
       </section>
@@ -541,7 +533,19 @@ export default function App() {
     setFormOpen(true)
   }
 
+  const requestLoginForWrite = () => {
+    if (canWriteLedger(cloudConfigured, userRef.current?.id)) return false
+    setLoginOpen(true)
+    setToast('请先登录同一邮箱，所有修改才能自动同步到云端。')
+    return true
+  }
+
+  const requireCloudLogin = () => {
+    if (requestLoginForWrite()) throw new Error('请先登录云端账号，再保存修改。')
+  }
+
   const saveTicket = async (input: TicketInput) => {
+    requireCloudLogin()
     await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
     await refresh()
     setFormOpen(false)
@@ -550,6 +554,7 @@ export default function App() {
   }
 
   const addSupplier = async (name: string) => {
+    requireCloudLogin()
     await ledgerRepository.createSupplier(name)
     await refresh()
     setToast('供货商已录入，新增出票时可以直接选择。')
@@ -557,6 +562,7 @@ export default function App() {
   }
 
   const addProject = async (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }) => {
+    requireCloudLogin()
     await ledgerRepository.createProject(input)
     await refresh()
     setToast('项目价格已录入，新增出票时可以直接选择。')
@@ -564,6 +570,7 @@ export default function App() {
   }
 
   const updateProject = async (id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }) => {
+    requireCloudLogin()
     await ledgerRepository.updateProjectPrices(id, input)
     await refresh()
     setToast('项目价格已修改，已有出票记录保持原金额。')
@@ -583,6 +590,7 @@ export default function App() {
   }
 
   const deleteTicket = async (ticket: TicketRecord) => {
+    if (requestLoginForWrite()) return
     if (!window.confirm(`确认删除 ${formatDate(ticket.issueDate)} 的「${ticket.supplierName}」记录吗？删除后将不再计入统计。`)) return
     await ledgerRepository.deleteTicket(ticket)
     await refresh()
@@ -624,7 +632,7 @@ export default function App() {
           </div>
         </div>
         <button className="header-action" type="button" onClick={() => void synchronise()} disabled={!user || syncing}>
-          {syncing ? '同步中' : user ? '同步' : '本机'}
+          {syncing ? '同步中' : user ? unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
         </button>
       </header>
 
@@ -640,7 +648,7 @@ export default function App() {
 
           {cloudConfigured ? (
             <section className={`sync-banner ${user ? 'connected' : ''}`}>
-              <div><strong>{user ? '云端自动同步已启用' : '连接云端，换机也不丢账'}</strong><span>{user ? `${user.email ?? '当前账号'} · ${unsyncedCount ? `${unsyncedCount} 条待同步` : syncMessage || '全部记录已同步'}` : '登录后，当前本机记录会安全同步到你的私人账号。'}</span></div>
+              <div><strong>{user ? '云端自动同步已启用' : '登录后自动同步电脑与手机'}</strong><span>{user ? `${user.email ?? '当前账号'} · ${unsyncedCount ? `${unsyncedCount} 条待同步` : syncMessage || '正在连接云端…'}` : '请登录同一邮箱。未登录时不能保存修改，避免资料只留在本机。'}</span></div>
               {user ? <button type="button" onClick={() => void signOut()}>退出</button> : <button type="button" onClick={() => setLoginOpen(true)}>登录</button>}
             </section>
           ) : (
@@ -710,7 +718,7 @@ export default function App() {
         <button className={view === 'records' ? 'active' : ''} onClick={() => setView('records')} type="button"><span>▤</span>记录</button>
       </nav>
 
-      {formOpen && <TicketForm ticket={selectedTicket} suppliers={suppliers} projects={projects} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}

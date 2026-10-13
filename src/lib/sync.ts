@@ -7,6 +7,12 @@ export interface VersionedRecord {
   syncStatus: SyncStatus
 }
 
+// Cloud-enabled ledgers must not silently fork new anonymous local data.
+// Network availability is intentionally not checked: signed-in offline edits
+// remain queued locally and are uploaded when connectivity returns.
+export const canWriteLedger = (configured: boolean, authenticatedUserId: string | null | undefined) =>
+  !configured || Boolean(authenticatedUserId)
+
 export const isNewer = (left: string, right: string) => new Date(left).getTime() > new Date(right).getTime()
 
 // Ensure consecutive local edits remain distinct, even within one millisecond.
