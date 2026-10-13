@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Supplier, TicketRecord } from '../types'
-import { createLedgerBackup } from './export'
+import { buildTicketExportRows, createLedgerBackup } from './export'
 
 const supplier: Supplier = {
   id: 'supplier-1', userId: 'local-user', name: '示例供货商', normalizedName: '示例供货商',
@@ -39,9 +39,14 @@ describe('complete ledger backup', () => {
     const ticket: TicketRecord = {
       id: 'ticket-1', userId: supplier.userId, issueDate: '2026-01-01', supplierId: supplier.id,
       supplierName: supplier.name, projectId: project.id, projectName: project.name, subItemName: '',
-      agentPriceThb: 140, costThb: 90, note: '示例备注', createdAt: supplier.createdAt,
+      personCount: 3, agentPriceThb: 140, costThb: 90, note: '示例备注', createdAt: supplier.createdAt,
       updatedAt: supplier.updatedAt, deletedAt: supplier.updatedAt, syncStatus: 'pending'
     }
     expect(createLedgerBackup({ suppliers: [supplier], projects: [project], tickets: [ticket] }).tickets).toEqual([ticket])
+    const active = { ...ticket, deletedAt: null, issueTime: '09:35' }
+    expect(buildTicketExportRows([active, ticket])).toHaveLength(1)
+    expect(buildTicketExportRows([active])[0]).toMatchObject({ '人数': 3, '曼谷时间': '09:35', '代理售价 (THB)': 140, '供货商成本 (THB)': 90, '利润 (THB)': 50 })
+    expect(buildTicketExportRows([{ ...active, personCount: null }])[0]['人数']).toBe('')
+    expect(buildTicketExportRows([{ ...active, entryMode: 'profit_only', manualProfitThb: 123.45 }])[0]).toMatchObject({ '人数': 3, '代理售价 (THB)': '', '供货商成本 (THB)': '', '利润 (THB)': 123.45 })
   })
 })

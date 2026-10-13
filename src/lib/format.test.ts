@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { getBangkokDate, getBangkokTime, isValidIssueTime } from './format'
+import { getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount, MAX_PERSON_COUNT } from './format'
+
+describe('person count', () => {
+  it.each([1, 2, 100, MAX_PERSON_COUNT])('accepts positive integer %s', (count) => expect(isValidPersonCount(count)).toBe(true))
+  it.each([0, -1, 1.5, NaN, Infinity, MAX_PERSON_COUNT + 1])('rejects invalid count %s', (count) => expect(isValidPersonCount(count)).toBe(false))
+})
 
 describe('Bangkok issue time', () => {
   it('defaults to Bangkok time independent of the device time zone', () => {

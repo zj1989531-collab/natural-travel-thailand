@@ -84,6 +84,13 @@ describe('monthly commission settlement statistics', () => {
 })
 
 describe('profit statistics', () => {
+  it('keeps all financial totals and ticket counts unchanged when headcount changes', () => {
+    const ticket = makeTicket({ personCount: 5 })
+    expect(getProfit(ticket)).toBe(260)
+    expect(summarise([ticket])).toEqual(summarise([{ ...ticket, personCount: 1 }]))
+    expect(bySupplier([ticket])[0]).toMatchObject({ count: 1, agentPriceThb: 1000, costThb: 740, profitThb: 260 })
+    expect(summarise([makeTicket({ entryMode: 'profit_only', manualProfitThb: 100, personCount: 10 })])).toEqual({ count: 0, agentPriceThb: 0, costThb: 0, profitThb: 100 })
+  })
   it('calculates profit from agent price minus supplier cost', () => {
     expect(getProfit(makeTicket({ agentPriceThb: 1250.5, costThb: 800.25 }))).toBe(450.25)
   })

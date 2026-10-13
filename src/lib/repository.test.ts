@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { User } from '@supabase/supabase-js'
-import type { Project, TicketRecord } from '../types'
+import type { Project, TicketInput, TicketRecord } from '../types'
 import { mergeRemoteRecord } from './sync'
 
 const state = vi.hoisted(() => ({
@@ -218,5 +218,57 @@ describe('profit-only entries and time synchronization', () => {
     await expect(ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '24:00' }, original)).rejects.toThrow('曼谷时间')
     await expect(ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' })).rejects.toThrow('曼谷时间')
     expect(await ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' }, original)).toMatchObject({ issueTime: null })
+  })
+})
+
+describe('person count persistence', () => {
+  const prepare = () => {
+    const project = localProject()
+    state.local.projects.set(project.id, project)
+    state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: user.id, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
+    const input: TicketInput = {
+      personCount: 1, issueDate: '2026-10-13', issueTime: '10:30', projectId: project.id,
+      supplierName: project.supplierName, projectName: project.name, subItemName: project.subItemName,
+      agentPriceThb: 900, costThb: 700, note: ''
+    }
+    return input
+  }
+
+  it('saves and edits headcount, round-trips it through cloud without multiplying prices', async () => {
+    const input = prepare()
+    const original = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 3 })
+    expect(original).toMatchObject({ personCount: 3, agentPriceThb: 900, costThb: 700 })
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.get(original.id).person_count).toBe(3)
+    const updated = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 5 }, original)
+    expect(updated).toMatchObject({ id: original.id, personCount: 5, createdAt: original.createdAt, agentPriceThb: 900, costThb: 700 })
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.size).toBe(1)
+    expect(state.cloud.tickets.get(original.id).person_count).toBe(5)
+    expect(state.local.tickets.get(original.id)).toMatchObject({ personCount: 5, syncStatus: 'synced' })
+  })
+
+  it.each([null, undefined, 0, -1, 1.5, NaN, Infinity, 2147483648])('rejects invalid new headcount %s without saving', async (personCount) => {
+    const input = prepare()
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, personCount })).rejects.toThrow('人数')
+    expect(state.local.tickets.size).toBe(0)
+    expect(state.uploads).toEqual([])
+  })
+
+  it('preserves unknown legacy headcount and permits deliberate completion', async () => {
+    const input = prepare()
+    const legacy = localTicket('2026-10-13T01:00:00.000Z')
+    state.local.tickets.set(legacy.id, legacy)
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: null }, legacy)
+    expect(saved.personCount).toBeNull()
+    const completed = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 2 }, saved)
+    expect(completed.personCount).toBe(2)
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, personCount: null }, completed)).rejects.toThrow('人数')
+  })
+
+  it('reads older cloud records without inventing headcount', async () => {
+    state.cloud.tickets.set('ticket-1', cloudTicket('2026-10-13T01:00:00.000Z'))
+    await ledgerRepository.synchronise(user)
+    expect(state.local.tickets.get('ticket-1').personCount).toBeNull()
   })
 })
