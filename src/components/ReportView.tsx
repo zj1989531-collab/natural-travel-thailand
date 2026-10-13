@@ -45,13 +45,13 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
       {report.quantity.days.length > 0 && <div className="report-table-scroll" role="region" aria-label="每日出票数量" tabIndex={0}><table className="report-table report-quantity-table"><caption>每日出票数量</caption><thead><tr><th scope="col">日期</th><th scope="col">出票记录</th><th scope="col">已录人数</th><th scope="col">人数未填</th></tr></thead><tbody>{report.quantity.days.map((day) => <tr key={day.date}><th scope="row">{day.date}</th><td className="report-number">{day.recordCount}</td><td className="report-number">{formatNumber(day.peopleCount)}</td><td className="report-number">{day.unknownCount}</td></tr>)}</tbody><tfoot><tr><th scope="row">合计</th><td className="report-number">{report.quantity.recordCount}</td><td className="report-number">{formatNumber(report.quantity.peopleCount)}</td><td className="report-number">{report.quantity.unknownCount}</td></tr></tfoot></table></div>}
     </section>
     <p className="report-counts">利润合计包含 {report.records.length} 条记录 · 已录人数 {formatNumber(report.recordedPeople)} 人</p>
-    {report.unknownHeadcounts > 0 && <p className="report-notice">{report.unknownHeadcounts} 条出票记录未填写人数，不计入已录人数；仅录利润记录也不计入票数及已录人数。</p>}
+    {report.unknownHeadcounts > 0 && <p className="report-notice">{report.unknownHeadcounts} 条出票记录未填写人数，不计入已录人数；仅录利润记录也不计入出票记录数及已录人数。</p>}
     <p className="report-note">{report.mode === 'day' ? '日报合计不含月结项目；当天月结记录在下方另列，计入所属月份的月报。' : '包含所选日期范围内的全部有效记录及月结返佣。月报按曼谷自然月1日至月底统计。'}利润均为总额，已按各记录的计价方式计算；旧记录不重复乘人数。</p>
 
     <section className="report-section"><h3>供货商汇总 · 按利润排序</h3>
       {report.supplierStats.length === 0 ? <p className="report-empty">当前范围没有计入本报表的记录。</p> : <div className="report-table-scroll" role="region" aria-label="供货商汇总" tabIndex={0}>
         <table className="report-table report-supplier-table"><caption>供货商汇总</caption>
-          <thead><tr><th scope="col">供货商</th><th scope="col">票数</th><th scope="col">利润</th></tr></thead>
+          <thead><tr><th scope="col">供货商</th><th scope="col">出票记录</th><th scope="col">利润</th></tr></thead>
           <tbody>{report.supplierStats.map((supplier) => <tr key={supplier.supplierId}><th scope="row">{supplier.supplierName}</th><td className="report-number">{supplier.count}</td><td className={`report-money ${supplier.profitThb < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(supplier.profitThb)}</td></tr>)}</tbody>
           <tfoot><tr><th scope="row">合计</th><td className="report-number">{report.summary.count}</td><td className="report-money">{formatThb(report.summary.profitThb)}</td></tr></tfoot>
         </table>
@@ -59,7 +59,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     </section>
     <section className="report-section"><h3>记录明细</h3>{report.records.length > 0 ? <RecordTable records={report.records} caption="报表记录明细" /> : <p className="report-empty">没有符合当前报表条件的记录。</p>}</section>
     {report.mode === 'day' && report.monthlyRecords.length > 0 && <section className="report-section report-monthly-section"><h3>月结项目另列 · 不计入日报合计</h3><p className="report-note">{report.monthlyRecords.length} 条月结记录 · 利润 {formatThb(report.monthlySummary.profitThb)}，包含在对应月报中。</p><RecordTable records={report.monthlyRecords} caption="当日月结记录（不计入日报合计）" /></section>}
-    <footer className="report-footer">按出票日期统计 · 已排除删除记录 · 仅录利润项目不计票数 · 修改账本后报表自动更新</footer>
+    <footer className="report-footer">按出票日期统计 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
   </article>
 }
 

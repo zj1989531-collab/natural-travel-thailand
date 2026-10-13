@@ -20,6 +20,46 @@ const records = [
 ]
 
 describe('formatted ledger reports', () => {
+  it('queries monthly-settlement project ticket quantities daily, monthly and cumulatively', () => {
+    const daily = buildReport(records, query({ mode: 'day', projectName: '泰拳' }))
+    expect(daily.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })
+    expect(daily.quantity.days).toEqual([{ date: '2026-10-13', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
+    expect(daily.summary.profitThb).toBe(0)
+    expect(daily.monthlySummary.profitThb).toBe(100)
+    expect(buildReport(records, query({ projectName: '泰拳' })).summary.profitThb).toBe(100)
+    const all = buildReport(records, query({ mode: 'all' }))
+    expect(all.start).toBe('2026-09-30')
+    expect(all.end).toBe('2026-11-01')
+    expect(all.quantity).toMatchObject({ recordCount: 6, peopleCount: 16, unknownCount: 1 })
+    expect(all.quantity.days.map((day) => day.date)).toEqual(['2026-09-30', '2026-10-13', '2026-11-01'])
+  })
+
+  it('combines supplier and exact parent-project filters across packages, not notes or similar names', () => {
+    const rows = [
+      ticket('adult', { projectName: '泰拳', subItemName: '成人', personCount: 3 }),
+      ticket('child', { projectName: '泰拳', subItemName: '儿童', personCount: 2 }),
+      ticket('other-supplier', { projectName: '泰拳', supplierId: 'supplier-b', personCount: 5 }),
+      ticket('similar', { projectName: '泰拳课程', personCount: 9 }),
+      ticket('note', { note: '泰拳', subItemName: '泰拳', personCount: 8 }),
+      ticket('deleted-project', { projectName: '泰拳', deletedAt: '2026-10-13T04:00:00Z' }),
+      ticket('commission', { projectName: '泰拳', entryMode: 'profit_only', manualProfitThb: 25, personCount: 20 })
+    ]
+    const report = buildReport(rows, query({ projectName: '泰拳', supplierId: 'supplier-a' }))
+    expect(report.quantity).toMatchObject({ recordCount: 2, peopleCount: 5, unknownCount: 0 })
+    expect(report.records.map((row) => row.id)).toEqual(['adult', 'child', 'commission'])
+    expect(report.projectName).toBe('泰拳')
+    expect(buildReport(rows, query({ projectName: '未出票项目' })).quantity.recordCount).toBe(0)
+  })
+
+  it('reports unknown quantities explicitly and updates them after edits or deletion', () => {
+    const missing = ticket('legacy', { personCount: null })
+    const known = ticket('known')
+    expect(buildReport([missing, known], query()).quantity).toMatchObject({ peopleCount: 3, recordCount: 2, unknownCount: 1 })
+    expect(buildReport([missing, { ...known, personCount: 5 }], query()).quantity.peopleCount).toBe(5)
+    expect(buildReport([missing, { ...known, deletedAt: '2026-10-13T04:00:00Z' }], query()).quantity).toMatchObject({ peopleCount: 0, recordCount: 1, unknownCount: 1 })
+    expect(buildReport([records[4]], query()).quantity).toMatchObject({ peopleCount: 0, recordCount: 0, unknownCount: 0, days: [] })
+    expect(buildReport([], query({ mode: 'all' })).quantity.recordCount).toBe(0)
+  })
   it('includes all active monthly records, using multiplied amounts and preserving legacy totals', () => {
     const report = buildReport(records, query())
     expect(report.start).toBe('2026-10-01')
