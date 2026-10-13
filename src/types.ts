@@ -1,5 +1,6 @@
 export type SyncStatus = 'synced' | 'pending' | 'error'
 export type EntryMode = 'standard' | 'profit_only'
+export type AmountBasis = 'total' | 'per_person'
 
 export interface Supplier {
   id: string
@@ -29,6 +30,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  amountBasis?: AmountBasis
   personCount?: number | null
   entryMode?: EntryMode
   manualProfitThb?: number | null
@@ -51,6 +53,7 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  amountBasis?: AmountBasis
   personCount?: number | null
   entryMode?: EntryMode
   manualProfitThb?: number | null

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { User } from '@supabase/supabase-js'
 import type { Project, TicketInput, TicketRecord } from '../types'
 import { mergeRemoteRecord } from './sync'
+import { getTicketAmounts } from './ticket-amounts'
 
 const state = vi.hoisted(() => ({
   local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>() },
@@ -219,6 +220,15 @@ describe('profit-only entries and time synchronization', () => {
     await expect(ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' })).rejects.toThrow('曼谷时间')
     expect(await ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' }, original)).toMatchObject({ issueTime: null })
   })
+  it('round-trips per-person commission and only multiplies on calculation', async () => {
+    const { original, input } = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, amountBasis: 'per_person', personCount: 3 }, original)
+    expect(saved.manualProfitThb).toBe(123.45)
+    expect(getTicketAmounts(saved).profitThb).toBe(370.35)
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.get(saved.id)).toMatchObject({ amount_basis: 'per_person', person_count: 3, manual_profit_thb: 123.45 })
+    expect(getTicketAmounts(state.local.tickets.get(saved.id)).profitThb).toBe(370.35)
+  })
 })
 
 describe('person count persistence', () => {
@@ -234,18 +244,24 @@ describe('person count persistence', () => {
     return input
   }
 
-  it('saves and edits headcount, round-trips it through cloud without multiplying prices', async () => {
+  it('saves unit prices and updates totals when headcount changes, without repeated multiplication on sync', async () => {
     const input = prepare()
     const original = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 3 })
     expect(original).toMatchObject({ personCount: 3, agentPriceThb: 900, costThb: 700 })
+    expect(original.amountBasis).toBe('per_person')
+    expect(getTicketAmounts(original)).toEqual({ agentPriceThb: 2700, costThb: 2100, profitThb: 600 })
     await ledgerRepository.synchronise(user)
     expect(state.cloud.tickets.get(original.id).person_count).toBe(3)
+    expect(state.cloud.tickets.get(original.id).amount_basis).toBe('per_person')
     const updated = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 5 }, original)
     expect(updated).toMatchObject({ id: original.id, personCount: 5, createdAt: original.createdAt, agentPriceThb: 900, costThb: 700 })
     await ledgerRepository.synchronise(user)
     expect(state.cloud.tickets.size).toBe(1)
     expect(state.cloud.tickets.get(original.id).person_count).toBe(5)
     expect(state.local.tickets.get(original.id)).toMatchObject({ personCount: 5, syncStatus: 'synced' })
+    expect(getTicketAmounts(state.local.tickets.get(original.id))).toEqual({ agentPriceThb: 4500, costThb: 3500, profitThb: 1000 })
+    await ledgerRepository.synchronise(user)
+    expect(getTicketAmounts(state.local.tickets.get(original.id)).profitThb).toBe(1000)
   })
 
   it.each([null, undefined, 0, -1, 1.5, NaN, Infinity, 2147483648])('rejects invalid new headcount %s without saving', async (personCount) => {
@@ -261,8 +277,10 @@ describe('person count persistence', () => {
     state.local.tickets.set(legacy.id, legacy)
     const saved = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: null }, legacy)
     expect(saved.personCount).toBeNull()
+    expect(saved.amountBasis).toBe('total')
     const completed = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 2 }, saved)
     expect(completed.personCount).toBe(2)
+    expect(getTicketAmounts(completed).agentPriceThb).toBe(900)
     await expect(ledgerRepository.createOrUpdateTicket({ ...input, personCount: null }, completed)).rejects.toThrow('人数')
   })
 
@@ -270,5 +288,14 @@ describe('person count persistence', () => {
     state.cloud.tickets.set('ticket-1', cloudTicket('2026-10-13T01:00:00.000Z'))
     await ledgerRepository.synchronise(user)
     expect(state.local.tickets.get('ticket-1').personCount).toBeNull()
+    expect(state.local.tickets.get('ticket-1').amountBasis).toBe('total')
+  })
+  it('rejects missing headcount for per-person edits, excessive totals and sub-cent prices', async () => {
+    const input = prepare()
+    const legacy = localTicket('2026-10-13T01:00:00.000Z')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, amountBasis: 'per_person', personCount: null }, legacy)).rejects.toThrow('人数')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, personCount: 50, agentPriceThb: 999999999999.99 })).rejects.toThrow('金额或人数过大')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, agentPriceThb: 10.001 })).rejects.toThrow('两位小数')
+    expect(state.local.tickets.size).toBe(0)
   })
 })

@@ -84,6 +84,22 @@ describe('monthly commission settlement statistics', () => {
 })
 
 describe('profit statistics', () => {
+  it('uses multiplied totals in daily, monthly and supplier metrics, recalculating on edits and deletions', () => {
+    const ticket = makeTicket({ amountBasis: 'per_person', personCount: 3, agentPriceThb: 650, costThb: 600 })
+    const total = { count: 1, agentPriceThb: 1950, costThb: 1800, profitThb: 150 }
+    expect(summarise(ticketsForDailyStats([ticket], ticket.issueDate))).toEqual(total)
+    expect(summarise(ticketsInMonth([ticket], '2026-10'))).toEqual(total)
+    expect(bySupplier([ticket])[0]).toMatchObject(total)
+    expect(summarise([{ ...ticket, personCount: 5 }]).profitThb).toBe(250)
+    expect(summarise([{ ...ticket, deletedAt: '2026-10-13T02:00:00Z' }]).profitThb).toBe(0)
+    const monthly = { ...ticket, projectName: '泰拳' }
+    expect(ticketsForDailyStats([monthly], monthly.issueDate)).toEqual([])
+    expect(summarise(ticketsInMonth([monthly], '2026-10'))).toEqual(total)
+    const commission = { ...ticket, entryMode: 'profit_only' as const, manualProfitThb: 50.25 }
+    expect(ticketsForDailyStats([commission], commission.issueDate)).toEqual([])
+    expect(summarise([commission])).toEqual({ count: 0, agentPriceThb: 0, costThb: 0, profitThb: 150.75 })
+    expect(bySupplier([commission])[0].profitThb).toBe(150.75)
+  })
   it('keeps all financial totals and ticket counts unchanged when headcount changes', () => {
     const ticket = makeTicket({ personCount: 5 })
     expect(getProfit(ticket)).toBe(260)

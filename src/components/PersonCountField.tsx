@@ -3,9 +3,10 @@ import { MAX_PERSON_COUNT } from '../lib/format'
 
 const COMMON_COUNTS = Array.from({ length: 50 }, (_, index) => index + 1)
 
-export function PersonCountField({ value, allowUnknown = false, onChange }: {
+export function PersonCountField({ value, allowUnknown = false, multiplyAmounts = true, onChange }: {
   value: number | null | undefined
   allowUnknown?: boolean
+  multiplyAmounts?: boolean
   onChange: (value: number | null) => void
 }) {
   const [custom, setCustom] = useState(() => value != null && !COMMON_COUNTS.includes(value))
@@ -25,6 +26,6 @@ export function PersonCountField({ value, allowUnknown = false, onChange }: {
       自定义人数
       <input inputMode="numeric" type="number" min="1" max={MAX_PERSON_COUNT} step="1" value={value ?? ''} onChange={(event) => onChange(event.target.value === '' ? null : Number(event.target.value))} required />
     </label>}
-    <span className="muted" id="person-count-help">仅记录人数，不自动倍增售价、成本或利润。</span>
+    <span className="muted" id="person-count-help">{multiplyAmounts ? '单人金额 × 人数，自动计算总售价、总成本和总利润。' : '整单总额模式：人数仅作记录，不再乘入金额。'}</span>
   </div>
 }

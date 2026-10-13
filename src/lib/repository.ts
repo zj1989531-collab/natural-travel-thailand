@@ -3,7 +3,8 @@ import { db } from './db'
 import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AppSettings, EntryMode, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AmountBasis, AppSettings, EntryMode, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -17,6 +18,7 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  amount_basis?: AmountBasis
   person_count?: number | null
   entry_mode?: EntryMode
   manual_profit_thb?: number | string | null
@@ -115,6 +117,7 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  amountBasis: ticket.amount_basis ?? 'total',
   personCount: ticket.person_count ?? null,
   entryMode: ticket.entry_mode ?? 'standard',
   manualProfitThb: ticket.manual_profit_thb == null ? null : Number(ticket.manual_profit_thb),
@@ -137,6 +140,7 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  amount_basis: ticket.amountBasis ?? 'total',
   person_count: ticket.personCount ?? null,
   entry_mode: ticket.entryMode ?? 'standard',
   manual_profit_thb: ticket.entryMode === 'profit_only' ? ticket.manualProfitThb ?? null : null,
@@ -320,6 +324,9 @@ export const ledgerRepository = {
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
+    const amountBasis = input.amountBasis ?? (existing ? existing.amountBasis ?? 'total' : 'per_person')
+    if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
+    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error('按人数计算时，人数必须是大于或等于1的整数。')
     if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
       throw new Error('人数必须是大于或等于1的整数。')
     }
@@ -357,6 +364,7 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
+      amountBasis,
       personCount: input.personCount ?? null,
       entryMode,
       issueTime: input.issueTime || null,
@@ -377,6 +385,9 @@ export const ledgerRepository = {
       deletedAt: null,
       syncStatus: statusForWrite()
     }
+    validateAmountPrecision(entryMode === 'profit_only' ? [ticket.manualProfitThb!] : [ticket.agentPriceThb, ticket.costThb])
+    const totals = getTicketAmounts(ticket)
+    validateAmountPrecision([totals.agentPriceThb, totals.costThb, Math.abs(totals.profitThb)])
     await db.putTicket(ticket)
     return ticket
   },

@@ -15,6 +15,7 @@ create table if not exists public.tickets (
   manual_profit_thb numeric(14, 2),
   issue_time time without time zone,
   person_count integer constraint tickets_person_count_valid check (person_count >= 1),
+  amount_basis text not null default 'total',
   user_id uuid not null references auth.users(id) on delete cascade,
   issue_date date not null,
   supplier_id uuid not null references public.suppliers(id),
@@ -28,6 +29,7 @@ create table if not exists public.tickets (
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint tickets_amount_basis_valid check (amount_basis in ('total','per_person') and (amount_basis <> 'per_person' or (person_count is not null and person_count >= 1))),
   constraint tickets_entry_mode_valid check (
     (entry_mode='standard' and manual_profit_thb is null) or
     (entry_mode='profit_only' and manual_profit_thb is not null and manual_profit_thb >= 0 and agent_price_thb=0 and cost_thb=0)

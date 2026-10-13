@@ -3,12 +3,13 @@ import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
+import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
-import type { EntryMode, Project, Supplier, TicketInput, TicketRecord } from './types'
+import type { AmountBasis, EntryMode, Project, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records'
 
@@ -27,6 +28,7 @@ interface TicketFormProps {
 }
 
 const emptyForm = (): TicketInput => ({
+  amountBasis: 'per_person',
   personCount: 1,
   issueDate: getBangkokDate(),
   issueTime: getBangkokTime(),
@@ -73,6 +75,7 @@ function SummaryPanel({ title, subtitle, tickets, note }: { title: string; subti
 
 function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
+    amountBasis: ticket.amountBasis ?? 'total',
     personCount: ticket.personCount ?? null,
     issueDate: ticket.issueDate,
     issueTime: ticket.issueTime ?? '',
@@ -123,7 +126,9 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
 
   const names = projectNames(projects)
   const availableSubItems = projects.filter((project) => project.name === form.projectName)
-  const profit = form.entryMode === 'profit_only' ? form.manualProfitThb ?? 0 : (Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : 0) - (Number.isFinite(form.costThb) ? form.costThb : 0)
+  const perPerson = form.amountBasis === 'per_person'
+  const totals = getTicketAmounts(form)
+  const profit = totals.profitThb
 
   return (
     <div className="sheet-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -147,7 +152,15 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
             <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
             {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
           </label>
-          <PersonCountField value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null)} onChange={(value) => update('personCount', value)} />
+          <PersonCountField value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />
+          <label>
+            计价方式
+            <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
+              <option value="per_person">按人数计算（单人金额 × 人数）</option>
+              <option value="total">整单总额（不乘人数）</option>
+            </select>
+          </label>
+          {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按人数计算，请先核对并填写单人金额。</p>}
           <label>
             项目
             <select value={form.projectName} onChange={(event) => {
@@ -170,20 +183,21 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
           </label>
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
           {(form.entryMode === 'profit_only' || isMonthlySettlementProject(form.projectName)) && <p className="sheet-copy">月结返佣项目：仅计入月报，不计入每日票数、售价、成本和利润。</p>}
-          {form.entryMode === 'profit_only' && <p className="sheet-copy">只填写本次返佣利润，不填写售价或成本；请勿重复录入已统计的项目利润。</p>}
+          {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
-          {form.entryMode === 'profit_only' ? <label>返佣利润（THB）<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
+          {form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
             <label>
-              代理售价（THB）
+              {perPerson ? '单人代理售价（THB）' : '代理售价总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : ''} onChange={(event) => update('agentPriceThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
             </label>
             <label>
-              供货商成本（THB）
+              {perPerson ? '单人供货商成本（THB）' : '供货商成本总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.costThb) ? form.costThb : ''} onChange={(event) => update('costThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
             </label>
           </div>}
+          {form.entryMode !== 'profit_only' && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
           <div className={`profit-preview ${profit >= 0 ? 'positive' : 'negative'}`}>
-            <span>{form.entryMode === 'profit_only' ? '本次月结利润' : '本张票盈利'}</span>
+            <span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span>
             <strong>{formatThb(profit)}</strong>
           </div>
           <label>
@@ -737,7 +751,7 @@ export default function App() {
                   <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
                   <strong className={getProfit(ticket) >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(getProfit(ticket))}</strong>
                 </div>
-                <div className="ticket-meta"><span>{ticket.personCount == null ? '人数未记录' : `${formatNumber(ticket.personCount)} 人`}</span>{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>代理售价 {formatThb(ticket.agentPriceThb)}</span><span>成本 {formatThb(ticket.costThb)}</span></>}</div>
+                <div className="ticket-meta"><span>{ticket.personCount == null ? '人数未记录' : `${formatNumber(ticket.personCount)} 人`}</span><span>{ticket.amountBasis === 'per_person' ? '按人数计算' : '整单总额'}</span>{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>总售价 {formatThb(getTicketAmounts(ticket).agentPriceThb)}</span><span>总成本 {formatThb(getTicketAmounts(ticket).costThb)}</span></>}</div>
                 {ticket.note && <p className="ticket-note">{ticket.note}</p>}
                 <div className="ticket-actions"><button type="button" onClick={() => { setSelectedTicket(ticket); setFormOpen(true) }}>编辑</button><button className="danger-action" type="button" onClick={() => void deleteTicket(ticket)}>删除</button></div>
               </article>

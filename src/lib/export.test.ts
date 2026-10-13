@@ -48,5 +48,9 @@ describe('complete ledger backup', () => {
     expect(buildTicketExportRows([active])[0]).toMatchObject({ '人数': 3, '曼谷时间': '09:35', '代理售价 (THB)': 140, '供货商成本 (THB)': 90, '利润 (THB)': 50 })
     expect(buildTicketExportRows([{ ...active, personCount: null }])[0]['人数']).toBe('')
     expect(buildTicketExportRows([{ ...active, entryMode: 'profit_only', manualProfitThb: 123.45 }])[0]).toMatchObject({ '人数': 3, '代理售价 (THB)': '', '供货商成本 (THB)': '', '利润 (THB)': 123.45 })
+    const perPerson = { ...active, amountBasis: 'per_person' as const }
+    expect(buildTicketExportRows([perPerson])[0]).toMatchObject({ '人数': 3, '计价方式': '按人数计算', '单人代理售价 (THB)': 140, '单人供货商成本 (THB)': 90, '代理售价 (THB)': 420, '供货商成本 (THB)': 270, '利润 (THB)': 150 })
+    expect(buildTicketExportRows([{ ...perPerson, entryMode: 'profit_only', manualProfitThb: 50.25 }])[0]).toMatchObject({ '单人返佣利润 (THB)': 50.25, '代理售价 (THB)': '', '供货商成本 (THB)': '', '利润 (THB)': 150.75 })
+    expect(createLedgerBackup({ suppliers: [supplier], projects: [project], tickets: [perPerson] }).tickets[0].amountBasis).toBe('per_person')
   })
 })

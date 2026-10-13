@@ -1,7 +1,7 @@
 import type { SupplierSummary, Summary, TicketRecord } from '../types'
+import { getTicketAmounts } from './ticket-amounts'
 
-export const getProfit = (ticket: Pick<TicketRecord, 'agentPriceThb' | 'costThb' | 'entryMode' | 'manualProfitThb'>): number =>
-  ticket.entryMode === 'profit_only' ? ticket.manualProfitThb ?? 0 : ticket.agentPriceThb - ticket.costThb
+export const getProfit = (ticket: Parameters<typeof getTicketAmounts>[0]): number => getTicketAmounts(ticket).profitThb
 
 export const activeTickets = (tickets: TicketRecord[]): TicketRecord[] =>
   tickets.filter((ticket) => !ticket.deletedAt)
@@ -10,8 +10,8 @@ export const summarise = (tickets: TicketRecord[]): Summary =>
   activeTickets(tickets).reduce<Summary>(
     (total, ticket) => ({
       count: total.count + (ticket.entryMode === 'profit_only' ? 0 : 1),
-      agentPriceThb: total.agentPriceThb + (ticket.entryMode === 'profit_only' ? 0 : ticket.agentPriceThb),
-      costThb: total.costThb + (ticket.entryMode === 'profit_only' ? 0 : ticket.costThb),
+      agentPriceThb: total.agentPriceThb + getTicketAmounts(ticket).agentPriceThb,
+      costThb: total.costThb + getTicketAmounts(ticket).costThb,
       profitThb: total.profitThb + getProfit(ticket)
     }),
     { count: 0, agentPriceThb: 0, costThb: 0, profitThb: 0 }
@@ -55,8 +55,8 @@ export const bySupplier = (tickets: TicketRecord[]): SupplierSummary[] => {
       profitThb: 0
     }
     existing.count += ticket.entryMode === 'profit_only' ? 0 : 1
-    existing.agentPriceThb += ticket.entryMode === 'profit_only' ? 0 : ticket.agentPriceThb
-    existing.costThb += ticket.entryMode === 'profit_only' ? 0 : ticket.costThb
+    existing.agentPriceThb += getTicketAmounts(ticket).agentPriceThb
+    existing.costThb += getTicketAmounts(ticket).costThb
     existing.profitThb += getProfit(ticket)
     groups.set(ticket.supplierId, existing)
   })
