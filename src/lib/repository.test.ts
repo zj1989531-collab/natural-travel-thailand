@@ -121,23 +121,23 @@ describe('cloud synchronization races', () => {
 })
 
 const localProject = (): Project => ({
-  id: 'project-1', userId: user.id, supplierId: 'supplier-1', supplierName: '星光旅行社',
-  name: '东方亚特兰蒂斯（新船）', normalizedName: '东方亚特兰蒂斯（新船）',
-  subItemName: '普通票（儿童）', normalizedSubItemName: '普通票（儿童）',
-  defaultCostThb: 1050, defaultAgentPriceThb: 1050,
+  id: 'project-1', userId: user.id, supplierId: 'supplier-1', supplierName: '示例供货商',
+  name: '示例景点', normalizedName: '示例景点',
+  subItemName: '儿童票', normalizedSubItemName: '儿童票',
+  defaultCostThb: 700, defaultAgentPriceThb: 900,
   createdAt: '2026-10-13T00:00:00.000Z', updatedAt: '2026-10-13T01:00:00.000Z', syncStatus: 'synced'
 })
 
 describe('project price corrections', () => {
   it('updates only the existing project prices, preserving identity, other packages and old tickets', async () => {
     const original = { ...localProject(), updatedAt: '2099-01-01T00:00:00.000Z' }
-    const other = { ...localProject(), id: 'project-2', subItemName: '普通票（成人）' }
+    const other = { ...localProject(), id: 'project-2', subItemName: '成人票' }
     const ticket = localTicket('2026-10-13T01:00:00.000Z')
     state.local.projects.set(original.id, original)
     state.local.projects.set(other.id, other)
     state.local.tickets.set(ticket.id, ticket)
-    const updated = await ledgerRepository.updateProjectPrices(original.id, { defaultCostThb: 1000, defaultAgentPriceThb: 1050 })
-    expect(updated).toMatchObject({ ...original, defaultCostThb: 1000, syncStatus: 'pending', updatedAt: expect.any(String) })
+    const updated = await ledgerRepository.updateProjectPrices(original.id, { defaultCostThb: 600, defaultAgentPriceThb: 900 })
+    expect(updated).toMatchObject({ ...original, defaultCostThb: 600, syncStatus: 'pending', updatedAt: expect.any(String) })
     expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(new Date(original.updatedAt).getTime())
     expect(state.local.projects.size).toBe(2)
     expect(state.local.projects.get(other.id)).toEqual(other)
@@ -145,8 +145,8 @@ describe('project price corrections', () => {
   })
 
   it.each([
-    [-1, 1050], [NaN, 1050], [Infinity, 1050],
-    [1000, -1], [1000, NaN], [1000, Infinity]
+    [-1, 900], [NaN, 900], [Infinity, 900],
+    [600, -1], [600, NaN], [600, Infinity]
   ])('rejects invalid cost %s or price %s without changing the record', async (cost, price) => {
     const original = localProject()
     state.local.projects.set(original.id, original)
@@ -163,7 +163,7 @@ describe('project price corrections', () => {
   it.each(['missing', 'other-project'])('rejects unavailable or other-account project %s', async (id) => {
     const original = { ...localProject(), id: 'other-project', userId: 'user-2' }
     state.local.projects.set(original.id, original)
-    await expect(ledgerRepository.updateProjectPrices(id, { defaultCostThb: 1000, defaultAgentPriceThb: 1050 })).rejects.toThrow('当前账号无法修改')
+    await expect(ledgerRepository.updateProjectPrices(id, { defaultCostThb: 600, defaultAgentPriceThb: 900 })).rejects.toThrow('当前账号无法修改')
     expect(state.local.projects.get(original.id)).toEqual(original)
     expect(state.local.projects.size).toBe(1)
   })
@@ -177,10 +177,10 @@ describe('project price corrections', () => {
       normalized_sub_item_name: original.normalizedSubItemName, default_cost_thb: original.defaultCostThb,
       default_agent_price_thb: original.defaultAgentPriceThb, created_at: original.createdAt, updated_at: original.updatedAt
     })
-    await ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 1000, defaultAgentPriceThb: 1050 })
+    await ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 600, defaultAgentPriceThb: 900 })
     expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
     expect(state.cloud.projects.size).toBe(1)
-    expect(state.cloud.projects.get('project-1')).toMatchObject({ id: 'project-1', user_id: user.id, default_cost_thb: 1000, default_agent_price_thb: 1050 })
+    expect(state.cloud.projects.get('project-1')).toMatchObject({ id: 'project-1', user_id: user.id, default_cost_thb: 600, default_agent_price_thb: 900 })
     expect(state.local.projects.get('project-1').syncStatus).toBe('synced')
   })
 })
