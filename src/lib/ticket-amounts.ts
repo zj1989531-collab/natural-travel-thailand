@@ -22,7 +22,7 @@ export const validateAmountPrecision = (amounts: number[]) => {
   if (amounts.some((amount) => !Number.isFinite(amount) || amount < 0 || !Number.isSafeInteger(Math.round(amount * 100)) || amount > 999999999999.99)) {
     throw new Error('金额或人数过大，请检查输入。')
   }
-  if (amounts.some((amount) => Math.abs(amount * 100 - Math.round(amount * 100)) > 0.01)) {
+  if (amounts.some((amount) => amount !== Number(amount.toFixed(2)))) {
     throw new Error('金额最多保留两位小数。')
   }
 }
