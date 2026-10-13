@@ -16,9 +16,9 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     exportedAt,
     // Explicit fields exclude authentication sessions and any future secret fields.
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus'])),
-    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
+    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Include deletion markers so a backup does not resurrect deleted tickets.
-    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
   }
 }
 
@@ -40,10 +40,12 @@ export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
     .map((ticket) => ({
       '出票日期': ticket.issueDate,
+      '曼谷时间': ticket.issueTime || '',
+      '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
       '供应商': ticket.supplierName,
       '项目': ticket.projectName || '未分类项目',
-      '代理售价 (THB)': ticket.agentPriceThb,
-      '供货商成本 (THB)': ticket.costThb,
+      '代理售价 (THB)': ticket.entryMode === 'profit_only' ? '' : ticket.agentPriceThb,
+      '供货商成本 (THB)': ticket.entryMode === 'profit_only' ? '' : ticket.costThb,
       '利润 (THB)': getProfit(ticket),
       '备注': ticket.note,
       '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
@@ -51,7 +53,7 @@ export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
   const workbook = XLSX.utils.book_new()
   const worksheet = XLSX.utils.json_to_sheet(rows)
   worksheet['!cols'] = [
-    { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 32 }, { wch: 23 }
+    { wch: 14 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 32 }, { wch: 23 }
   ]
   XLSX.utils.book_append_sheet(workbook, worksheet, '出票记录')
   XLSX.writeFile(workbook, `票务盈利簿_${new Date().toISOString().slice(0, 10)}.xlsx`)

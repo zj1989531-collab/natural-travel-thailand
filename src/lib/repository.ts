@@ -1,9 +1,9 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { db } from './db'
-import { createId, normalizeSupplier } from './format'
+import { createId, isValidIssueTime, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AppSettings, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AppSettings, EntryMode, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -17,6 +17,9 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  entry_mode?: EntryMode
+  manual_profit_thb?: number | string | null
+  issue_time?: string | null
   id: string
   user_id: string
   issue_date: string
@@ -34,6 +37,7 @@ type CloudTicket = {
 }
 
 type CloudProject = {
+  entry_mode?: EntryMode
   id: string
   user_id: string
   supplier_id: string
@@ -77,6 +81,7 @@ const toCloudSupplier = (supplier: Supplier) => ({
 })
 
 const toLocalProject = (project: CloudProject): Project => ({
+  entryMode: project.entry_mode ?? 'standard',
   id: project.id,
   userId: project.user_id,
   supplierId: project.supplier_id,
@@ -93,6 +98,7 @@ const toLocalProject = (project: CloudProject): Project => ({
 })
 
 const toCloudProject = (project: Project) => ({
+  entry_mode: project.entryMode ?? 'standard',
   id: project.id,
   user_id: project.userId,
   supplier_id: project.supplierId,
@@ -108,6 +114,9 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  entryMode: ticket.entry_mode ?? 'standard',
+  manualProfitThb: ticket.manual_profit_thb == null ? null : Number(ticket.manual_profit_thb),
+  issueTime: ticket.issue_time?.slice(0, 5) ?? null,
   id: ticket.id,
   userId: ticket.user_id,
   issueDate: ticket.issue_date,
@@ -126,6 +135,9 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  entry_mode: ticket.entryMode ?? 'standard',
+  manual_profit_thb: ticket.entryMode === 'profit_only' ? ticket.manualProfitThb ?? null : null,
+  issue_time: ticket.issueTime || null,
   id: ticket.id,
   user_id: ticket.userId,
   issue_date: ticket.issueDate,
@@ -245,11 +257,11 @@ export const ledgerRepository = {
     return supplier
   },
 
-  async createProject(input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }): Promise<Project> {
+  async createProject(input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number; entryMode?: EntryMode }): Promise<Project> {
     const name = input.name.trim()
     const subItemName = input.subItemName.trim()
     if (!name) throw new Error('请输入项目名称。')
-    if (!Number.isFinite(input.defaultCostThb) || !Number.isFinite(input.defaultAgentPriceThb) || input.defaultCostThb < 0 || input.defaultAgentPriceThb < 0) {
+    if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || !Number.isFinite(input.defaultAgentPriceThb) || input.defaultCostThb < 0 || input.defaultAgentPriceThb < 0)) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
     const settings = await getSettings()
@@ -265,6 +277,7 @@ export const ledgerRepository = {
     }
     const timestamp = now()
     const project: Project = {
+      entryMode: input.entryMode ?? 'standard',
       id: createId(),
       userId,
       supplierId: supplier.id,
@@ -273,8 +286,8 @@ export const ledgerRepository = {
       normalizedName,
       subItemName,
       normalizedSubItemName,
-      defaultCostThb: input.defaultCostThb,
-      defaultAgentPriceThb: input.defaultAgentPriceThb,
+      defaultCostThb: input.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
+      defaultAgentPriceThb: input.entryMode === 'profit_only' ? 0 : input.defaultAgentPriceThb,
       createdAt: timestamp,
       updatedAt: timestamp,
       syncStatus: statusForWrite()
@@ -290,6 +303,7 @@ export const ledgerRepository = {
     const userId = await activeUserId()
     const current = (await db.getProjects()).find((project) => project.id === id && project.userId === userId)
     if (!current) throw new Error('当前账号无法修改这个项目价格。')
+    if (current.entryMode === 'profit_only') throw new Error('仅录利润项目没有默认售价和成本，请在记录中填写利润。')
     const updated: Project = {
       ...current,
       defaultCostThb: input.defaultCostThb,
@@ -302,6 +316,7 @@ export const ledgerRepository = {
   },
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
+    if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
     const normalizedName = normalizeSupplier(input.supplierName)
@@ -328,8 +343,17 @@ export const ledgerRepository = {
     const projects = await db.getProjects()
     const project = projects.find((item) => item.id === input.projectId && item.supplierId === nextSupplier.id && item.userId === userId)
     if (!project || project.name !== input.projectName || project.subItemName !== input.subItemName) throw new Error('请选择该供货商已录入的项目子项。')
+    const entryMode = project.entryMode ?? 'standard'
+    if (entryMode === 'profit_only') {
+      if (typeof input.manualProfitThb !== 'number' || !Number.isFinite(input.manualProfitThb) || input.manualProfitThb < 0) throw new Error('请填写大于或等于0的利润金额。')
+    } else if (!Number.isFinite(input.agentPriceThb) || !Number.isFinite(input.costThb) || input.agentPriceThb < 0 || input.costThb < 0) {
+      throw new Error('成本和代理售价必须是大于或等于0的金额。')
+    }
 
     const ticket: TicketRecord = {
+      entryMode,
+      issueTime: input.issueTime || null,
+      manualProfitThb: entryMode === 'profit_only' ? input.manualProfitThb : null,
       id: existing?.id ?? createId(),
       userId,
       issueDate: input.issueDate,
@@ -338,8 +362,8 @@ export const ledgerRepository = {
       projectId: input.projectId,
       projectName: input.projectName,
       subItemName: input.subItemName,
-      agentPriceThb: input.agentPriceThb,
-      costThb: input.costThb,
+      agentPriceThb: entryMode === 'profit_only' ? 0 : input.agentPriceThb,
+      costThb: entryMode === 'profit_only' ? 0 : input.costThb,
       note: input.note.trim(),
       createdAt: existing?.createdAt ?? changedAt,
       updatedAt: changedAt,

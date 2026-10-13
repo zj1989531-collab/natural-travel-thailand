@@ -1,7 +1,7 @@
 import type { SupplierSummary, Summary, TicketRecord } from '../types'
 
-export const getProfit = (ticket: Pick<TicketRecord, 'agentPriceThb' | 'costThb'>): number =>
-  ticket.agentPriceThb - ticket.costThb
+export const getProfit = (ticket: Pick<TicketRecord, 'agentPriceThb' | 'costThb' | 'entryMode' | 'manualProfitThb'>): number =>
+  ticket.entryMode === 'profit_only' ? ticket.manualProfitThb ?? 0 : ticket.agentPriceThb - ticket.costThb
 
 export const activeTickets = (tickets: TicketRecord[]): TicketRecord[] =>
   tickets.filter((ticket) => !ticket.deletedAt)
@@ -9,9 +9,9 @@ export const activeTickets = (tickets: TicketRecord[]): TicketRecord[] =>
 export const summarise = (tickets: TicketRecord[]): Summary =>
   activeTickets(tickets).reduce<Summary>(
     (total, ticket) => ({
-      count: total.count + 1,
-      agentPriceThb: total.agentPriceThb + ticket.agentPriceThb,
-      costThb: total.costThb + ticket.costThb,
+      count: total.count + (ticket.entryMode === 'profit_only' ? 0 : 1),
+      agentPriceThb: total.agentPriceThb + (ticket.entryMode === 'profit_only' ? 0 : ticket.agentPriceThb),
+      costThb: total.costThb + (ticket.entryMode === 'profit_only' ? 0 : ticket.costThb),
       profitThb: total.profitThb + getProfit(ticket)
     }),
     { count: 0, agentPriceThb: 0, costThb: 0, profitThb: 0 }
@@ -28,7 +28,7 @@ export const isMonthlySettlementProject = (projectName: string): boolean => {
 // Settlement classification affects the daily dashboard only. Keep the source
 // records unchanged so the full ledger, monthly report and export retain them.
 export const ticketsForDailyStats = (tickets: TicketRecord[], date: string): TicketRecord[] =>
-  activeTickets(ticketsOnDate(tickets, date)).filter((ticket) => !isMonthlySettlementProject(ticket.projectName))
+  activeTickets(ticketsOnDate(tickets, date)).filter((ticket) => ticket.entryMode !== 'profit_only' && !isMonthlySettlementProject(ticket.projectName))
 
 export const monthDateRange = (month: string): { start: string; end: string } => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('月份格式必须为 YYYY-MM。')
@@ -54,9 +54,9 @@ export const bySupplier = (tickets: TicketRecord[]): SupplierSummary[] => {
       costThb: 0,
       profitThb: 0
     }
-    existing.count += 1
-    existing.agentPriceThb += ticket.agentPriceThb
-    existing.costThb += ticket.costThb
+    existing.count += ticket.entryMode === 'profit_only' ? 0 : 1
+    existing.agentPriceThb += ticket.entryMode === 'profit_only' ? 0 : ticket.agentPriceThb
+    existing.costThb += ticket.entryMode === 'profit_only' ? 0 : ticket.costThb
     existing.profitThb += getProfit(ticket)
     groups.set(ticket.supplierId, existing)
   })

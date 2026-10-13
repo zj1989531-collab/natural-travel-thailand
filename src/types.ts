@@ -1,4 +1,5 @@
 export type SyncStatus = 'synced' | 'pending' | 'error'
+export type EntryMode = 'standard' | 'profit_only'
 
 export interface Supplier {
   id: string
@@ -11,6 +12,7 @@ export interface Supplier {
 }
 
 export interface Project {
+  entryMode?: EntryMode
   id: string
   userId: string
   supplierId: string
@@ -27,6 +29,9 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  entryMode?: EntryMode
+  manualProfitThb?: number | null
+  issueTime?: string | null
   id: string
   userId: string
   issueDate: string
@@ -45,6 +50,9 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  entryMode?: EntryMode
+  manualProfitThb?: number | null
+  issueTime?: string | null
   issueDate: string
   supplierName: string
   projectId: string

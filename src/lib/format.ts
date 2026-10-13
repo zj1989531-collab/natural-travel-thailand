@@ -35,6 +35,11 @@ export const getBangkokDate = (date = new Date()): string => {
 
 export const getBangkokMonth = (date = new Date()): string => getBangkokDate(date).slice(0, 7)
 
+export const getBangkokTime = (date = new Date()): string =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: BANGKOK_TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)
+
+export const isValidIssueTime = (time: string): boolean => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)
+
 export const toNumber = (value: string): number => {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0

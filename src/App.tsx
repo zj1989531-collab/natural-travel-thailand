@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth } from './lib/format'
+import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime } from './lib/format'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
-import type { Project, Supplier, TicketInput, TicketRecord } from './types'
+import type { EntryMode, Project, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records'
 
@@ -27,6 +27,9 @@ interface TicketFormProps {
 
 const emptyForm = (): TicketInput => ({
   issueDate: getBangkokDate(),
+  issueTime: getBangkokTime(),
+  entryMode: 'standard',
+  manualProfitThb: null,
   supplierName: '',
   projectId: '',
   projectName: '',
@@ -69,6 +72,9 @@ function SummaryPanel({ title, subtitle, tickets, note }: { title: string; subti
 function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     issueDate: ticket.issueDate,
+    issueTime: ticket.issueTime ?? '',
+    entryMode: ticket.entryMode ?? 'standard',
+    manualProfitThb: ticket.manualProfitThb ?? null,
     supplierName: ticket.supplierName,
     projectId: ticket.projectId ?? '',
     projectName: ticket.projectName || '',
@@ -91,8 +97,12 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
       setError('请填写出票日期，并选择项目及适用的套餐；供货商会自动带入。')
       return
     }
-    if (!Number.isFinite(form.agentPriceThb) || !Number.isFinite(form.costThb) || form.agentPriceThb < 0 || form.costThb < 0) {
-      setError('实收和成本必须是大于或等于 0 的金额。')
+    if ((!ticket && !form.issueTime) || (form.issueTime && !isValidIssueTime(form.issueTime))) {
+      setError('请填写有效的曼谷时间（HH:mm）。')
+      return
+    }
+    if (form.entryMode === 'profit_only' ? typeof form.manualProfitThb !== 'number' || !Number.isFinite(form.manualProfitThb) || form.manualProfitThb < 0 : !Number.isFinite(form.agentPriceThb) || !Number.isFinite(form.costThb) || form.agentPriceThb < 0 || form.costThb < 0) {
+      setError(form.entryMode === 'profit_only' ? '请填写大于或等于0的利润金额。' : '实收和成本必须是大于或等于0的金额。')
       return
     }
     setSaving(true)
@@ -106,7 +116,7 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
 
   const names = projectNames(projects)
   const availableSubItems = projects.filter((project) => project.name === form.projectName)
-  const profit = (Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : 0) - (Number.isFinite(form.costThb) ? form.costThb : 0)
+  const profit = form.entryMode === 'profit_only' ? form.manualProfitThb ?? 0 : (Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : 0) - (Number.isFinite(form.costThb) ? form.costThb : 0)
 
   return (
     <div className="sheet-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -124,6 +134,11 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
+          </label>
+          <label>
+            时间（曼谷 UTC+7）
+            <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
+            {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
           </label>
           <label>
             项目
@@ -146,9 +161,10 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
             </select>
           </label>
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
-          {isMonthlySettlementProject(form.projectName) && <p className="sheet-copy">月结返佣项目：仅计入月报，不计入每日票数、售价、成本和利润。</p>}
+          {(form.entryMode === 'profit_only' || isMonthlySettlementProject(form.projectName)) && <p className="sheet-copy">月结返佣项目：仅计入月报，不计入每日票数、售价、成本和利润。</p>}
+          {form.entryMode === 'profit_only' && <p className="sheet-copy">只填写本次返佣利润，不填写售价或成本；请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
-          <div className="form-grid">
+          {form.entryMode === 'profit_only' ? <label>返佣利润（THB）<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
             <label>
               代理售价（THB）
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : ''} onChange={(event) => update('agentPriceThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
@@ -157,9 +173,9 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
               供货商成本（THB）
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.costThb) ? form.costThb : ''} onChange={(event) => update('costThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
             </label>
-          </div>
+          </div>}
           <div className={`profit-preview ${profit >= 0 ? 'positive' : 'negative'}`}>
-            <span>本张票盈利</span>
+            <span>{form.entryMode === 'profit_only' ? '本次月结利润' : '本张票盈利'}</span>
             <strong>{formatThb(profit)}</strong>
           </div>
           <label>
@@ -181,7 +197,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
   suppliers: Supplier[]
   projects: Project[]
   onAddSupplier: (name: string) => Promise<void>
-  onAddProject: (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
+  onAddProject: (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number; entryMode?: EntryMode }) => Promise<void>
   onUpdateProject: (id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
   onBackup: () => Promise<void>
   onClose: () => void
@@ -192,6 +208,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
   const [subItemName, setSubItemName] = useState('')
   const [cost, setCost] = useState('')
   const [agentPrice, setAgentPrice] = useState('')
+  const [entryMode, setEntryMode] = useState<EntryMode>('standard')
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const projectFormRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
@@ -223,13 +240,14 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
       if (editingProject) {
         await onUpdateProject(editingProject.id, { defaultCostThb: Number(cost), defaultAgentPriceThb: Number(agentPrice) })
       } else {
-        await onAddProject({ supplierId: projectSupplierId, name: projectName, subItemName, defaultCostThb: Number(cost), defaultAgentPriceThb: Number(agentPrice) })
+        await onAddProject({ supplierId: projectSupplierId, name: projectName, subItemName, entryMode, defaultCostThb: entryMode === 'profit_only' ? 0 : Number(cost), defaultAgentPriceThb: entryMode === 'profit_only' ? 0 : Number(agentPrice) })
       }
       setProjectName('')
       setSubItemName('')
       setCost('')
       setAgentPrice('')
       setEditingProject(null)
+      setEntryMode('standard')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后重试。')
     } finally {
@@ -239,6 +257,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
 
   const editProject = (project: Project) => {
     setEditingProject(project)
+    setEntryMode(project.entryMode ?? 'standard')
     setProjectSupplierId(project.supplierId)
     setProjectName(project.name)
     setSubItemName(project.subItemName)
@@ -249,6 +268,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
 
   const cancelProjectEdit = () => {
     setEditingProject(null)
+    setEntryMode('standard')
     setProjectName('')
     setSubItemName('')
     setCost('')
@@ -285,10 +305,11 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
             </select>
             <input autoComplete="off" placeholder="项目名称，例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required readOnly={editingProject !== null} />
             <input autoComplete="off" placeholder="子项/套餐名称（可选，例如：经济舱）" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} readOnly={editingProject !== null} />
-            <div className="form-grid">
+            {!editingProject && <label>记账方式<select value={entryMode} onChange={(event) => setEntryMode(event.target.value as EntryMode)}><option value="standard">售价减成本</option><option value="profit_only">仅录利润（月结返佣）</option></select></label>}
+            {entryMode === 'profit_only' ? <p className="sheet-copy">此项目无默认成本和售价。每次记账只填写利润，计入月报。</p> : <div className="form-grid">
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder="供货商成本（THB）" value={cost} onChange={(event) => setCost(event.target.value)} required />
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder="代理售价（THB）" value={agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required />
-            </div>
+            </div>}
             <button className="primary-button full-width" type="submit" disabled={saving !== null}>{saving === 'project' ? '保存中…' : editingProject ? '保存价格修改' : '保存子项价格'}</button>
             {editingProject && <button className="secondary-button" type="button" disabled={saving !== null} onClick={cancelProjectEdit}>取消修改</button>}
           </form>
@@ -297,7 +318,7 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
 
         <section className="supplier-list" aria-label="已录入的价格表">
           <div className="supplier-list-heading"><span>已录入子项</span><strong>{projects.length}</strong></div>
-          {projects.length === 0 ? <p className="supplier-empty">还没有项目子项，请先添加一个。</p> : projects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {formatThb(project.defaultAgentPriceThb)}</strong><button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑价格</button></div></div>)}
+          {projects.length === 0 ? <p className="supplier-empty">还没有项目子项，请先添加一个。</p> : projects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div>{project.entryMode === 'profit_only' ? <strong>仅录利润 · 月结</strong> : <><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {formatThb(project.defaultAgentPriceThb)}</strong><button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑价格</button></>}</div></div>)}
         </section>
       </section>
     </div>
@@ -552,7 +573,7 @@ export default function App() {
     await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
     await refresh()
     setFormOpen(false)
-    setToast(isMonthlySettlementProject(input.projectName)
+    setToast(input.entryMode === 'profit_only' || isMonthlySettlementProject(input.projectName)
       ? '月结返佣记录已保存，仅计入月报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
     void synchronise()
@@ -566,7 +587,7 @@ export default function App() {
     void synchronise()
   }
 
-  const addProject = async (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }) => {
+  const addProject = async (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number; entryMode?: EntryMode }) => {
     requireCloudLogin()
     await ledgerRepository.createProject(input)
     await refresh()
@@ -700,15 +721,15 @@ export default function App() {
             </div>
             {(query || dateFilter || supplierFilter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setDateFilter(''); setSupplierFilter('') }}>清除筛选</button>}
           </section>
-          <div className="record-summary"><span>{visibleTickets.length} 张记录</span><strong>利润 {formatThb(summarise(visibleTickets).profitThb)}</strong></div>
+          <div className="record-summary"><span>{visibleTickets.length} 条记录</span><strong>利润 {formatThb(summarise(visibleTickets).profitThb)}</strong></div>
           <section className="records-list">
             {visibleTickets.length === 0 ? <div className="empty-card">没有符合条件的记录。</div> : visibleTickets.map((ticket) => (
               <article className="ticket-card" key={ticket.id}>
                 <div className="ticket-card-main">
-                  <div><p>{formatDate(ticket.issueDate)} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
+                  <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
                   <strong className={getProfit(ticket) >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(getProfit(ticket))}</strong>
                 </div>
-                <div className="ticket-meta"><span>代理售价 {formatThb(ticket.agentPriceThb)}</span><span>成本 {formatThb(ticket.costThb)}</span></div>
+                <div className="ticket-meta">{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>代理售价 {formatThb(ticket.agentPriceThb)}</span><span>成本 {formatThb(ticket.costThb)}</span></>}</div>
                 {ticket.note && <p className="ticket-note">{ticket.note}</p>}
                 <div className="ticket-actions"><button type="button" onClick={() => { setSelectedTicket(ticket); setFormOpen(true) }}>编辑</button><button className="danger-action" type="button" onClick={() => void deleteTicket(ticket)}>删除</button></div>
               </article>
