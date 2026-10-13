@@ -5,8 +5,8 @@ export const projectNames = (projects: Project[]) =>
 
 const clearSelection = (form: TicketInput, projectName: string): TicketInput => ({
   ...form, projectName, projectId: '', supplierName: '', subItemName: '',
-  agentPriceThb: Number.NaN, costThb: Number.NaN
-  , entryMode: 'standard', manualProfitThb: null
+  agentPriceThb: Number.NaN, costThb: Number.NaN,
+  entryMode: 'standard', manualProfitThb: null
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({

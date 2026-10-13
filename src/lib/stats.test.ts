@@ -23,6 +23,15 @@ const makeTicket = (overrides: Partial<TicketRecord>): TicketRecord => ({
 })
 
 describe('monthly commission settlement statistics', () => {
+  it('includes manually entered profit only in monthly profit, without fake sales, costs or ticket counts', () => {
+    const commission = makeTicket({ entryMode: 'profit_only', projectName: '示例返佣', manualProfitThb: 123.45, agentPriceThb: 999, costThb: 999 })
+    expect(getProfit(commission)).toBe(123.45)
+    expect(ticketsForDailyStats([commission], commission.issueDate)).toEqual([])
+    expect(summarise(ticketsInMonth([commission], '2026-10'))).toEqual({ count: 0, agentPriceThb: 0, costThb: 0, profitThb: 123.45 })
+    expect(bySupplier([commission])[0]).toMatchObject({ count: 0, agentPriceThb: 0, costThb: 0, profitThb: 123.45 })
+    expect(summarise([{ ...commission, manualProfitThb: 200 }]).profitThb).toBe(200)
+    expect(summarise([{ ...commission, deletedAt: '2026-10-13T02:00:00Z' }]).profitThb).toBe(0)
+  })
   it.each(['69秀', '69 秀', '７９秀', '79秀', '泰拳', 'MAX 泰拳', '嘉年华', '东方嘉年华', '格兰岛一日游', '格兰岛跟团一日游', '潜水', '芭提雅潜水（SH）'])('classifies %s as monthly settlement', (name) => {
     expect(isMonthlySettlementProject(name)).toBe(true)
   })

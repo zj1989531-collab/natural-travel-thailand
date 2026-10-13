@@ -16,9 +16,11 @@ const copy = (value: any) => ({ ...value })
 vi.mock('./db', () => ({ db: {
   getSettings: async () => ({ localUserId: 'anonymous', lastCloudUserId: 'user-1' }),
   getTickets: async () => [...state.local.tickets.values()].map(copy),
+  getTicket: async (id: string) => state.local.tickets.get(id),
   getSuppliers: async () => [...state.local.suppliers.values()].map(copy),
   getProjects: async () => [...state.local.projects.values()].map(copy),
   putProject: async (project: Project) => { state.local.projects.set(project.id, copy(project)) },
+  putTicket: async (ticket: TicketRecord) => { state.local.tickets.set(ticket.id, copy(ticket)) },
   mergeRemoteTickets: async (records: any[]) => records.forEach((remote) => state.local.tickets.set(remote.id, mergeRemoteRecord(state.local.tickets.get(remote.id), remote))),
   mergeRemoteSuppliers: async (records: any[]) => records.forEach((remote) => state.local.suppliers.set(remote.id, mergeRemoteRecord(state.local.suppliers.get(remote.id), remote))),
   mergeRemoteProjects: async (records: any[]) => records.forEach((remote) => state.local.projects.set(remote.id, mergeRemoteRecord(state.local.projects.get(remote.id), remote)))
@@ -129,6 +131,10 @@ const localProject = (): Project => ({
 })
 
 describe('project price corrections', () => {
+  it('does not allow default sales and costs on a profit-only project', async () => {
+    state.local.projects.set('project-1', { ...localProject(), entryMode: 'profit_only', defaultCostThb: 0, defaultAgentPriceThb: 0 })
+    await expect(ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 100, defaultAgentPriceThb: 200 })).rejects.toThrow('仅录利润')
+  })
   it('updates only the existing project prices, preserving identity, other packages and old tickets', async () => {
     const original = { ...localProject(), updatedAt: '2099-01-01T00:00:00.000Z' }
     const other = { ...localProject(), id: 'project-2', subItemName: '成人票' }
@@ -182,5 +188,35 @@ describe('project price corrections', () => {
     expect(state.cloud.projects.size).toBe(1)
     expect(state.cloud.projects.get('project-1')).toMatchObject({ id: 'project-1', user_id: user.id, default_cost_thb: 600, default_agent_price_thb: 900 })
     expect(state.local.projects.get('project-1').syncStatus).toBe('synced')
+  })
+})
+
+describe('profit-only entries and time synchronization', () => {
+  const prepare = () => {
+    const project = { ...localProject(), entryMode: 'profit_only' as const, defaultCostThb: 0, defaultAgentPriceThb: 0 }
+    state.local.projects.set(project.id, project)
+    state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: user.id, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
+    const original = localTicket('2026-10-13T01:00:00.000Z')
+    state.local.tickets.set(original.id, original)
+    return { original, input: { issueDate: '2026-10-13', issueTime: '22:37', projectId: project.id, supplierName: project.supplierName, projectName: project.name, subItemName: project.subItemName, manualProfitThb: 123.45, agentPriceThb: NaN, costThb: NaN, note: '示例返佣' } }
+  }
+  it('saves and round-trips manual profit and Bangkok time without inventing revenue or cost', async () => {
+    const { original, input } = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket(input, original)
+    expect(saved).toMatchObject({ entryMode: 'profit_only', manualProfitThb: 123.45, issueTime: '22:37', agentPriceThb: 0, costThb: 0, createdAt: original.createdAt })
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.get(saved.id)).toMatchObject({ entry_mode: 'profit_only', manual_profit_thb: 123.45, issue_time: '22:37' })
+    expect(state.local.tickets.get(saved.id)).toMatchObject({ entryMode: 'profit_only', manualProfitThb: 123.45, issueTime: '22:37', syncStatus: 'synced' })
+  })
+  it.each([null, -1, NaN, Infinity])('rejects invalid profit %s', async (manualProfitThb) => {
+    const { original, input } = prepare()
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, manualProfitThb }, original)).rejects.toThrow('利润金额')
+    expect(state.local.tickets.get(original.id)).toEqual(original)
+  })
+  it('validates time and preserves unknown legacy time as null', async () => {
+    const { original, input } = prepare()
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '24:00' }, original)).rejects.toThrow('曼谷时间')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' })).rejects.toThrow('曼谷时间')
+    expect(await ledgerRepository.createOrUpdateTicket({ ...input, issueTime: '' }, original)).toMatchObject({ issueTime: null })
   })
 })

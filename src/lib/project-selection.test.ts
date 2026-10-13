@@ -14,6 +14,12 @@ const project = (id: string, name: string, subItemName = '', supplierId = 'suppl
 })
 
 describe('project-first ticket selection', () => {
+  it('selects profit-only mode and clears old prices and stale manual profit', () => {
+    const commission = { ...project('commission', '示例返佣'), entryMode: 'profit_only' as const }
+    const selected = chooseProject({ ...form, manualProfitThb: 500 }, [commission], commission.name)
+    expect(selected).toMatchObject({ entryMode: 'profit_only', manualProfitThb: null, costThb: 0, agentPriceThb: 0 })
+    expect(chooseProject(selected, [project('normal', '普通项目')], '普通项目')).toMatchObject({ entryMode: 'standard', manualProfitThb: null, costThb: 100, agentPriceThb: 150 })
+  })
   it('lists all projects without a supplier filter and groups duplicate names', () => {
     expect(projectNames([project('1', '项目甲'), project('2', '项目乙', '', 'supplier-b'), project('3', '项目甲', '成人')])).toHaveLength(2)
     expect(projectNames([project('1', '项目甲'), project('2', '项目乙', '', 'supplier-b')])).toContain('项目乙')

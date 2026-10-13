@@ -11,6 +11,9 @@ create table if not exists public.suppliers (
 
 create table if not exists public.tickets (
   id uuid primary key,
+  entry_mode text not null default 'standard',
+  manual_profit_thb numeric(14, 2),
+  issue_time time without time zone,
   user_id uuid not null references auth.users(id) on delete cascade,
   issue_date date not null,
   supplier_id uuid not null references public.suppliers(id),
@@ -23,7 +26,11 @@ create table if not exists public.tickets (
   note text not null default '',
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint tickets_entry_mode_valid check (
+    (entry_mode='standard' and manual_profit_thb is null) or
+    (entry_mode='profit_only' and manual_profit_thb is not null and manual_profit_thb >= 0 and agent_price_thb=0 and cost_thb=0)
+  )
 );
 
 create index if not exists tickets_user_issue_date_idx on public.tickets (user_id, issue_date desc);
@@ -31,6 +38,7 @@ create index if not exists tickets_user_supplier_idx on public.tickets (user_id,
 
 create table if not exists public.projects (
   id uuid primary key,
+  entry_mode text not null default 'standard',
   user_id uuid not null references auth.users(id) on delete cascade,
   supplier_id uuid not null references public.suppliers(id),
   supplier_name text not null,
@@ -42,7 +50,8 @@ create table if not exists public.projects (
   default_agent_price_thb numeric(14, 2) not null check (default_agent_price_thb >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (user_id, supplier_id, normalized_name, normalized_sub_item_name)
+  unique (user_id, supplier_id, normalized_name, normalized_sub_item_name),
+  constraint projects_entry_mode_valid check (entry_mode in ('standard','profit_only') and (entry_mode <> 'profit_only' or (default_cost_thb=0 and default_agent_price_thb=0)))
 );
 
 create index if not exists projects_user_supplier_idx on public.projects (user_id, supplier_id);
