@@ -1,0 +1,18 @@
+{
+  "name": "票务盈利簿",
+  "short_name": "盈利簿",
+  "description": "移动端出票盈利统计",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f2",
+  "theme_color": "#176a59",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
