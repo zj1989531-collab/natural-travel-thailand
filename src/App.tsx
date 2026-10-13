@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
+import { ReportView } from './components/ReportView'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
@@ -11,7 +12,7 @@ import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } 
 import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, Supplier, TicketInput, TicketRecord } from './types'
 
-type View = 'dashboard' | 'records'
+type View = 'dashboard' | 'records' | 'reports'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -670,7 +671,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${view === 'reports' ? ' report-view' : ''}`}>
       <header className="app-header">
         <div className="brand">
           <div className="brand-mark">฿</div>
@@ -727,7 +728,7 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : <>
+        </> : view === 'reports' ? <ReportView tickets={tickets} suppliers={suppliers} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
@@ -764,6 +765,7 @@ export default function App() {
         <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')} type="button"><span>▦</span>概览</button>
         <button className="nav-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button>
         <button className={view === 'records' ? 'active' : ''} onClick={() => setView('records')} type="button"><span>▤</span>记录</button>
+        <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')} type="button"><span>▥</span>报表</button>
       </nav>
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
