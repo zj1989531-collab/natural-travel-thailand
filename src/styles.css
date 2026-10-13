@@ -49,6 +49,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .summary-panel, .ranking-section { margin-bottom: 20px; padding: 18px; border: 1px solid #e4e9e4; border-radius: 21px; background: #fff; box-shadow: 0 5px 20px #2442360a; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
 .ticket-count { padding: 5px 9px; color: #4c7065; border-radius: 20px; background: #eef5f1; font-size: 12px; font-weight: 700; }
+.stats-note { margin: 12px 0 0; color: #67786f; font-size: 12px; line-height: 1.6; }
 .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .metric-card { min-width: 0; padding: 12px 10px; border-radius: 14px; background: #f5f7f4; }
 .metric-card span { display: block; margin-bottom: 5px; color: #77827e; font-size: 10px; }

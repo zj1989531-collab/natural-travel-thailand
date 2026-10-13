@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { bySupplier, getProfit, summarise, ticketsInMonth, ticketsOnDate } from './stats'
+import { bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsOnDate } from './stats'
+import { getBangkokDate, getBangkokMonth } from './format'
 import type { TicketRecord } from '../types'
 
 const makeTicket = (overrides: Partial<TicketRecord>): TicketRecord => ({
@@ -19,6 +20,58 @@ const makeTicket = (overrides: Partial<TicketRecord>): TicketRecord => ({
   deletedAt: null,
   syncStatus: 'synced',
   ...overrides
+})
+
+describe('monthly commission settlement statistics', () => {
+  it.each(['69秀', '69 秀', '７９秀', '79秀', '泰拳', 'MAX 泰拳', '嘉年华', '东方嘉年华', '格兰岛一日游', '格兰岛跟团一日游', '潜水', '芭提雅潜水（SH）'])('classifies %s as monthly settlement', (name) => {
+    expect(isMonthlySettlementProject(name)).toBe(true)
+  })
+
+  it.each(['89成人秀', '99成人秀', '169秀', '格兰岛长尾船包船', '黑珍珠海盗船格兰岛半日游', '芭提亚游艇会', '曼谷续签'])('keeps %s in daily statistics', (name) => {
+    expect(isMonthlySettlementProject(name)).toBe(false)
+  })
+
+  it('excludes all six categories from every daily metric but keeps them in the monthly report and supplier ranking', () => {
+    const tickets = ['69秀', '79秀', '泰拳', '东方嘉年华', '格兰岛跟团一日游', '芭提雅潜水（SH）', '普通项目'].map((projectName, index) => makeTicket({ id: `record-${index}`, projectName, agentPriceThb: 100, costThb: 80 }))
+    expect(summarise(ticketsForDailyStats(tickets, '2026-10-13'))).toEqual({ count: 1, agentPriceThb: 100, costThb: 80, profitThb: 20 })
+    const monthly = ticketsInMonth(tickets, '2026-10')
+    expect(summarise(monthly)).toEqual({ count: 7, agentPriceThb: 700, costThb: 560, profitThb: 140 })
+    expect(bySupplier(monthly)[0]).toMatchObject({ count: 7, profitThb: 140 })
+    expect(ticketsOnDate(tickets, '2026-10-13')).toHaveLength(7)
+  })
+
+  it('uses the parent project only, not notes or subitem text', () => {
+    const ticket = makeTicket({ projectName: '普通项目', subItemName: '泰拳', note: '69秀' })
+    expect(ticketsForDailyStats([ticket], ticket.issueDate)).toEqual([ticket])
+  })
+
+  it('recalculates on project and price edits and excludes deletions from both reports', () => {
+    const daily = makeTicket({ projectName: '普通项目', agentPriceThb: 100, costThb: 80 })
+    const edited = { ...daily, projectName: '泰拳', agentPriceThb: 120 }
+    expect(summarise(ticketsForDailyStats([daily], daily.issueDate)).profitThb).toBe(20)
+    expect(summarise(ticketsForDailyStats([edited], edited.issueDate)).count).toBe(0)
+    expect(summarise(ticketsInMonth([edited], '2026-10')).profitThb).toBe(40)
+    const deleted = { ...edited, deletedAt: '2026-10-13T02:00:00.000Z' }
+    expect(summarise(ticketsForDailyStats([deleted], deleted.issueDate)).count).toBe(0)
+    expect(summarise(ticketsInMonth([deleted], '2026-10')).count).toBe(0)
+  })
+
+  it('includes the 1st and last day, excluding adjacent months', () => {
+    const tickets = ['2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'].map((issueDate) => makeTicket({ id: issueDate, issueDate, projectName: '79秀' }))
+    expect(ticketsInMonth(tickets, '2026-10').map((ticket) => ticket.issueDate)).toEqual(['2026-10-01', '2026-10-31'])
+    expect(monthDateRange('2026-02')).toEqual({ start: '2026-02-01', end: '2026-02-28' })
+    expect(monthDateRange('2024-02')).toEqual({ start: '2024-02-01', end: '2024-02-29' })
+    expect(() => monthDateRange('2026-13')).toThrow()
+  })
+
+  it('changes reporting month at Bangkok midnight rather than UTC midnight', () => {
+    const before = new Date('2026-09-30T16:59:59Z')
+    const after = new Date('2026-09-30T17:00:00Z')
+    expect(getBangkokDate(before)).toBe('2026-09-30')
+    expect(getBangkokMonth(before)).toBe('2026-09')
+    expect(getBangkokDate(after)).toBe('2026-10-01')
+    expect(getBangkokMonth(after)).toBe('2026-10')
+  })
 })
 
 describe('profit statistics', () => {

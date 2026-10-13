@@ -6,7 +6,7 @@ import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
-import { activeTickets, bySupplier, getProfit, summarise, ticketsInMonth, ticketsOnDate } from './lib/stats'
+import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
 import type { Project, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records'
@@ -45,7 +45,7 @@ function MetricCard({ label, value, tone = 'default' }: { label: string; value: 
   )
 }
 
-function SummaryPanel({ title, subtitle, tickets }: { title: string; subtitle: string; tickets: TicketRecord[] }) {
+function SummaryPanel({ title, subtitle, tickets, note }: { title: string; subtitle: string; tickets: TicketRecord[]; note?: string }) {
   const summary = summarise(tickets)
   return (
     <section className="summary-panel">
@@ -61,6 +61,7 @@ function SummaryPanel({ title, subtitle, tickets }: { title: string; subtitle: s
         <MetricCard label="供货商成本" value={formatThb(summary.costThb)} tone="cost" />
         <MetricCard label="盈利" value={formatThb(summary.profitThb)} tone="profit" />
       </div>
+      {note && <p className="stats-note">{note}</p>}
     </section>
   )
 }
@@ -145,6 +146,7 @@ function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSu
             </select>
           </label>
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
+          {isMonthlySettlementProject(form.projectName) && <p className="sheet-copy">月结返佣项目：仅计入月报，不计入每日票数、售价、成本和利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
           <div className="form-grid">
             <label>
@@ -517,6 +519,7 @@ export default function App() {
 
   const today = getBangkokDate()
   const month = getBangkokMonth()
+  const monthRange = monthDateRange(month)
   const visibleTickets = useMemo(() => activeTickets(tickets).filter((ticket) => {
     const dateMatches = !dateFilter || ticket.issueDate === dateFilter
     const supplierMatches = !supplierFilter || ticket.supplierId === supplierFilter
@@ -549,7 +552,9 @@ export default function App() {
     await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
     await refresh()
     setFormOpen(false)
-    setToast(selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
+    setToast(isMonthlySettlementProject(input.projectName)
+      ? '月结返佣记录已保存，仅计入月报，不计入每日统计。'
+      : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
     void synchronise()
   }
 
@@ -657,8 +662,8 @@ export default function App() {
             </section>
           )}
 
-          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsOnDate(tickets, today)} />
-          <SummaryPanel title="本月概览" subtitle={month} tickets={ticketsInMonth(tickets, month)} />
+          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="不含月结返佣项目：69秀、79秀、泰拳、嘉年华、格兰岛一日游、潜水。" />
+          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含月结返佣项目。" />
 
           <section className="ranking-section">
             <div className="section-heading">

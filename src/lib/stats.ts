@@ -20,8 +20,27 @@ export const summarise = (tickets: TicketRecord[]): Summary =>
 export const ticketsOnDate = (tickets: TicketRecord[], date: string): TicketRecord[] =>
   tickets.filter((ticket) => ticket.issueDate === date)
 
-export const ticketsInMonth = (tickets: TicketRecord[], month: string): TicketRecord[] =>
-  tickets.filter((ticket) => ticket.issueDate.startsWith(month))
+export const isMonthlySettlementProject = (projectName: string): boolean => {
+  const name = projectName.normalize('NFKC').replace(/\s+/g, '').toLowerCase()
+  return /^(69|79)秀/.test(name) || /泰拳|嘉年华|潜水/.test(name) || /格兰岛.*一日游/.test(name)
+}
+
+// Settlement classification affects the daily dashboard only. Keep the source
+// records unchanged so the full ledger, monthly report and export retain them.
+export const ticketsForDailyStats = (tickets: TicketRecord[], date: string): TicketRecord[] =>
+  activeTickets(ticketsOnDate(tickets, date)).filter((ticket) => !isMonthlySettlementProject(ticket.projectName))
+
+export const monthDateRange = (month: string): { start: string; end: string } => {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('月份格式必须为 YYYY-MM。')
+  const [year, number] = month.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year, number, 0)).getUTCDate()
+  return { start: `${month}-01`, end: `${month}-${String(lastDay).padStart(2, '0')}` }
+}
+
+export const ticketsInMonth = (tickets: TicketRecord[], month: string): TicketRecord[] => {
+  const { start, end } = monthDateRange(month)
+  return tickets.filter((ticket) => /^\d{4}-\d{2}-\d{2}$/.test(ticket.issueDate) && ticket.issueDate >= start && ticket.issueDate <= end)
+}
 
 export const bySupplier = (tickets: TicketRecord[]): SupplierSummary[] => {
   const groups = new Map<string, SupplierSummary>()
