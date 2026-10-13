@@ -51,6 +51,12 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .report-totals strong { display: block; margin-top: 6px; font-size: clamp(12px, 3.3vw, 21px); letter-spacing: -.04em; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .report-totals .report-profit { background: #e9f7ef; color: #147c52; }.report-totals .report-loss { background: #fff1ef; color: #c24b42; }
 .report-counts { margin: 14px 0 8px; color: #40584f; font-size: 12px; font-weight: 700; }
+.report-quantity { margin: 20px 0; padding: 16px 12px; border: 1px solid #dce8e0; border-radius: 12px; background: #fbfdfb; }
+.report-quantity h3 { margin: 0 0 12px; font-size: 14px; color: #294139; }
+.report-quantity-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.report-quantity-metrics span { display: block; font-size: 11px; color: #6f8077; }
+.report-quantity-metrics strong { display: block; margin: 5px 0 10px; font-size: 23px; color: #176a59; }
+.report-quantity-table { min-width: 340px; }
 .report-note, .report-notice { color: #6f8077; font-size: 11px; line-height: 1.7; }
 .report-notice { margin: 12px 0; padding: 10px; border-radius: 8px; background: #fff9e9; color: #735e2d; }
 .report-section { margin-top: 25px; }.report-section h3 { margin: 0 0 12px; color: #294139; font-size: 14px; }

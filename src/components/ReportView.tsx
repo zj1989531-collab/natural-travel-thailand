@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { Supplier, TicketRecord } from '../types'
+import type { Project, Supplier, TicketRecord } from '../types'
 import { formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime } from '../lib/format'
 import { buildReport, type LedgerReport, type ReportMode, type ReportQuery } from '../lib/reports'
-import { getProfit, monthDateRange } from '../lib/stats'
+import { activeTickets, getProfit, monthDateRange } from '../lib/stats'
+import { projectNames } from '../lib/project-selection'
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
@@ -29,14 +30,21 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     <header className="report-paper-heading">
       <p className="eyebrow">票务盈利簿 · THB · Asia/Bangkok</p>
       <h2>{report.title}</h2>
-      <p>{report.start === report.end ? report.start : `${report.start} — ${report.end}`}</p>
-      <div className="report-meta"><span>供货商：{supplierName}</span><span>预览时间：{generatedAt}（曼谷）</span></div>
+      <p>{report.mode === 'all' ? '全部已录日期（累计）' : report.start === report.end ? report.start : `${report.start} — ${report.end}`}</p>
+      <div className="report-meta"><span>项目：{report.projectName || '全部项目'}</span><span>供货商：{supplierName}</span><span>预览时间：{generatedAt}（曼谷）</span></div>
     </header>
     {pendingCount > 0 && <p className="report-notice">当前账本有 {pendingCount} 条记录待同步；此预览来自本机当前账本，可能包含尚未上传的修改。</p>}
     <div className="report-totals">
       <div className={report.summary.profitThb < 0 ? 'report-loss' : 'report-profit'}><span>总利润</span><strong>{formatThb(report.summary.profitThb)}</strong></div>
     </div>
-    <p className="report-counts">{report.records.length} 条记录 · {report.summary.count} 张票 · 已录人数 {formatNumber(report.recordedPeople)} 人</p>
+    <section className="report-quantity" aria-label="项目出票数量查询">
+      <h3>项目出票数量查询</h3>
+      <div className="report-quantity-metrics"><div><span>出票记录数</span><strong>{formatNumber(report.quantity.recordCount)} 笔</strong></div><div><span>已录人数</span><strong>{formatNumber(report.quantity.peopleCount)} 人</strong></div></div>
+      <p className="report-note">门票类项目按每人1张：已录 {formatNumber(report.quantity.peopleCount)} 张；包船、包车等项目仅表示人数。数量查询包含月结出票项目，不受每日利润排除规则影响；仅录返佣利润的记录不计出票数量。</p>
+      {report.quantity.unknownCount > 0 && <p className="report-notice">另有 {report.quantity.unknownCount} 笔出票记录未填写人数，以上数量仅为已录部分，不能作为完整门票总数。</p>}
+      {report.quantity.days.length > 0 && <div className="report-table-scroll" role="region" aria-label="每日出票数量" tabIndex={0}><table className="report-table report-quantity-table"><caption>每日出票数量</caption><thead><tr><th scope="col">日期</th><th scope="col">出票记录</th><th scope="col">已录人数</th><th scope="col">人数未填</th></tr></thead><tbody>{report.quantity.days.map((day) => <tr key={day.date}><th scope="row">{day.date}</th><td className="report-number">{day.recordCount}</td><td className="report-number">{formatNumber(day.peopleCount)}</td><td className="report-number">{day.unknownCount}</td></tr>)}</tbody><tfoot><tr><th scope="row">合计</th><td className="report-number">{report.quantity.recordCount}</td><td className="report-number">{formatNumber(report.quantity.peopleCount)}</td><td className="report-number">{report.quantity.unknownCount}</td></tr></tfoot></table></div>}
+    </section>
+    <p className="report-counts">利润合计包含 {report.records.length} 条记录 · 已录人数 {formatNumber(report.recordedPeople)} 人</p>
     {report.unknownHeadcounts > 0 && <p className="report-notice">{report.unknownHeadcounts} 条出票记录未填写人数，不计入已录人数；仅录利润记录也不计入票数及已录人数。</p>}
     <p className="report-note">{report.mode === 'day' ? '日报合计不含月结项目；当天月结记录在下方另列，计入所属月份的月报。' : '包含所选日期范围内的全部有效记录及月结返佣。月报按曼谷自然月1日至月底统计。'}利润均为总额，已按各记录的计价方式计算；旧记录不重复乘人数。</p>
 
@@ -55,11 +63,11 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
   </article>
 }
 
-export function ReportView({ tickets, suppliers }: { tickets: TicketRecord[]; suppliers: Supplier[] }) {
+export function ReportView({ tickets, suppliers, projects = [] }: { tickets: TicketRecord[]; suppliers: Supplier[]; projects?: Project[] }) {
   const [query, setQuery] = useState<ReportQuery>(() => {
     const month = getBangkokMonth()
     const range = monthDateRange(month)
-    return { mode: 'month', month, date: getBangkokDate(), startDate: range.start, endDate: range.end, supplierId: '' }
+    return { mode: 'month', month, date: getBangkokDate(), startDate: range.start, endDate: range.end, supplierId: '', projectName: '' }
   })
   const result = useMemo(() => {
     try { return { report: buildReport(tickets, query), error: '' } }
@@ -67,14 +75,16 @@ export function ReportView({ tickets, suppliers }: { tickets: TicketRecord[]; su
   }, [tickets, query])
   const update = <K extends keyof ReportQuery>(key: K, value: ReportQuery[K]) => setQuery((current) => ({ ...current, [key]: value }))
   const generatedAt = `${getBangkokDate()} ${getBangkokTime()}`
+  const names = useMemo(() => projectNames([...projects, ...activeTickets(tickets).map((ticket) => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))]), [projects, tickets])
 
   return <>
     <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 随账本自动更新</p><h1>格式化报表</h1></div><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></section>
     <section className="report-controls" aria-label="报表筛选">
-      <label>报表类型<select value={query.mode} onChange={(event) => update('mode', event.target.value as ReportMode)}><option value="day">日报</option><option value="month">月报</option><option value="range">自定义日期范围</option></select></label>
+      <label>报表类型<select value={query.mode} onChange={(event) => update('mode', event.target.value as ReportMode)}><option value="day">日报</option><option value="month">月报</option><option value="range">自定义日期范围</option><option value="all">全部日期（累计）</option></select></label>
       {query.mode === 'day' && <label>报表日期<input type="date" value={query.date} onChange={(event) => update('date', event.target.value)} /></label>}
       {query.mode === 'month' && <label>报表月份<input type="month" value={query.month} onChange={(event) => update('month', event.target.value)} /></label>}
       {query.mode === 'range' && <><label>开始日期<input type="date" value={query.startDate} onChange={(event) => update('startDate', event.target.value)} /></label><label>结束日期<input type="date" value={query.endDate} onChange={(event) => update('endDate', event.target.value)} /></label></>}
+      <label>查询项目<select value={query.projectName ?? ''} onChange={(event) => update('projectName', event.target.value)}><option value="">全部项目</option>{names.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
       <label>报表供货商<select value={query.supplierId} onChange={(event) => update('supplierId', event.target.value)}><option value="">全部供货商</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>
     </section>
     <p className="report-scroll-hint">手机上可左右滑动表格查看完整列；打印时仅保留报表内容。</p>

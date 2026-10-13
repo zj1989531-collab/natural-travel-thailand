@@ -1,6 +1,6 @@
 import type { Project, TicketInput } from '../types'
 
-export const projectNames = (projects: Project[]) => {
+export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) => {
   const monthlyCommissionNames = new Set(projects
     .filter((project) => project.entryMode === 'profit_only' || /月结[返反]佣/.test(project.name))
     .map((project) => project.name))
