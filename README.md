@@ -4,7 +4,7 @@
 
 ## 启动
 
-需要 Node.js 20+ 与 pnpm：
+需要 Node.js 22+ 与 pnpm：
 
 ```bash
 pnpm install
@@ -38,6 +38,8 @@ pnpm dev:sync
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
+
+个人首次使用可先用注册 Supabase 时的邮箱登录。默认发信服务只允许组织成员的邮箱；其他邮箱需先配置自己的 SMTP 服务。两台设备应始终使用同一个邮箱，避免建立两个不同的账本账号。
 
 不配置 Supabase 时，应用仍可离线使用并将数据保存在当前浏览器。清除浏览器网站数据会清除仅本机数据，因此应定期导出 Excel。
 

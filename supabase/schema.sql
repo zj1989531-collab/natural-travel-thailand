@@ -56,13 +56,22 @@ grant select, insert, update on table public.suppliers, public.projects, public.
 revoke all privileges on table public.suppliers, public.projects, public.tickets from anon;
 
 create policy "Users manage only their suppliers" on public.suppliers
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 create policy "Users manage only their projects" on public.projects
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 create policy "Users manage only their tickets" on public.tickets
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+-- Supabase's automatic RLS event trigger is internal, not a client API.
+do $$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    revoke execute on function public.rls_auto_enable() from public, anon, authenticated;
+  end if;
+end;
+$$;
 
 -- Reject an older concurrent upload before it can overwrite the latest record.
 -- Equal timestamps are already acknowledged and must not emit another UPDATE.

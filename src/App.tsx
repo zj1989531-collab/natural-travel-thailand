@@ -292,7 +292,11 @@ function LoginSheet({ onClose, onSent }: { onClose: () => void; onSent: (message
     })
     setSending(false)
     if (authError) {
-      setError(authError.message)
+      setError(/email address not authorized/i.test(authError.message)
+        ? '请使用注册 Supabase 时的邮箱。其他邮箱需要先配置云端邮件服务。'
+        : /email rate limit exceeded/i.test(authError.message)
+          ? '登录邮件发送过于频繁，请稍后再试。'
+          : authError.message)
       return
     }
     onSent('登录链接已发送，请到邮箱打开链接完成同步。')

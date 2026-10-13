@@ -17,7 +17,7 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 2. 新建 Free 组织和项目；项目可命名为 natural-travel-thailand，区域选 Singapore（若可用）。保存生成的数据库密码，等待项目创建完成。
 3. 打开项目 SQL Editor，新建查询，粘贴仓库 `supabase/schema.sql` 的全部内容，然后点击 Run。它会创建供货商、项目套餐、票务记录表，以及账号行级权限和实时同步配置。
 4. 在 Authentication → URL Configuration 设置 Site URL 为 https://zj1989531-collab.github.io/natural-travel-thailand/ ，Redirect URLs 添加这个完整地址和 http://localhost:5173/ 。
-5. 在 Authentication 的 Email 模板保留 Magic Link 登录链接；邮箱登录完成后两台设备使用同一个邮箱。
+5. 保留默认 Magic Link 邮件模板，先用注册 Supabase 时的邮箱登录；默认发信服务只允许组织成员的邮箱。其他邮箱需要配置自定义 SMTP 后才可使用。两台设备登录同一个邮箱。
 
 ## 3. 连接网站与数据库
 
