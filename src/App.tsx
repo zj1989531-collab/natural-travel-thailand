@@ -183,11 +183,12 @@ function TicketForm({ ticket, suppliers, projects, onCancel, onManageSuppliers, 
   )
 }
 
-function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onClose }: {
+function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpdateProject, onClose }: {
   suppliers: Supplier[]
   projects: Project[]
   onAddSupplier: (name: string) => Promise<void>
   onAddProject: (input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
+  onUpdateProject: (id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }) => Promise<void>
   onClose: () => void
 }) {
   const [supplierName, setSupplierName] = useState('')
@@ -196,8 +197,14 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onClo
   const [subItemName, setSubItemName] = useState('')
   const [cost, setCost] = useState('')
   const [agentPrice, setAgentPrice] = useState('')
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const projectFormRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<'supplier' | 'project' | null>(null)
+
+  useEffect(() => {
+    if (editingProject) projectFormRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [editingProject])
 
   const addSupplier = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -218,16 +225,40 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onClo
     setSaving('project')
     setError('')
     try {
-      await onAddProject({ supplierId: projectSupplierId, name: projectName, subItemName, defaultCostThb: Number(cost), defaultAgentPriceThb: Number(agentPrice) })
+      if (editingProject) {
+        await onUpdateProject(editingProject.id, { defaultCostThb: Number(cost), defaultAgentPriceThb: Number(agentPrice) })
+      } else {
+        await onAddProject({ supplierId: projectSupplierId, name: projectName, subItemName, defaultCostThb: Number(cost), defaultAgentPriceThb: Number(agentPrice) })
+      }
       setProjectName('')
       setSubItemName('')
       setCost('')
       setAgentPrice('')
+      setEditingProject(null)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后重试。')
     } finally {
       setSaving(null)
     }
+  }
+
+  const editProject = (project: Project) => {
+    setEditingProject(project)
+    setProjectSupplierId(project.supplierId)
+    setProjectName(project.name)
+    setSubItemName(project.subItemName)
+    setCost(String(project.defaultCostThb))
+    setAgentPrice(String(project.defaultAgentPriceThb))
+    setError('')
+  }
+
+  const cancelProjectEdit = () => {
+    setEditingProject(null)
+    setProjectName('')
+    setSubItemName('')
+    setCost('')
+    setAgentPrice('')
+    setError('')
   }
 
   return (
@@ -249,26 +280,28 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onClo
         </section>
 
         <section className="management-section">
-          <h3>2. 录入项目与子项价格</h3>
-          <form className="project-form" onSubmit={addProject}>
-            <select value={projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required>
+          <h3>{editingProject ? '2. 修改项目价格' : '2. 录入项目与子项价格'}</h3>
+          {editingProject && <p className="sheet-copy">只更新此套餐的默认价格，不影响已保存的出票记录。</p>}
+          <form className="project-form" ref={projectFormRef} onSubmit={addProject}>
+            <select value={projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required disabled={editingProject !== null}>
               <option value="">选择供货商</option>
               {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
             </select>
-            <input autoComplete="off" placeholder="项目名称，例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
-            <input autoComplete="off" placeholder="子项/套餐名称（可选，例如：经济舱）" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} />
+            <input autoComplete="off" placeholder="项目名称，例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required readOnly={editingProject !== null} />
+            <input autoComplete="off" placeholder="子项/套餐名称（可选，例如：经济舱）" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} readOnly={editingProject !== null} />
             <div className="form-grid">
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder="供货商成本（THB）" value={cost} onChange={(event) => setCost(event.target.value)} required />
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder="代理售价（THB）" value={agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required />
             </div>
-            <button className="primary-button full-width" type="submit" disabled={saving !== null}>{saving === 'project' ? '保存中…' : '保存子项价格'}</button>
+            <button className="primary-button full-width" type="submit" disabled={saving !== null}>{saving === 'project' ? '保存中…' : editingProject ? '保存价格修改' : '保存子项价格'}</button>
+            {editingProject && <button className="secondary-button" type="button" disabled={saving !== null} onClick={cancelProjectEdit}>取消修改</button>}
           </form>
         </section>
         {error && <p className="form-error" role="alert">{error}</p>}
 
         <section className="supplier-list" aria-label="已录入的价格表">
           <div className="supplier-list-heading"><span>已录入子项</span><strong>{projects.length}</strong></div>
-          {projects.length === 0 ? <p className="supplier-empty">还没有项目子项，请先添加一个。</p> : projects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {formatThb(project.defaultAgentPriceThb)}</strong></div></div>)}
+          {projects.length === 0 ? <p className="supplier-empty">还没有项目子项，请先添加一个。</p> : projects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {formatThb(project.defaultAgentPriceThb)}</strong><button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑价格</button></div></div>)}
         </section>
       </section>
     </div>
@@ -528,6 +561,13 @@ export default function App() {
     void synchronise()
   }
 
+  const updateProject = async (id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }) => {
+    await ledgerRepository.updateProjectPrices(id, input)
+    await refresh()
+    setToast('项目价格已修改，已有出票记录保持原金额。')
+    void synchronise()
+  }
+
   const deleteTicket = async (ticket: TicketRecord) => {
     if (!window.confirm(`确认删除 ${formatDate(ticket.issueDate)} 的「${ticket.supplierName}」记录吗？删除后将不再计入统计。`)) return
     await ledgerRepository.deleteTicket(ticket)
@@ -657,7 +697,7 @@ export default function App() {
       </nav>
 
       {formOpen && <TicketForm ticket={selectedTicket} suppliers={suppliers} projects={projects} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
-      {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onClose={() => setSupplierSheetOpen(false)} />}
+      {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <button className="export-button" onClick={() => void exportTicketsToXlsx(tickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(tickets).length)}</button>

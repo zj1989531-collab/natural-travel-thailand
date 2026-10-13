@@ -283,6 +283,24 @@ export const ledgerRepository = {
     return project
   },
 
+  async updateProjectPrices(id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }): Promise<Project> {
+    if (!Number.isFinite(input.defaultCostThb) || !Number.isFinite(input.defaultAgentPriceThb) || input.defaultCostThb < 0 || input.defaultAgentPriceThb < 0) {
+      throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
+    }
+    const userId = await activeUserId()
+    const current = (await db.getProjects()).find((project) => project.id === id && project.userId === userId)
+    if (!current) throw new Error('当前账号无法修改这个项目价格。')
+    const updated: Project = {
+      ...current,
+      defaultCostThb: input.defaultCostThb,
+      defaultAgentPriceThb: input.defaultAgentPriceThb,
+      updatedAt: nextModifiedAt(current.updatedAt),
+      syncStatus: statusForWrite()
+    }
+    await db.putProject(updated)
+    return updated
+  },
+
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
