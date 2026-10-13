@@ -15,10 +15,18 @@ const render = (records: TicketRecord[], filter = query) => renderToStaticMarkup
 describe('online formatted report preview', () => {
   it('renders a named report, period, supplier summary, details, totals and sync warning', () => {
     const html = render([record])
-    for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 成人票', '测试备注', '09:35 曼谷', '已录人数 3 人', '待同步', '฿1,950.00', '฿1,800.00', '฿150.00']) expect(html).toContain(text)
+    for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 成人票', '测试备注', '09:35 曼谷', '已录人数 3 人', '待同步', '฿150.00']) expect(html).toContain(text)
     expect(html).toContain('<thead>')
     expect(html).toContain('<tfoot>')
     expect(html).toContain('scope="col"')
+  })
+
+  it.each(['day', 'month', 'range'] as const)('shows only financial profit in %s reports, including commission detail and print markup', (mode) => {
+    const html = render([record, { ...record, id: 'commission', entryMode: 'profit_only', manualProfitThb: 50 }], { ...query, mode })
+    for (const text of ['总代理售价', '总售价', '总成本', '总供货商成本', '฿1,950.00', '฿1,800.00']) expect(html).not.toContain(text)
+    expect(html).toContain('฿150.00')
+    expect(html).toContain('colSpan="3"')
+    expect(html).not.toContain('colSpan="5"')
   })
 
   it('labels excluded daily commission separately and does not treat manual-only profit as sales', () => {

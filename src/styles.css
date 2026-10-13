@@ -45,7 +45,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .report-paper-heading h2 { font-size: 24px; color: #19332d; }
 .report-paper-heading > p:not(.eyebrow) { margin: 8px 0 12px; font-size: 13px; }
 .report-meta { display: flex; flex-wrap: wrap; gap: 7px 20px; color: #77837d; font-size: 11px; }
-.report-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+.report-totals { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 20px; }
 .report-totals > div { min-width: 0; padding: 12px 8px; border-radius: 10px; background: #f4f7f3; }
 .report-totals span { display: block; color: #6f8077; font-size: 11px; }
 .report-totals strong { display: block; margin-top: 6px; font-size: clamp(12px, 3.3vw, 21px); letter-spacing: -.04em; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
@@ -57,7 +57,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .report-table-scroll { overflow-x: auto; max-width: 100%; border: 1px solid #e0e7e1; border-radius: 9px; overscroll-behavior-x: contain; }
 .report-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 .report-table caption { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
-.report-supplier-table { min-width: 560px; }.report-record-table { min-width: 740px; }
+.report-supplier-table { min-width: 290px; }.report-record-table { min-width: 520px; }
 .report-table th, .report-table td { padding: 11px 10px; text-align: left; border-bottom: 1px solid #e6ece7; vertical-align: top; }
 .report-table thead { background: #eef5f0; color: #44655a; }.report-table tfoot { background: #f4f7f3; font-weight: 800; }
 .report-table tbody tr:nth-child(even) { background: #fafcf9; }.report-table tr:last-child > * { border-bottom: 0; }
@@ -80,7 +80,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
   .report-table th, .report-table td { padding: 7px 4px; overflow-wrap: anywhere; }
   .report-table .report-money, .report-table .report-number, .report-record-table td:first-child { white-space: normal; }
   .report-record-table td:nth-child(2) { min-width: 0; max-width: none; }
-  .report-record-table th:nth-child(2) { width: 30%; }.report-record-table th:nth-child(3) { width: 7%; }
+  .report-record-table th:nth-child(1) { width: 22%; }.report-record-table th:nth-child(2) { width: 44%; }.report-record-table th:nth-child(3) { width: 8%; }.report-record-table th:nth-child(4) { width: 26%; }
   .report-table thead { display: table-header-group; }.report-table tfoot { display: table-row-group; }
   .report-table tr { break-inside: avoid; }.report-section h3 { break-after: avoid; }
 }
