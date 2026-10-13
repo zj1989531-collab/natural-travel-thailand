@@ -63,7 +63,8 @@ async function mergeRemoteRows<K extends SyncedStore>(storeName: K, rows: Ledger
 
 async function putLocalRecord<K extends SyncedStore>(storeName: K, record: LedgerDb[K]['value']) {
   const database = await getDb()
-  const transaction = database.transaction([storeName, 'settings'], 'readwrite')
+  const transaction = database.transaction(storeName === 'tickets' ? ['tickets', 'settings', 'ticket_refunds'] : [storeName, 'settings'], 'readwrite')
+  try {
   const settings = await transaction.objectStore('settings').get('app')
   // A form can have read the anonymous owner just before first login adopted
   // the existing rows. Assign its delayed write using settings in this same
@@ -71,9 +72,19 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
   const next = settings?.lastCloudUserId && record.userId === settings.localUserId
     ? { ...record, userId: settings.lastCloudUserId, syncStatus: 'pending' as const }
     : record
+  if (storeName === 'tickets') {
+    const current = await transaction.objectStore('tickets').get(record.id)
+    const history = await transaction.objectStore('ticket_refunds').index('by-ticket-id').getAll(record.id)
+    const oldFields = current as unknown as Record<string, unknown> | undefined
+    const newFields = next as unknown as Record<string, unknown>
+    if (oldFields && history.some((row) => row.userId === current!.userId) && Object.keys({ ...oldFields, ...newFields }).some((key) => !['updatedAt', 'syncStatus', 'refunds'].includes(key) && oldFields[key] !== newFields[key])) {
+      throw new Error('已有退票明细的原票不可编辑或删除，请保留完整记录。')
+    }
+  }
   const key = await transaction.objectStore(storeName).put(next)
   await transaction.done
   return key
+  } catch (error) { try { transaction.abort() } catch { /* Transaction may already have aborted. */ } await transaction.done.catch(() => undefined); throw error }
 }
 
 export const db = {
