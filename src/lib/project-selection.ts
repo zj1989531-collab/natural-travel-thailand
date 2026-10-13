@@ -1,7 +1,15 @@
 import type { Project, TicketInput } from '../types'
 
-export const projectNames = (projects: Project[]) =>
-  [...new Set(projects.map((project) => project.name))].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+export const projectNames = (projects: Project[]) => {
+  const monthlyCommissionNames = new Set(projects
+    .filter((project) => project.entryMode === 'profit_only' || /月结[返反]佣/.test(project.name))
+    .map((project) => project.name))
+
+  return [...new Set(projects.map((project) => project.name))].sort((a, b) =>
+    Number(monthlyCommissionNames.has(a)) - Number(monthlyCommissionNames.has(b)) ||
+    Array.from(a).length - Array.from(b).length ||
+    a.localeCompare(b, 'zh-CN'))
+}
 
 const clearSelection = (form: TicketInput, projectName: string): TicketInput => ({
   ...form, projectName, projectId: '', supplierName: '', subItemName: '',

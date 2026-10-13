@@ -14,6 +14,36 @@ const project = (id: string, name: string, subItemName = '', supplierId = 'suppl
 })
 
 describe('project-first ticket selection', () => {
+  it('sorts project names by character count, with a consistent order for ties', () => {
+    const projects = [project('1', '格兰岛一日游'), project('2', '潜水'), project('3', '泰拳'), project('4', '嘉年华')]
+    const tiedNames = ['潜水', '泰拳'].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    expect(projectNames(projects)).toEqual([...tiedNames, '嘉年华', '格兰岛一日游'])
+    expect(projects.map((item) => item.id)).toEqual(['1', '2', '3', '4'])
+    expect(projectNames([])).toEqual([])
+  })
+
+  it('places monthly commission entries last and sorts that group by length too', () => {
+    const projects = [
+      { ...project('1', '星光旅行社（月结返佣）'), entryMode: 'profit_only' as const },
+      { ...project('2', '返佣'), entryMode: 'profit_only' as const },
+      project('3', '很长的常规出票项目名称'),
+      project('4', '生蚝（月结返佣）'),
+      project('5', '虾哥（月结反佣）'),
+      project('6', '潜水')
+    ]
+    const tiedNames = ['生蚝（月结返佣）', '虾哥（月结反佣）'].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    expect(projectNames(projects)).toEqual(['潜水', '很长的常规出票项目名称', '返佣', ...tiedNames, '星光旅行社（月结返佣）'])
+  })
+
+  it('counts Unicode characters rather than UTF-16 units and keeps grouped monthly names last', () => {
+    expect(projectNames([project('1', '𠮷'), project('2', '票甲')])).toEqual(['𠮷', '票甲'])
+    expect(projectNames([
+      project('1', '短名'),
+      { ...project('2', '短名', '返佣套餐'), entryMode: 'profit_only' as const },
+      project('3', '常规长名称')
+    ])).toEqual(['常规长名称', '短名'])
+  })
+
   it('selects profit-only mode and clears old prices and stale manual profit', () => {
     const commission = { ...project('commission', '示例返佣'), entryMode: 'profit_only' as const }
     const selected = chooseProject({ ...form, manualProfitThb: 500 }, [commission], commission.name)
