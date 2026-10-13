@@ -17,7 +17,7 @@ describe('complete ledger backup', () => {
   it('preserves all catalogue rows, IDs, optional subitems, amounts and timestamps', () => {
     const projects = Array.from({ length: 95 }, (_, i) => ({ ...project, id: `project-${i}` }))
     const backup = createLedgerBackup({ suppliers: [supplier], projects, tickets: [] }, '2026-01-03T00:00:00.000Z')
-    expect(backup).toMatchObject({ format: 'ticket-profit-ledger', version: 1, currency: 'THB', timeZone: 'Asia/Bangkok' })
+    expect(backup).toMatchObject({ format: 'ticket-profit-ledger', version: 2, currency: 'THB', timeZone: 'Asia/Bangkok', refunds: [] })
     expect(backup.suppliers).toEqual([supplier])
     expect(backup.projects).toEqual(projects)
     expect(backup.projects).toHaveLength(95)

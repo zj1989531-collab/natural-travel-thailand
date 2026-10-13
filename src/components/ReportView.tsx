@@ -4,6 +4,7 @@ import { formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTim
 import { buildReport, type LedgerReport, type ReportMode, type ReportQuery } from '../lib/reports'
 import { activeTickets, getProfit, monthDateRange } from '../lib/stats'
 import { projectNames } from '../lib/project-selection'
+import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
@@ -13,10 +14,12 @@ function RecordTable({ records, caption }: { records: TicketRecord[]; caption: s
       <thead><tr><th scope="col">日期 / 时间</th><th scope="col">项目 / 供货商</th><th scope="col">人数</th><th scope="col">利润</th></tr></thead>
       <tbody>{records.map((ticket) => {
         const profit = getProfit(ticket)
+        const refund = getRefundState(ticket)
+        const people = getEffectivePersonCount(ticket)
         return <tr key={ticket.id}>
           <td>{ticket.issueDate}<small>{ticket.issueTime ? `${ticket.issueTime} 曼谷` : '时间未记录'}</small></td>
-          <td><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><small>{ticket.supplierName} · {ticket.entryMode === 'profit_only' ? '仅录利润' : ticket.amountBasis === 'per_person' ? '按人数计价' : '整单总额'}</small>{ticket.note && <small className="report-record-note">备注：{ticket.note}</small>}</td>
-          <td className="report-number">{ticket.personCount == null ? '—' : formatNumber(ticket.personCount)}</td>
+          <td><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><small>{ticket.supplierName} · {ticket.entryMode === 'profit_only' ? '仅录利润' : ticket.amountBasis === 'per_person' ? '按人数计价' : '整单总额'}</small>{refund.active.length > 0 && <small>{refund.full ? '已全部退票' : `已退${refund.refundedPeople}人`} · 利润回算原出票日期</small>}{ticket.note && <small className="report-record-note">备注：{ticket.note}</small>}</td>
+          <td className="report-number">{people == null ? '—' : formatNumber(people)}</td>
           <td className={`report-money ${profit < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(profit)}</td>
         </tr>
       })}</tbody>
@@ -40,7 +43,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     <section className="report-quantity" aria-label="项目出票数量查询">
       <h3>项目出票数量查询</h3>
       <div className="report-quantity-metrics"><div><span>出票记录数</span><strong>{formatNumber(report.quantity.recordCount)} 笔</strong></div><div><span>已录人数</span><strong>{formatNumber(report.quantity.peopleCount)} 人</strong></div></div>
-      <p className="report-note">门票类项目按每人1张：已录 {formatNumber(report.quantity.peopleCount)} 张；包船、包车等项目仅表示人数。数量查询包含月结出票项目，不受每日利润排除规则影响；仅录返佣利润的记录不计出票数量。</p>
+      <p className="report-note">门票类项目按每人1张：已录 {formatNumber(report.quantity.peopleCount)} 张（已扣除退票）；包船、包车等项目仅表示有效人数。数量查询包含月结出票项目，不受每日利润排除规则影响；仅录返佣利润的记录不计出票数量。</p>
       {report.quantity.unknownCount > 0 && <p className="report-notice">另有 {report.quantity.unknownCount} 笔出票记录未填写人数，以上数量仅为已录部分，不能作为完整门票总数。</p>}
       {report.quantity.days.length > 0 && <div className="report-table-scroll" role="region" aria-label="每日出票数量" tabIndex={0}><table className="report-table report-quantity-table"><caption>每日出票数量</caption><thead><tr><th scope="col">日期</th><th scope="col">出票记录</th><th scope="col">已录人数</th><th scope="col">人数未填</th></tr></thead><tbody>{report.quantity.days.map((day) => <tr key={day.date}><th scope="row">{day.date}</th><td className="report-number">{day.recordCount}</td><td className="report-number">{formatNumber(day.peopleCount)}</td><td className="report-number">{day.unknownCount}</td></tr>)}</tbody><tfoot><tr><th scope="row">合计</th><td className="report-number">{report.quantity.recordCount}</td><td className="report-number">{formatNumber(report.quantity.peopleCount)}</td><td className="report-number">{report.quantity.unknownCount}</td></tr></tfoot></table></div>}
     </section>
@@ -58,7 +61,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     </section>
     <section className="report-section"><h3>记录明细</h3>{report.records.length > 0 ? <RecordTable records={report.records} caption="报表记录明细" /> : <p className="report-empty">没有符合当前报表条件的记录。</p>}</section>
     {report.mode === 'day' && report.monthlyRecords.length > 0 && <section className="report-section report-monthly-section"><h3>月结项目另列 · 不计入日报合计</h3><p className="report-note">{report.monthlyRecords.length} 条月结记录 · 利润 {formatThb(report.monthlySummary.profitThb)}，包含在对应月报中。</p><RecordTable records={report.monthlyRecords} caption="当日月结记录（不计入日报合计）" /></section>}
-    <footer className="report-footer">按出票日期统计 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
+    <footer className="report-footer">按原出票日期统计，退票回算原日/月 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
   </article>
 }
 

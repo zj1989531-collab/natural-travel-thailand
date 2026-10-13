@@ -41,7 +41,8 @@ begin
       raise exception '退票明细不可修改；请先撤销，再重新登记。';
     end if;
     if new.cancelled_at is not distinct from old.cancelled_at then return null; end if;
-    if old.cancelled_at is not null or new.cancelled_at is null or new.updated_at<=old.updated_at then
+    if old.cancelled_at is not null then return null; end if;
+    if new.cancelled_at is null or new.updated_at<=old.updated_at then
       raise exception '退票撤销状态无效，请刷新后重试。';
     end if;
     return new;

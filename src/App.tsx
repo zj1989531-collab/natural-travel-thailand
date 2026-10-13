@@ -4,13 +4,15 @@ import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from '.
 import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
 import { ReportView } from './components/ReportView'
+import { RefundHistory, RefundSheet } from './components/RefundSheet'
+import { getEffectivePersonCount, getRefundState } from './lib/refunds'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
-import type { AmountBasis, EntryMode, Project, Supplier, TicketInput, TicketRecord } from './types'
+import type { AmountBasis, EntryMode, Project, RefundInput, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records' | 'reports'
 
@@ -408,6 +410,8 @@ export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | undefined>()
   const [formOpen, setFormOpen] = useState(false)
+  const [refundOpen, setRefundOpen] = useState(false)
+  const [refundTicketId, setRefundTicketId] = useState('')
   const [supplierSheetOpen, setSupplierSheetOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
@@ -470,6 +474,7 @@ export default function App() {
         syncQueueRef.current?.clearPending()
         setSyncMessage('')
         setFormOpen(false)
+        setRefundOpen(false)
         setSelectedTicket(undefined)
       }
       userRef.current = nextUser
@@ -518,7 +523,7 @@ export default function App() {
       debounceTimer = window.setTimeout(() => { if (alive) void synchronise() }, 180)
     }
     let channel = client.channel(`ledger:${user.id}`)
-    for (const table of ['suppliers', 'projects', 'tickets']) {
+    for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds']) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, scheduleSync)
     }
     channel.subscribe((status) => {
@@ -573,7 +578,7 @@ export default function App() {
   }).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, supplierFilter, query])
 
   const monthlySupplierStats = useMemo(() => bySupplier(ticketsInMonth(tickets, month)), [tickets, month])
-  const unsyncedCount = [...tickets, ...suppliers, ...projects].filter((record) => record.syncStatus !== 'synced').length
+  const unsyncedCount = [...tickets, ...suppliers, ...projects, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length
 
   const openNewForm = () => {
     setSelectedTicket(undefined)
@@ -589,6 +594,29 @@ export default function App() {
 
   const requireCloudLogin = () => {
     if (requestLoginForWrite()) throw new Error('请先登录云端账号，再保存修改。')
+  }
+
+  const openRefund = (id = '') => {
+    if (requestLoginForWrite()) return
+    setRefundTicketId(id); setRefundOpen(true)
+  }
+  const saveRefund = async (input: RefundInput) => {
+    requireCloudLogin()
+    const originalDate = tickets.find((ticket) => ticket.id === input.ticketId)?.issueDate
+    await synchronise()
+    await ledgerRepository.createRefund(input)
+    await refresh()
+    setRefundOpen(false)
+    setToast(`退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`)
+    void synchronise()
+  }
+  const cancelRefund = async (id: string) => {
+    if (requestLoginForWrite()) return
+    if (!window.confirm('确认撤销这笔退票登记吗？原日期的利润和有效票量会恢复；退票明细仍保留。这只修改账本，不会转账。')) return
+    try {
+      await synchronise(); await ledgerRepository.cancelRefund(id); await refresh()
+      setToast('退票已撤销，原日期统计已重新计算。'); void synchronise()
+    } catch (error) { setToast(error instanceof Error ? error.message : '撤销未完成，请刷新核对。') }
   }
 
   const saveTicket = async (input: TicketInput) => {
@@ -628,11 +656,11 @@ export default function App() {
 
   const backupAllData = async () => {
     try {
-      const [backupSuppliers, backupProjects, backupTickets] = await Promise.all([
-        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets()
+      const [backupSuppliers, backupProjects, backupTickets, backupRefunds] = await Promise.all([
+        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds()
       ])
-      downloadLedgerBackup(createLedgerBackup({ suppliers: backupSuppliers, projects: backupProjects, tickets: backupTickets }))
-      setToast('全部资料备份已导出，包含供货商、项目价格和出票记录，请妥善保管。')
+      downloadLedgerBackup(createLedgerBackup({ suppliers: backupSuppliers, projects: backupProjects, tickets: backupTickets, refunds: backupRefunds }))
+      setToast('全部资料备份已导出，包含供货商、项目价格、出票记录及退票明细。')
     } catch (error) {
       setToast(error instanceof Error ? error.message : '备份未完成，请稍后重试。')
     }
@@ -641,10 +669,10 @@ export default function App() {
   const deleteTicket = async (ticket: TicketRecord) => {
     if (requestLoginForWrite()) return
     if (!window.confirm(`确认删除 ${formatDate(ticket.issueDate)} 的「${ticket.supplierName}」记录吗？删除后将不再计入统计。`)) return
-    await ledgerRepository.deleteTicket(ticket)
-    await refresh()
-    setToast('记录已删除，统计已重新计算。')
-    void synchronise()
+    try {
+      await ledgerRepository.deleteTicket(ticket); await refresh()
+      setToast('记录已删除，统计已重新计算。'); void synchronise()
+    } catch (error) { setToast(error instanceof Error ? error.message : '删除未完成，请刷新核对。') }
   }
 
   const install = async () => {
@@ -692,7 +720,7 @@ export default function App() {
               <p className="eyebrow">{formatDate(today)}</p>
               <h1>今天的盈利，一眼掌握。</h1>
             </div>
-            <button className="round-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button>
+            <div className="heading-actions"><button className="secondary-button small" type="button" aria-label="主页退票" onClick={() => openRefund()}>↶ 退票</button><button className="round-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button></div>
           </section>
 
           {cloudConfigured ? (
@@ -752,9 +780,10 @@ export default function App() {
                   <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
                   <strong className={getProfit(ticket) >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(getProfit(ticket))}</strong>
                 </div>
-                <div className="ticket-meta"><span>{ticket.personCount == null ? '人数未记录' : `${formatNumber(ticket.personCount)} 人`}</span><span>{ticket.amountBasis === 'per_person' ? '按人数计算' : '整单总额'}</span>{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>总售价 {formatThb(getTicketAmounts(ticket).agentPriceThb)}</span><span>总成本 {formatThb(getTicketAmounts(ticket).costThb)}</span></>}</div>
+                <div className="ticket-meta"><span>{getEffectivePersonCount(ticket) == null ? '人数未记录' : `有效 ${formatNumber(getEffectivePersonCount(ticket)!)} 人`}</span><span>{ticket.amountBasis === 'per_person' ? '按人数计算' : '整单总额'}</span>{getRefundState(ticket).active.length > 0 && <span>{getRefundState(ticket).full ? '已全部退票' : `已退 ${getRefundState(ticket).refundedPeople} 人`} · 回算原日/月</span>}{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>净售价 {formatThb(getTicketAmounts(ticket).agentPriceThb)}</span><span>净成本 {formatThb(getTicketAmounts(ticket).costThb)}</span></>}</div>
                 {ticket.note && <p className="ticket-note">{ticket.note}</p>}
-                <div className="ticket-actions"><button type="button" onClick={() => { setSelectedTicket(ticket); setFormOpen(true) }}>编辑</button><button className="danger-action" type="button" onClick={() => void deleteTicket(ticket)}>删除</button></div>
+                <RefundHistory ticket={ticket} onCancel={(id) => void cancelRefund(id)} />
+                <div className="ticket-actions">{ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && <button type="button" onClick={() => openRefund(ticket.id)}>退票</button>}<button type="button" disabled={Boolean(ticket.refunds?.length)} onClick={() => { setSelectedTicket(ticket); setFormOpen(true) }}>编辑</button><button className="danger-action" type="button" disabled={Boolean(ticket.refunds?.length)} onClick={() => void deleteTicket(ticket)}>删除</button></div>
               </article>
             ))}
           </section>
@@ -769,6 +798,7 @@ export default function App() {
       </nav>
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {refundOpen && <RefundSheet tickets={tickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}

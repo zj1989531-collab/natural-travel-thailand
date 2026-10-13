@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { User } from '@supabase/supabase-js'
-import type { Project, TicketInput, TicketRecord } from '../types'
+import type { Project, RefundInput, RefundRecord, TicketInput, TicketRecord } from '../types'
 import { mergeRemoteRecord } from './sync'
 import { getTicketAmounts } from './ticket-amounts'
 
 const state = vi.hoisted(() => ({
-  local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>() },
-  cloud: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>() },
+  local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>() },
+  cloud: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>() },
+  rejectRefundWrite: false,
+  loseRefundResponse: false,
   uploads: [] as { table: string; records: any[] }[],
   duringUpload: null as null | ((table: string) => void)
 }))
@@ -18,6 +20,10 @@ vi.mock('./db', () => ({ db: {
   getSettings: async () => ({ localUserId: 'anonymous', lastCloudUserId: 'user-1' }),
   getTickets: async () => [...state.local.tickets.values()].map(copy),
   getTicket: async (id: string) => state.local.tickets.get(id),
+  getRefunds: async () => [...state.local.ticket_refunds.values()].map(copy),
+  getRefund: async (id: string) => state.local.ticket_refunds.get(id),
+  putRefund: async (record: RefundRecord) => { state.local.ticket_refunds.set(record.id, copy(record)) },
+  mergeRemoteRefunds: async (records: any[]) => records.forEach((remote) => state.local.ticket_refunds.set(remote.id, mergeRemoteRecord(state.local.ticket_refunds.get(remote.id), remote))),
   getSuppliers: async () => [...state.local.suppliers.values()].map(copy),
   getProjects: async () => [...state.local.projects.values()].map(copy),
   putProject: async (project: Project) => { state.local.projects.set(project.id, copy(project)) },
@@ -29,36 +35,43 @@ vi.mock('./db', () => ({ db: {
 
 vi.mock('./supabase', () => ({ getSupabase: () => ({
   from: (table: Table) => {
-    const query = (write?: any[]) => {
-      let userId = 'user-1'
+    const query = (write?: any[], mode = 'upsert') => {
+      const filters: Record<string, string> = {}
       let offset = 0
       let end = 499
       const builder = {
-        eq: (_column: string, value: string) => { userId = value; return builder },
+        eq: (column: string, value: string) => { filters[column] = value; return builder },
         order: () => builder,
         range: (start: number, last: number) => { offset = start; end = last; return builder },
         abortSignal: async () => {
+          const matches = (row: any) => Object.entries(filters).every(([key, value]) => row[key] === value)
           if (write) {
+            if (table === 'ticket_refunds' && state.rejectRefundWrite) return { error: { message: '云端拒绝退票' }, data: null }
+            if (mode === 'update') {
+              for (const [id, row] of state.cloud[table]) if (matches(row)) state.cloud[table].set(id, { ...row, ...write[0] })
+              return { error: null, data: null }
+            }
             state.uploads.push({ table, records: write.map(copy) })
             state.duringUpload?.(table)
             for (const record of write) {
               const current = state.cloud[table].get(record.id)
+              if (mode === 'insert' && current) return { error: { message: 'duplicate key' }, data: null }
               // Model the PostgreSQL trigger: a stale/equal timestamp is ignored.
               if (!current || new Date(record.updated_at).getTime() > new Date(current.updated_at).getTime()) {
                 state.cloud[table].set(record.id, copy(record))
               }
             }
-            return { error: null, data: null }
+            return { error: table === 'ticket_refunds' && state.loseRefundResponse ? { message: '响应丢失' } : null, data: null }
           }
           return {
             error: null,
-            data: [...state.cloud[table].values()].filter((row) => row.user_id === userId).slice(offset, end + 1).map(copy)
+            data: [...state.cloud[table].values()].filter(matches).slice(offset, end + 1).map(copy)
           }
         }
       }
       return builder
     }
-    return { select: () => query(), upsert: (rows: any[]) => query(rows) }
+    return { select: () => query(), upsert: (rows: any[]) => query(rows), insert: (row: any) => query([row], 'insert'), update: (row: any) => query([row], 'update') }
   }
 }) }))
 
@@ -76,14 +89,106 @@ const cloudTicket = (updatedAt: string, note = '') => ({
   created_at: '2026-10-13T00:00:00.000Z', updated_at: updatedAt, deleted_at: null
 })
 
+describe('confirmed cloud refunds', () => {
+  const prepare = () => {
+    const ticket = { ...localTicket('2026-10-13T00:00:00Z'), amountBasis: 'per_person' as const, personCount: 3, agentPriceThb: 650, costThb: 600, syncStatus: 'synced' as const }
+    state.local.tickets.set(ticket.id, ticket)
+    state.cloud.tickets.set(ticket.id, { ...cloudTicket(ticket.updatedAt), amount_basis: 'per_person', person_count: 3, agent_price_thb: 650, cost_thb: 600 })
+    const input: RefundInput = { operationId: 'refund-1', ticketId: ticket.id, personCount: 1, isFull: false, refundRevenueThb: 650, returnedCostThb: 550, refundDate: '2026-10-14', refundTime: '09:30', note: '手续费50' }
+    return { ticket, input }
+  }
+  it('records actual cash movements separately without changing original prices or date', async () => {
+    const { ticket, input } = prepare()
+    await ledgerRepository.createRefund(input)
+    const [projected] = await ledgerRepository.getTickets()
+    expect(getTicketAmounts(projected)).toMatchObject({ agentPriceThb: 1300, costThb: 1250, profitThb: 50 })
+    expect(projected.issueDate).toBe('2026-10-13')
+    expect(state.local.tickets.get(ticket.id)).toEqual(ticket)
+    expect(projected.refunds).toHaveLength(1)
+  })
+  it('deduplicates a retry after a lost response, even after a full refund', async () => {
+    const { input } = prepare()
+    const full = { ...input, isFull: true, refundRevenueThb: 1950, returnedCostThb: 1800 }
+    state.loseRefundResponse = true
+    const receipt = await ledgerRepository.createRefund(full)
+    expect(await ledgerRepository.createRefund(full)).toEqual(receipt)
+    expect(state.cloud.ticket_refunds.size).toBe(1)
+    expect(state.local.ticket_refunds.size).toBe(1)
+    expect(receipt.personCount).toBe(3)
+  })
+  it('does not cache an unconfirmed refund or allow a reused operation ID with changed amounts', async () => {
+    const { input } = prepare()
+    state.rejectRefundWrite = true
+    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('云端拒绝')
+    expect(state.local.ticket_refunds.size).toBe(0)
+    state.rejectRefundWrite = false
+    await ledgerRepository.createRefund(input)
+    await expect(ledgerRepository.createRefund({ ...input, returnedCostThb: 600 })).rejects.toThrow('编号已使用')
+    expect(state.cloud.ticket_refunds.size).toBe(1)
+  })
+  it('requires online access and a synced original ticket', async () => {
+    const { ticket, input } = prepare()
+    vi.stubGlobal('navigator', { onLine: false })
+    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('联网')
+    vi.stubGlobal('navigator', { onLine: true })
+    state.local.tickets.set(ticket.id, { ...ticket, syncStatus: 'pending' })
+    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('原票尚未同步')
+    expect(state.cloud.ticket_refunds.size).toBe(0)
+  })
+  it('voids a refund idempotently, restores statistics, and preserves the history', async () => {
+    const { ticket, input } = prepare()
+    await ledgerRepository.createRefund(input)
+    await ledgerRepository.cancelRefund(input.operationId)
+    await ledgerRepository.cancelRefund(input.operationId)
+    const [restored] = await ledgerRepository.getTickets()
+    expect(getTicketAmounts(restored).profitThb).toBe(150)
+    expect(restored.refunds?.[0].cancelledAt).toBeTruthy()
+    expect(state.local.ticket_refunds.size).toBe(1)
+    await expect(ledgerRepository.deleteTicket(ticket)).rejects.toThrow('不可删除')
+    await expect(ledgerRepository.createOrUpdateTicket({ issueDate: ticket.issueDate, issueTime: '09:30', supplierName: ticket.supplierName, projectId: ticket.projectId!, projectName: ticket.projectName, subItemName: '', agentPriceThb: 650, costThb: 600, personCount: 3, note: '' }, ticket)).rejects.toThrow('不可编辑')
+    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('编号已使用')
+  })
+  it('leaves local statistics unchanged when cloud cancellation is rejected', async () => {
+    const { input } = prepare()
+    await ledgerRepository.createRefund(input)
+    state.rejectRefundWrite = true
+    await expect(ledgerRepository.cancelRefund(input.operationId)).rejects.toThrow('云端拒绝')
+    expect((await ledgerRepository.getRefunds())[0].cancelledAt).toBeNull()
+    expect(getTicketAmounts((await ledgerRepository.getTickets())[0]).profitThb).toBe(50)
+  })
+  it('pulls receipts and cancellations to a second device without uploading duplicates', async () => {
+    const { input } = prepare()
+    await ledgerRepository.createRefund(input)
+    state.local.ticket_refunds.clear()
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(getTicketAmounts((await ledgerRepository.getTickets())[0]).profitThb).toBe(50)
+    const remote = state.cloud.ticket_refunds.get(input.operationId)
+    state.cloud.ticket_refunds.set(remote.id, { ...remote, cancelled_at: '2099-01-01T00:00:00Z', updated_at: '2099-01-01T00:00:00Z' })
+    await ledgerRepository.synchronise(user)
+    expect(getTicketAmounts((await ledgerRepository.getTickets())[0]).profitThb).toBe(150)
+    expect(state.cloud.ticket_refunds.size).toBe(1)
+    expect(state.uploads.filter((row) => row.table === 'ticket_refunds')).toHaveLength(1)
+  })
+  it('rejects unavailable and other-account records and hides other-account receipts', async () => {
+    const { input, ticket } = prepare()
+    state.local.tickets.set(ticket.id, { ...ticket, userId: 'user-2' })
+    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('当前账号')
+    state.local.ticket_refunds.set('foreign', { id: 'foreign', userId: 'user-2', ticketId: ticket.id })
+    expect(await ledgerRepository.getTickets()).toEqual([])
+    expect(await ledgerRepository.getRefunds()).toEqual([])
+  })
+})
+
 beforeEach(() => {
   vi.stubGlobal('navigator', { onLine: true })
-  for (const table of ['suppliers', 'projects', 'tickets'] as const) {
+  for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds'] as const) {
     state.local[table].clear()
     state.cloud[table].clear()
   }
   state.uploads.length = 0
   state.duringUpload = null
+  state.rejectRefundWrite = false
+  state.loseRefundResponse = false
 })
 
 describe('cloud synchronization races', () => {

@@ -1,11 +1,12 @@
 import type { TicketRecord } from '../types'
 import { isValidPersonCount } from './format'
+import { getRefundState } from './refunds'
 
-type AmountInput = Pick<TicketRecord, 'amountBasis' | 'personCount' | 'entryMode' | 'agentPriceThb' | 'costThb' | 'manualProfitThb'>
+type AmountInput = Pick<TicketRecord, 'amountBasis' | 'personCount' | 'entryMode' | 'agentPriceThb' | 'costThb' | 'manualProfitThb' | 'refunds'> & Partial<Pick<TicketRecord, 'id' | 'userId'>>
 
 // Store the entered amounts unchanged; compute totals once at the point of use.
 // Missing basis means a legacy whole-order total, never an implicit unit price.
-export const getTicketAmounts = (ticket: AmountInput) => {
+export const getOriginalTicketAmounts = (ticket: AmountInput) => {
   const quantity = ticket.amountBasis === 'per_person'
     ? typeof ticket.personCount === 'number' && isValidPersonCount(ticket.personCount) ? ticket.personCount : 0
     : 1
@@ -16,6 +17,14 @@ export const getTicketAmounts = (ticket: AmountInput) => {
   const revenueCents = cents(ticket.agentPriceThb) * quantity
   const costCents = cents(ticket.costThb) * quantity
   return { agentPriceThb: revenueCents / 100, costThb: costCents / 100, profitThb: (revenueCents - costCents) / 100 }
+}
+
+export const getTicketAmounts = (ticket: AmountInput) => {
+  const original = getOriginalTicketAmounts(ticket)
+  const refunds = getRefundState(ticket)
+  const revenueCents = Math.round(original.agentPriceThb * 100) - Math.round(refunds.refundRevenueThb * 100)
+  const costCents = Math.round(original.costThb * 100) - Math.round(refunds.returnedCostThb * 100)
+  return { agentPriceThb: revenueCents / 100, costThb: costCents / 100, profitThb: ticket.entryMode === 'profit_only' ? original.profitThb : (revenueCents - costCents) / 100 }
 }
 
 export const validateAmountPrecision = (amounts: number[]) => {

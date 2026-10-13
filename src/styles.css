@@ -34,6 +34,8 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .eyebrow { margin-bottom: 5px; color: #77837d; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .muted { color: #77837d; font-size: 12px; }
 .person-count-field { display: grid; gap: 7px; }
+.refund-history { margin-top: 12px; padding: 10px; border: 1px solid #eadfd2; border-radius: 10px; color: #725e49; background: #fffaf4; font-size: 12px; }
+.refund-history summary { cursor: pointer; font-weight: 700; }.refund-history-row { padding: 10px 0; border-bottom: 1px solid #eadfd2; }.refund-history-row:last-child { border: 0; }.refund-history-row p { margin: 0 0 5px; line-height: 1.5; }
 .report-view .page-content { width: min(100%, 1000px); }
 .report-screen-heading { flex-wrap: wrap; }
 .report-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 16px; border: 1px solid #e3e8e4; border-radius: 16px; background: #fff; }

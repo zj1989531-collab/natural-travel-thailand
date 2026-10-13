@@ -30,6 +30,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  refunds?: RefundRecord[]
   amountBasis?: AmountBasis
   personCount?: number | null
   entryMode?: EntryMode
@@ -65,6 +66,35 @@ export interface TicketInput {
   subItemName: string
   agentPriceThb: number
   costThb: number
+  note: string
+}
+
+export interface RefundRecord {
+  id: string
+  userId: string
+  ticketId: string
+  personCount: number | null
+  isFull: boolean
+  refundRevenueThb: number
+  returnedCostThb: number
+  refundDate: string
+  refundTime: string
+  note: string
+  cancelledAt: string | null
+  createdAt: string
+  updatedAt: string
+  syncStatus: SyncStatus
+}
+
+export interface RefundInput {
+  operationId: string
+  ticketId: string
+  personCount: number | null
+  isFull: boolean
+  refundRevenueThb: number
+  returnedCostThb: number
+  refundDate: string
+  refundTime: string
   note: string
 }
 

@@ -3,8 +3,10 @@ import { db } from './db'
 import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AmountBasis, AppSettings, EntryMode, Project, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AmountBasis, AppSettings, EntryMode, Project, RefundInput, RefundRecord, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
 import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
+import { attachRefunds } from './refunds'
+import { validateRefundInput } from './refund-input'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -54,6 +56,10 @@ type CloudProject = {
   created_at: string
   updated_at: string
 }
+
+type CloudRefund = { id: string; user_id: string; ticket_id: string; person_count: number | null; is_full: boolean; refund_revenue_thb: number | string; returned_cost_thb: number | string; refund_date: string; refund_time: string; note: string; cancelled_at: string | null; created_at: string; updated_at: string }
+const toLocalRefund = (row: CloudRefund): RefundRecord => ({ id: row.id, userId: row.user_id, ticketId: row.ticket_id, personCount: row.person_count, isFull: row.is_full, refundRevenueThb: Number(row.refund_revenue_thb), returnedCostThb: Number(row.returned_cost_thb), refundDate: row.refund_date, refundTime: row.refund_time.slice(0, 5), note: row.note, cancelledAt: row.cancelled_at, createdAt: row.created_at, updatedAt: row.updated_at, syncStatus: 'synced' })
+const toCloudRefund = (row: RefundRecord) => ({ id: row.id, user_id: row.userId, ticket_id: row.ticketId, person_count: row.personCount, is_full: row.isFull, refund_revenue_thb: row.refundRevenueThb, returned_cost_thb: row.returnedCostThb, refund_date: row.refundDate, refund_time: row.refundTime, note: row.note, cancelled_at: row.cancelledAt, created_at: row.createdAt, updated_at: row.updatedAt })
 
 export interface SyncResult {
   synced: boolean
@@ -169,7 +175,7 @@ const getSettings = async (): Promise<AppSettings> => {
   return settings
 }
 
-type CloudTable = 'suppliers' | 'projects' | 'tickets'
+type CloudTable = 'suppliers' | 'projects' | 'tickets' | 'ticket_refunds'
 
 async function fetchCloudRows<T>(client: SupabaseClient, table: CloudTable, userId: string, signal: AbortSignal): Promise<T[]> {
   const rows: T[] = []
@@ -226,7 +232,78 @@ export const ledgerRepository = {
 
   async getTickets() {
     const userId = await activeUserId()
-    return (await db.getTickets()).filter((ticket) => ticket.userId === userId)
+    return attachRefunds((await db.getTickets()).filter((ticket) => ticket.userId === userId), (await db.getRefunds()).filter((row) => row.userId === userId))
+  },
+
+  async getRefunds() {
+    const userId = await activeUserId()
+    return (await db.getRefunds()).filter((row) => row.userId === userId)
+  },
+
+  async createRefund(input: RefundInput): Promise<RefundRecord> {
+    const userId = await activeUserId()
+    const client = getSupabase()
+    if (client && !navigator.onLine) throw new Error('退票需要联网确认，防止跨设备重复退票。')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const receipt = async () => {
+      if (!client) return db.getRefund(input.operationId)
+      const { data, error } = await client.from('ticket_refunds').select('*').eq('user_id', userId).eq('id', input.operationId).abortSignal(controller.signal)
+      if (error) throw new Error(error.message)
+      return data?.[0] ? toLocalRefund(data[0] as CloudRefund) : undefined
+    }
+    const sameRequest = (row: RefundRecord) => row.userId === userId && row.ticketId === input.ticketId && row.refundDate === input.refundDate && row.refundTime === input.refundTime && row.refundRevenueThb === input.refundRevenueThb && row.returnedCostThb === input.returnedCostThb && row.note === input.note.trim() && (input.isFull || row.personCount === input.personCount)
+    try {
+      const existing = await receipt()
+      if (existing) {
+        if (!sameRequest(existing) || existing.cancelledAt) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
+        await db.putRefund(existing)
+        return existing
+      }
+      const ticket = (await this.getTickets()).find((row) => row.id === input.ticketId)
+      if (!ticket) throw new Error('当前账号无法退这条出票记录。')
+      if (client && ticket.syncStatus !== 'synced') throw new Error('原票尚未同步，请先联网同步，再办理退票。')
+      const quantity = validateRefundInput(ticket, input)
+      const timestamp = now()
+      const row: RefundRecord = { ...quantity, id: input.operationId, userId, ticketId: input.ticketId, refundRevenueThb: input.refundRevenueThb, returnedCostThb: input.returnedCostThb, refundDate: input.refundDate, refundTime: input.refundTime, note: input.note.trim(), cancelledAt: null, createdAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' }
+      if (!client) {
+        const accepted = await db.addLocalRefund(row)
+        if (!sameRequest(accepted)) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
+        return accepted
+      }
+      const { error } = await client.from('ticket_refunds').insert(toCloudRefund(row)).abortSignal(controller.signal)
+      const accepted = await receipt()
+      if (!accepted || !sameRequest(accepted)) throw new Error(error?.message ?? '退票尚未确认，请联网后重试；相同提交不会重复登记。')
+      await db.putRefund(accepted)
+      return accepted
+    } finally { clearTimeout(timeout) }
+  },
+
+  async cancelRefund(id: string): Promise<void> {
+    const userId = await activeUserId()
+    const client = getSupabase()
+    if (client && !navigator.onLine) throw new Error('撤销退票需要联网确认。')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      let current = await db.getRefund(id)
+      if (client) {
+        const { data, error } = await client.from('ticket_refunds').select('*').eq('user_id', userId).eq('id', id).abortSignal(controller.signal)
+        if (error) throw new Error(error.message)
+        current = data?.[0] ? toLocalRefund(data[0] as CloudRefund) : undefined
+      }
+      if (!current || current.userId !== userId) throw new Error('当前账号无法撤销此退票。')
+      if (current.cancelledAt) { await db.putRefund(current); return }
+      const timestamp = nextModifiedAt(current.updatedAt)
+      const updated = { ...current, cancelledAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' as const }
+      if (client) {
+        const { error } = await client.from('ticket_refunds').update({ cancelled_at: timestamp, updated_at: timestamp }).eq('user_id', userId).eq('id', id).abortSignal(controller.signal)
+        if (error) throw new Error(error.message)
+        const { data, error: readError } = await client.from('ticket_refunds').select('*').eq('user_id', userId).eq('id', id).abortSignal(controller.signal)
+        if (readError || !data?.[0]?.cancelled_at) throw new Error(readError?.message ?? '撤销尚未确认，请刷新后核对。')
+        await db.putRefund(toLocalRefund(data[0] as CloudRefund))
+      } else await db.putRefund(updated)
+    } finally { clearTimeout(timeout) }
   },
 
   async getSuppliers() {
@@ -337,6 +414,7 @@ export const ledgerRepository = {
     const supplier = suppliers.find((item) => item.userId === userId && item.normalizedName === normalizedName)
     const currentTicket = existing ? await db.getTicket(existing.id) : undefined
     if (existing && (currentTicket ?? existing).userId !== userId) throw new Error('当前账号无法编辑这条记录，请重新打开记录。')
+    if (existing && (await db.getRefunds()).some((row) => row.ticketId === existing.id && row.userId === userId)) throw new Error('已有退票明细的原票不可编辑，请保留完整记录。')
     const changedAt = nextModifiedAt(existing?.updatedAt, currentTicket?.updatedAt, supplier?.updatedAt)
     const nextSupplier: Supplier = supplier ?? {
       id: createId(),
@@ -395,6 +473,7 @@ export const ledgerRepository = {
   async deleteTicket(ticket: TicketRecord): Promise<TicketRecord> {
     const currentTicket = await db.getTicket(ticket.id)
     if ((currentTicket ?? ticket).userId !== await activeUserId()) throw new Error('当前账号无法删除这条记录。')
+    if ((await db.getRefunds()).some((row) => row.ticketId === ticket.id && row.userId === ticket.userId)) throw new Error('已有退票明细的原票不可删除，请保留完整记录。')
     const deletedAt = nextModifiedAt(ticket.updatedAt, currentTicket?.updatedAt)
     const deleted = {
       ...(currentTicket ?? ticket),
@@ -429,6 +508,7 @@ export const ledgerRepository = {
       await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier })
       await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject })
       await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket })
+      await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund })
       return { synced: true }
     } catch (error) {
       if (externalSignal?.aborted) throw error

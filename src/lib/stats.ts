@@ -1,5 +1,6 @@
 import type { SupplierSummary, Summary, TicketRecord } from '../types'
 import { getTicketAmounts } from './ticket-amounts'
+import { getRefundState } from './refunds'
 
 export const getProfit = (ticket: Parameters<typeof getTicketAmounts>[0]): number => getTicketAmounts(ticket).profitThb
 
@@ -9,7 +10,7 @@ export const activeTickets = (tickets: TicketRecord[]): TicketRecord[] =>
 export const summarise = (tickets: TicketRecord[]): Summary =>
   activeTickets(tickets).reduce<Summary>(
     (total, ticket) => ({
-      count: total.count + (ticket.entryMode === 'profit_only' ? 0 : 1),
+      count: total.count + (ticket.entryMode === 'profit_only' || getRefundState(ticket).full ? 0 : 1),
       agentPriceThb: total.agentPriceThb + getTicketAmounts(ticket).agentPriceThb,
       costThb: total.costThb + getTicketAmounts(ticket).costThb,
       profitThb: total.profitThb + getProfit(ticket)
@@ -54,7 +55,7 @@ export const bySupplier = (tickets: TicketRecord[]): SupplierSummary[] => {
       costThb: 0,
       profitThb: 0
     }
-    existing.count += ticket.entryMode === 'profit_only' ? 0 : 1
+    existing.count += ticket.entryMode === 'profit_only' || getRefundState(ticket).full ? 0 : 1
     existing.agentPriceThb += getTicketAmounts(ticket).agentPriceThb
     existing.costThb += getTicketAmounts(ticket).costThb
     existing.profitThb += getProfit(ticket)

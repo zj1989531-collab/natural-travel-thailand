@@ -1,4 +1,5 @@
 -- 在 Supabase Dashboard 的 SQL Editor 中执行一次。
+-- Fresh installations must also execute refunds.sql to enable refund records.
 create table if not exists public.suppliers (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,

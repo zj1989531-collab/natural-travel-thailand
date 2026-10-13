@@ -1,8 +1,10 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import type { AppSettings, Project, Supplier, TicketRecord } from '../types'
+import type { AppSettings, Project, RefundRecord, Supplier, TicketRecord } from '../types'
+import { validateRefundInput } from './refund-input'
 import { mergeRemoteRecord } from './sync'
 
 interface LedgerDb extends DBSchema {
+  ticket_refunds: { key: string; value: RefundRecord; indexes: { 'by-ticket-id': string } }
   tickets: {
     key: string
     value: TicketRecord
@@ -27,7 +29,7 @@ interface LedgerDb extends DBSchema {
 let database: Promise<IDBPDatabase<LedgerDb>> | undefined
 
 const getDb = () => {
-  database ??= openDB<LedgerDb>('ticket-profit-ledger', 2, {
+  database ??= openDB<LedgerDb>('ticket-profit-ledger', 3, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
       const tickets = db.createObjectStore('tickets', { keyPath: 'id' })
@@ -40,12 +42,14 @@ const getDb = () => {
         const projects = db.createObjectStore('projects', { keyPath: 'id' })
         projects.createIndex('by-supplier-id', 'supplierId')
       }
-    }
+      if (oldVersion < 3) db.createObjectStore('ticket_refunds', { keyPath: 'id' }).createIndex('by-ticket-id', 'ticketId')
+    },
+    blocking() { void database?.then((connection) => connection.close()); database = undefined }
   })
   return database
 }
 
-type SyncedStore = 'tickets' | 'suppliers' | 'projects'
+type SyncedStore = 'tickets' | 'suppliers' | 'projects' | 'ticket_refunds'
 
 async function mergeRemoteRows<K extends SyncedStore>(storeName: K, rows: LedgerDb[K]['value'][]) {
   const database = await getDb()
@@ -75,8 +79,8 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
 export const db = {
   async adoptLocalRecords(sourceUserId: string, targetUserId: string, updatedAt: string, settings: AppSettings) {
     const database = await getDb()
-    const transaction = database.transaction(['tickets', 'suppliers', 'projects', 'settings'], 'readwrite')
-    for (const storeName of ['tickets', 'suppliers', 'projects'] as const) {
+    const transaction = database.transaction(['tickets', 'suppliers', 'projects', 'ticket_refunds', 'settings'], 'readwrite')
+    for (const storeName of ['tickets', 'suppliers', 'projects', 'ticket_refunds'] as const) {
       const store = transaction.objectStore(storeName)
       for (const record of await store.getAll()) {
         if (record.userId === sourceUserId) {
@@ -90,6 +94,27 @@ export const db = {
   mergeRemoteTickets: (tickets: TicketRecord[]) => mergeRemoteRows('tickets', tickets),
   mergeRemoteSuppliers: (suppliers: Supplier[]) => mergeRemoteRows('suppliers', suppliers),
   mergeRemoteProjects: (projects: Project[]) => mergeRemoteRows('projects', projects),
+  mergeRemoteRefunds: (refunds: RefundRecord[]) => mergeRemoteRows('ticket_refunds', refunds),
+  async getRefunds() { return (await getDb()).getAll('ticket_refunds') },
+  async getRefund(id: string) { return (await getDb()).get('ticket_refunds', id) },
+  async putRefund(refund: RefundRecord) { return putLocalRecord('ticket_refunds', refund) },
+  async addLocalRefund(refund: RefundRecord) {
+    const database = await getDb()
+    const transaction = database.transaction(['tickets', 'ticket_refunds', 'settings'], 'readwrite')
+    try {
+      const settings = await transaction.objectStore('settings').get('app')
+      const userId = settings?.lastCloudUserId ?? settings?.localUserId
+      const existing = await transaction.objectStore('ticket_refunds').get(refund.id)
+      if (existing) { await transaction.done; return existing }
+      const ticket = await transaction.objectStore('tickets').get(refund.ticketId)
+      if (!ticket || ticket.userId !== userId || refund.userId !== userId) throw new Error('当前账号无法退这条出票记录。')
+      const history = await transaction.objectStore('ticket_refunds').index('by-ticket-id').getAll(ticket.id)
+      validateRefundInput({ ...ticket, refunds: history }, { ...refund, operationId: refund.id })
+      await transaction.objectStore('ticket_refunds').put(refund)
+      await transaction.done
+      return refund
+    } catch (error) { try { transaction.abort() } catch { /* Transaction may already have aborted. */ } await transaction.done.catch(() => undefined); throw error }
+  },
   async getTicket(id: string) {
     return (await getDb()).get('tickets', id)
   },
