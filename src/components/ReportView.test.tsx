@@ -1,0 +1,44 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import { buildReport, type ReportQuery } from '../lib/reports'
+import type { TicketRecord } from '../types'
+import { ReportPreview, ReportView } from './ReportView'
+
+const record: TicketRecord = {
+  id: 'test-ticket', userId: 'test-user', issueDate: '2026-10-13', issueTime: '09:35', supplierId: 'test-supplier', supplierName: '测试供货商',
+  projectId: 'test-project', projectName: '测试项目', subItemName: '成人票', personCount: 3, amountBasis: 'per_person',
+  agentPriceThb: 650, costThb: 600, note: '测试备注', createdAt: '2026-10-13T02:35:00Z', updatedAt: '2026-10-13T02:35:00Z', deletedAt: null, syncStatus: 'synced'
+}
+const query: ReportQuery = { mode: 'month', month: '2026-10', date: '2026-10-13', startDate: '2026-10-01', endDate: '2026-10-31', supplierId: '' }
+const render = (records: TicketRecord[], filter = query) => renderToStaticMarkup(<ReportPreview report={buildReport(records, filter)} supplierName="全部供货商" pendingCount={1} generatedAt="2026-10-13 22:00" />)
+
+describe('online formatted report preview', () => {
+  it('renders a named report, period, supplier summary, details, totals and sync warning', () => {
+    const html = render([record])
+    for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 成人票', '测试备注', '09:35 曼谷', '已录人数 3 人', '待同步', '฿1,950.00', '฿1,800.00', '฿150.00']) expect(html).toContain(text)
+    expect(html).toContain('<thead>')
+    expect(html).toContain('<tfoot>')
+    expect(html).toContain('scope="col"')
+  })
+
+  it('labels excluded daily commission separately and does not treat manual-only profit as sales', () => {
+    const html = render([{ ...record, entryMode: 'profit_only', manualProfitThb: 50 }], { ...query, mode: 'day' })
+    expect(html).toContain('月结项目另列 · 不计入日报合计')
+    expect(html).toContain('当日月结记录（不计入日报合计）')
+    expect(html).toContain('฿150.00')
+    expect(html).toContain('当前范围没有计入本报表的记录')
+  })
+
+  it('handles empty reports and escapes record text instead of executing it', () => {
+    expect(render([])).toContain('没有符合当前报表条件的记录')
+    const html = render([{ ...record, note: '<script>alert(1)</script>' }])
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
+  })
+
+  it('provides period and supplier controls and a user-triggered print button', () => {
+    const html = renderToStaticMarkup(<ReportView tickets={[]} suppliers={[]} />)
+    for (const text of ['格式化报表', '日报', '月报', '自定义日期范围', '报表供货商', '打印 / 保存 PDF', '手机上可左右滑动表格']) expect(html).toContain(text)
+    expect(html).toContain('type="month"')
+  })
+})

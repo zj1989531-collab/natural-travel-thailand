@@ -772,7 +772,7 @@ export default function App() {
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}
-      <button className="export-button" onClick={() => void exportTicketsToXlsx(tickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(tickets).length)}</button>
+      <button className="export-button" onClick={() => void exportTicketsToXlsx(tickets)} type="button" title="导出全部有效记录到 Excel">{view === 'reports' ? '导出全部 Excel' : '导出 Excel'} · {formatNumber(activeTickets(tickets).length)}</button>
     </main>
   )
 }

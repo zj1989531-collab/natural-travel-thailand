@@ -38,7 +38,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
       <p>{report.start === report.end ? report.start : `${report.start} — ${report.end}`}</p>
       <div className="report-meta"><span>供货商：{supplierName}</span><span>预览时间：{generatedAt}（曼谷）</span></div>
     </header>
-    {pendingCount > 0 && <p className="report-notice">当前账本有 {pendingCount} 条记录待同步，此预览包含本机尚未上传的修改。</p>}
+    {pendingCount > 0 && <p className="report-notice">当前账本有 {pendingCount} 条记录待同步；此预览来自本机当前账本，可能包含尚未上传的修改。</p>}
     <div className="report-totals">
       <div><span>总代理售价</span><strong>{formatThb(report.summary.agentPriceThb)}</strong></div>
       <div><span>总供货商成本</span><strong>{formatThb(report.summary.costThb)}</strong></div>
