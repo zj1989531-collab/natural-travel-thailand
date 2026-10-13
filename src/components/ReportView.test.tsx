@@ -21,7 +21,7 @@ describe('online formatted report preview', () => {
     expect(html).toContain('scope="col"')
   })
 
-  it.each(['day', 'month', 'range'] as const)('shows only financial profit in %s reports, including commission detail and print markup', (mode) => {
+  it.each(['day', 'month', 'range', 'all'] as const)('shows only financial profit in %s reports, including commission detail and print markup', (mode) => {
     const html = render([record, { ...record, id: 'commission', entryMode: 'profit_only', manualProfitThb: 50 }], { ...query, mode })
     for (const text of ['总代理售价', '总售价', '总成本', '总供货商成本', '฿1,950.00', '฿1,800.00']) expect(html).not.toContain(text)
     expect(html).toContain('฿150.00')
