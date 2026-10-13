@@ -44,8 +44,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
       {report.quantity.unknownCount > 0 && <p className="report-notice">另有 {report.quantity.unknownCount} 笔出票记录未填写人数，以上数量仅为已录部分，不能作为完整门票总数。</p>}
       {report.quantity.days.length > 0 && <div className="report-table-scroll" role="region" aria-label="每日出票数量" tabIndex={0}><table className="report-table report-quantity-table"><caption>每日出票数量</caption><thead><tr><th scope="col">日期</th><th scope="col">出票记录</th><th scope="col">已录人数</th><th scope="col">人数未填</th></tr></thead><tbody>{report.quantity.days.map((day) => <tr key={day.date}><th scope="row">{day.date}</th><td className="report-number">{day.recordCount}</td><td className="report-number">{formatNumber(day.peopleCount)}</td><td className="report-number">{day.unknownCount}</td></tr>)}</tbody><tfoot><tr><th scope="row">合计</th><td className="report-number">{report.quantity.recordCount}</td><td className="report-number">{formatNumber(report.quantity.peopleCount)}</td><td className="report-number">{report.quantity.unknownCount}</td></tr></tfoot></table></div>}
     </section>
-    <p className="report-counts">利润合计包含 {report.records.length} 条记录 · 已录人数 {formatNumber(report.recordedPeople)} 人</p>
-    {report.unknownHeadcounts > 0 && <p className="report-notice">{report.unknownHeadcounts} 条出票记录未填写人数，不计入已录人数；仅录利润记录也不计入出票记录数及已录人数。</p>}
+    <p className="report-counts">利润合计包含 {report.records.length} 条记录{report.mode === 'day' ? '（月结记录在下方另列）' : ''}</p>
     <p className="report-note">{report.mode === 'day' ? '日报合计不含月结项目；当天月结记录在下方另列，计入所属月份的月报。' : report.mode === 'all' ? '累计报表包含全部已录日期内符合项目和供货商条件的有效记录及月结返佣。' : '包含所选日期范围内的全部有效记录及月结返佣。月报按曼谷自然月1日至月底统计。'}利润均为总额，已按各记录的计价方式计算；旧记录不重复乘人数。</p>
 
     <section className="report-section"><h3>供货商汇总 · 按利润排序</h3>
