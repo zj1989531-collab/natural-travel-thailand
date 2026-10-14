@@ -343,6 +343,40 @@ describe('manual selling prices and item quantity sync', () => {
   })
 })
 
+describe('project rename display aliases and sync', () => {
+  const prepare = () => {
+    const project: Project = { ...localProject(), name: '测试成人项目', normalizedName: '测试成人项目', subItemName: '普通票（成人）', normalizedSubItemName: '普通票（成人）' }
+    state.local.projects.set(project.id, project)
+    state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: user.id, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
+    return project
+  }
+  it('shows canonical labels before syncing without overwriting original catalogue or ticket snapshots', async () => {
+    const project = prepare()
+    const original = { ...localTicket(project.updatedAt), projectName: project.name, subItemName: project.subItemName }
+    state.local.tickets.set(original.id, original)
+    expect((await ledgerRepository.getProjects())[0]).toMatchObject({ name: '测试项目', subItemName: '普通票', defaultCostThb: project.defaultCostThb })
+    expect(state.local.projects.get(project.id)).toEqual(project)
+    expect((await ledgerRepository.getTickets())[0]).toMatchObject({ projectName: project.name, subItemName: project.subItemName })
+    expect(state.local.tickets.get(original.id)).toEqual(original)
+  })
+  it('prevents an offline catalogue upload from reintroducing the removed text', async () => {
+    const project = prepare()
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.projects.get(project.id)).toMatchObject({ id: project.id, name: '测试项目', sub_item_name: '普通票', normalized_name: '测试项目', normalized_sub_item_name: '普通票', default_cost_thb: project.defaultCostThb, default_agent_price_thb: project.defaultAgentPriceThb })
+  })
+  it('saves records chosen using renamed labels against a legacy cached project without changing prices', async () => {
+    const project = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket({ issueDate: '2026-10-14', issueTime: '09:30', projectId: project.id, projectName: '测试项目', subItemName: '普通票', supplierName: project.supplierName, agentPriceThb: 160, costThb: 100, personCount: 2, amountBasis: 'per_person', note: '' })
+    expect(saved).toMatchObject({ projectId: project.id, projectName: '测试项目', subItemName: '普通票', agentPriceThb: 160, costThb: 100 })
+    expect(getTicketAmounts(saved).profitThb).toBe(120)
+  })
+  it('detects duplicate labels after cleanup instead of creating a second package', async () => {
+    const project = prepare()
+    await expect(ledgerRepository.createProject({ supplierId: project.supplierId, name: '测试项目', subItemName: '普通票', defaultCostThb: 100, defaultAgentPriceThb: 160 })).rejects.toThrow('已存在')
+    expect(state.local.projects.size).toBe(1)
+  })
+})
+
 describe('profit-only entries and time synchronization', () => {
   const prepare = () => {
     const project = { ...localProject(), entryMode: 'profit_only' as const, defaultCostThb: 0, defaultAgentPriceThb: 0 }

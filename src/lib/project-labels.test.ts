@@ -6,8 +6,8 @@ import { buildReport } from './reports'
 import { buildTicketExportRows, createLedgerBackup } from './export'
 import { getTicketAmounts } from './ticket-amounts'
 
-const project: Project = { id: 'project-test', userId: 'user-test', name: '99成人秀', normalizedName: '99成人秀', subItemName: '普通票（成人）', normalizedSubItemName: '普通票（成人）', supplierId: 'supplier-test', supplierName: '成人测试供货商', defaultCostThb: 490, defaultAgentPriceThb: 550, createdAt: '2026-10-14T00:00:00Z', updatedAt: '2026-10-14T00:00:00Z', syncStatus: 'synced' }
-const ticket: TicketRecord = { id: 'ticket-test', userId: project.userId, projectId: project.id, projectName: project.name, subItemName: project.subItemName, supplierId: project.supplierId, supplierName: project.supplierName, issueDate: '2026-10-14', personCount: 2, amountBasis: 'per_person', agentPriceThb: 550, costThb: 490, note: '成人备注保留', createdAt: project.createdAt, updatedAt: project.updatedAt, deletedAt: null, syncStatus: 'synced' }
+const project: Project = { id: 'project-test', userId: 'user-test', name: '99成人秀', normalizedName: '99成人秀', subItemName: '普通票（成人）', normalizedSubItemName: '普通票（成人）', supplierId: 'supplier-test', supplierName: '成人测试供货商', defaultCostThb: 100, defaultAgentPriceThb: 160, createdAt: '2026-10-14T00:00:00Z', updatedAt: '2026-10-14T00:00:00Z', syncStatus: 'synced' }
+const ticket: TicketRecord = { id: 'ticket-test', userId: project.userId, projectId: project.id, projectName: project.name, subItemName: project.subItemName, supplierId: project.supplierId, supplierName: project.supplierName, issueDate: '2026-10-14', personCount: 2, amountBasis: 'per_person', agentPriceThb: 160, costThb: 100, note: '成人备注保留', createdAt: project.createdAt, updatedAt: project.updatedAt, deletedAt: null, syncStatus: 'synced' }
 const form: TicketInput = { issueDate: '2026-10-14', projectName: '', projectId: '', subItemName: '', supplierName: '', personCount: 2, amountBasis: 'per_person', agentPriceThb: NaN, costThb: NaN, note: '' }
 
 describe('project label cleanup without financial changes', () => {
@@ -22,7 +22,7 @@ describe('project label cleanup without financial changes', () => {
   })
   it('preserves IDs, suppliers, pricing, notes and historical storage snapshots', () => {
     const shownProject = projectDisplay(project)
-    expect(shownProject).toMatchObject({ id: project.id, name: '99秀', subItemName: '普通票', normalizedName: '99秀', normalizedSubItemName: '普通票', defaultCostThb: 490, defaultAgentPriceThb: 550, supplierName: project.supplierName })
+    expect(shownProject).toMatchObject({ id: project.id, name: '99秀', subItemName: '普通票', normalizedName: '99秀', normalizedSubItemName: '普通票', defaultCostThb: 100, defaultAgentPriceThb: 160, supplierName: project.supplierName })
     const shownTicket = ticketDisplay(ticket)
     expect(shownTicket).toMatchObject({ id: ticket.id, projectName: '99秀', subItemName: '普通票', note: ticket.note, supplierName: ticket.supplierName })
     expect(getTicketAmounts(shownTicket)).toEqual(getTicketAmounts(ticket))
@@ -32,7 +32,7 @@ describe('project label cleanup without financial changes', () => {
   })
   it('groups old and new display names and keeps child IDs and prices selectable', () => {
     expect(projectNames([project, { ...project, id: 'new', name: '99秀' }])).toEqual(['99秀'])
-    expect(chooseProject(form, [project], '99秀')).toMatchObject({ projectId: project.id, projectName: '99秀', subItemName: '普通票', agentPriceThb: 550, costThb: 490 })
+    expect(chooseProject(form, [project], '99秀')).toMatchObject({ projectId: project.id, projectName: '99秀', subItemName: '普通票', agentPriceThb: 160, costThb: 100 })
     expect(chooseProjectOption({ ...form, projectName: '99秀' }, [project], project.id)).toMatchObject({ projectId: project.id, projectName: '99秀', subItemName: '普通票' })
     expect(projectOptionLabel(project, [project])).toBe('普通票')
   })
