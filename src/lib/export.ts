@@ -3,6 +3,7 @@ import { getBangkokDate } from './format'
 import { getProfit } from './stats'
 import { getOriginalTicketAmounts, getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
+import { isItemQuantity, quantityLabels } from './quantity'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
   Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
@@ -20,9 +21,9 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     refunds: refunds.map((record) => pickFields(record, ['id', 'userId', 'ticketId', 'personCount', 'isFull', 'refundRevenueThb', 'returnedCostThb', 'refundDate', 'refundTime', 'note', 'cancelledAt', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Explicit fields exclude authentication sessions and any future secret fields.
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus'])),
-    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
+    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'manualAgentPrice', 'quantityUnit', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Include deletion markers so a backup does not resurrect deleted tickets.
-    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'amountBasis', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'quantityUnit', 'amountBasis', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
   }
 }
 
@@ -43,12 +44,14 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
     .map((ticket) => ({
       '出票日期': ticket.issueDate,
       '曼谷时间': ticket.issueTime || '',
-      '人数': ticket.personCount ?? '',
-      '有效人数': getRefundState(ticket).remainingPeople ?? '',
+      '人数': isItemQuantity(ticket) ? '' : ticket.personCount ?? '',
+      '数量': isItemQuantity(ticket) ? ticket.personCount ?? '' : '',
+      '有效人数': isItemQuantity(ticket) ? '' : getRefundState(ticket).remainingPeople ?? '',
+      '有效数量': isItemQuantity(ticket) ? getRefundState(ticket).remainingPeople ?? '' : '',
       '退票状态': getRefundState(ticket).active.length ? getRefundState(ticket).full ? '已全部退票' : '部分退票' : '未退票',
       '累计退代理 (THB)': getRefundState(ticket).refundRevenueThb,
       '累计成本返还 (THB)': getRefundState(ticket).returnedCostThb,
-      '计价方式': ticket.amountBasis === 'per_person' ? '按人数计算' : '整单总额',
+      '计价方式': ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计算` : '整单总额',
       '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
       '供应商': ticket.supplierName,
       '项目': ticket.projectName || '未分类项目',

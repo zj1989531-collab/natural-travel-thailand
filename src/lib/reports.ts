@@ -1,6 +1,7 @@
 import type { TicketRecord } from '../types'
 import { activeTickets, bySupplier, isMonthlySettlementProject, monthDateRange, summarise } from './stats'
 import { getEffectivePersonCount, getRefundState } from './refunds'
+import { isItemQuantity } from './quantity'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -37,11 +38,22 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
   const monthlyRecords = selected.filter((ticket) => ticket.entryMode === 'profit_only' || isMonthlySettlementProject(ticket.projectName))
   const monthlyIds = new Set(monthlyRecords.map((ticket) => ticket.id))
   const records = query.mode === 'day' ? selected.filter((ticket) => !monthlyIds.has(ticket.id)) : selected
-  const headcountRecords = records.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full)
+  const headcountRecords = records.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && !isItemQuantity(ticket))
   const knownHeadcounts = headcountRecords.filter((ticket) => getEffectivePersonCount(ticket) != null)
   // Quantity queries include monthly-settlement tickets even in a daily report.
   // A manual commission is not a ticket; missing headcount is never guessed.
-  const quantityRecords = selected.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full)
+  const quantityRecords = selected.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && !isItemQuantity(ticket))
+  const itemRecords = selected.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && isItemQuantity(ticket))
+  const itemDays = new Map<string, { date: string; recordCount: number; quantityCount: number; unknownCount: number }>()
+  for (const ticket of itemRecords) {
+    const row = itemDays.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, quantityCount: 0, unknownCount: 0 }
+    row.recordCount++
+    const count = getEffectivePersonCount(ticket)
+    if (Number.isInteger(count) && (count ?? 0) > 0) row.quantityCount += count!
+    else row.unknownCount++
+    itemDays.set(ticket.issueDate, row)
+  }
+  const itemQuantityDays = [...itemDays.values()]
   const dailyQuantities = new Map<string, { date: string; recordCount: number; peopleCount: number; unknownCount: number }>()
   for (const ticket of quantityRecords) {
     const row = dailyQuantities.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, peopleCount: 0, unknownCount: 0 }
@@ -62,6 +74,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     ...range,
     supplierId: query.supplierId,
     projectName: query.projectName ?? '',
+    itemQuantity: { recordCount: itemRecords.length, quantityCount: itemQuantityDays.reduce((sum, day) => sum + day.quantityCount, 0), unknownCount: itemQuantityDays.reduce((sum, day) => sum + day.unknownCount, 0), days: itemQuantityDays },
     quantity: {
       recordCount: quantityRecords.length,
       peopleCount: quantityDays.reduce((sum, day) => sum + day.peopleCount, 0),

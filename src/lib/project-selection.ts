@@ -12,15 +12,13 @@ export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) =>
 }
 
 const clearSelection = (form: TicketInput, projectName: string, quantityUnit: Project['quantityUnit'] = 'person'): TicketInput => ({
-  quantityUnit,
-  ...form, projectName, projectId: '', supplierName: '', subItemName: '',
+  ...form, quantityUnit, projectName, projectId: '', supplierName: '', subItemName: '',
   agentPriceThb: Number.NaN, costThb: Number.NaN,
   entryMode: 'standard', manualProfitThb: null
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({
-  quantityUnit: project.quantityUnit ?? 'person',
-  ...form, projectId: project.id, projectName: project.name, supplierName: project.supplierName,
+  ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.supplierName,
   subItemName: project.subItemName, entryMode: project.entryMode ?? 'standard', manualProfitThb: null,
   agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.manualAgentPrice ? Number.NaN : project.defaultAgentPriceThb,
   costThb: project.entryMode === 'profit_only' ? 0 : project.defaultCostThb
