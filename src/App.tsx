@@ -15,7 +15,7 @@ import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
-import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
+import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records' | 'reports'
@@ -555,6 +555,8 @@ export default function App() {
   const today = getBangkokDate()
   const month = getBangkokMonth()
   const monthRange = monthDateRange(month)
+  const year = today.slice(0, 4)
+  const yearRange = yearDateRange(year)
   const visibleTickets = useMemo(() => activeTickets(tickets).filter((ticket) => {
     const dateMatches = !dateFilter || ticket.issueDate === dateFilter
     const supplierMatches = !supplierFilter || ticket.supplierId === supplierFilter
@@ -722,6 +724,7 @@ export default function App() {
 
           <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="不含月结返佣项目：69秀、79秀、泰拳、嘉年华、格兰岛一日游、潜水。" />
           <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含月结返佣项目。" />
+          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年1月1日至12月31日统计，包含月结返佣及商品利润，退票回算原记录年份。" />
 
           <section className="ranking-section">
             <div className="section-heading">

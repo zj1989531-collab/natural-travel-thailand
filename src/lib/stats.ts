@@ -1,6 +1,7 @@
 import type { SupplierSummary, Summary, TicketRecord } from '../types'
 import { getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
+import { isValidCalendarDate } from './format'
 
 export const getProfit = (ticket: Parameters<typeof getTicketAmounts>[0]): number => getTicketAmounts(ticket).profitThb
 
@@ -41,6 +42,16 @@ export const monthDateRange = (month: string): { start: string; end: string } =>
 export const ticketsInMonth = (tickets: TicketRecord[], month: string): TicketRecord[] => {
   const { start, end } = monthDateRange(month)
   return tickets.filter((ticket) => /^\d{4}-\d{2}-\d{2}$/.test(ticket.issueDate) && ticket.issueDate >= start && ticket.issueDate <= end)
+}
+
+export const yearDateRange = (year: string): { start: string; end: string } => {
+  if (!/^[1-9]\d{3}$/.test(year)) throw new Error('年份格式必须为 YYYY。')
+  return { start: `${year}-01-01`, end: `${year}-12-31` }
+}
+
+export const ticketsInYear = (tickets: TicketRecord[], year: string): TicketRecord[] => {
+  const { start, end } = yearDateRange(year)
+  return tickets.filter((ticket) => isValidCalendarDate(ticket.issueDate) && ticket.issueDate >= start && ticket.issueDate <= end)
 }
 
 export const bySupplier = (tickets: TicketRecord[]): SupplierSummary[] => {
