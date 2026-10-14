@@ -297,6 +297,52 @@ describe('project price corrections', () => {
   })
 })
 
+describe('manual selling prices and item quantity sync', () => {
+  const prepare = () => {
+    const project: Project = { ...localProject(), name: '药品', normalizedName: '药品', subItemName: '测试规格', normalizedSubItemName: '测试规格', quantityUnit: 'item', manualAgentPrice: true, defaultAgentPriceThb: 0, defaultCostThb: 95 }
+    state.local.projects.set(project.id, project)
+    state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: user.id, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
+    const input: TicketInput = { issueDate: '2026-10-14', issueTime: '09:30', quantityUnit: 'person', personCount: 2, amountBasis: 'per_person', supplierName: project.supplierName, projectId: project.id, projectName: project.name, subItemName: project.subItemName, costThb: 95, agentPriceThb: 150, note: '' }
+    return { project, input }
+  }
+  it('requires an explicitly entered price and records the authoritative project quantity unit', async () => {
+    const { input } = prepare()
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, agentPriceThb: NaN })).rejects.toThrow('代理售价')
+    expect(state.local.tickets.size).toBe(0)
+    const saved = await ledgerRepository.createOrUpdateTicket(input)
+    expect(saved).toMatchObject({ quantityUnit: 'item', personCount: 2, agentPriceThb: 150, costThb: 95 })
+    expect(getTicketAmounts(saved).profitThb).toBe(110)
+    const explicitZero = await ledgerRepository.createOrUpdateTicket({ ...input, agentPriceThb: 0 })
+    expect(getTicketAmounts(explicitZero).profitThb).toBe(-190)
+  })
+  it('round-trips catalogue flags, quantity units and entered prices to another device', async () => {
+    const { project, input } = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket(input)
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.projects.get(project.id)).toMatchObject({ quantity_unit: 'item', manual_agent_price: true, default_agent_price_thb: 0, default_cost_thb: 95 })
+    expect(state.cloud.tickets.get(saved.id)).toMatchObject({ quantity_unit: 'item', person_count: 2, agent_price_thb: 150, cost_thb: 95 })
+    state.local.projects.clear(); state.local.tickets.clear()
+    await ledgerRepository.synchronise(user)
+    expect((await ledgerRepository.getProjects())[0]).toMatchObject({ quantityUnit: 'item', manualAgentPrice: true })
+    expect((await ledgerRepository.getTickets())[0]).toMatchObject({ quantityUnit: 'item', personCount: 2, agentPriceThb: 150, costThb: 95, syncStatus: 'synced' })
+  })
+  it('retains manual-price mode when correcting costs and never changes old transactions', async () => {
+    const { project, input } = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket(input)
+    const corrected = await ledgerRepository.updateProjectPrices(project.id, { defaultCostThb: 105, defaultAgentPriceThb: NaN })
+    expect(corrected).toMatchObject({ manualAgentPrice: true, defaultAgentPriceThb: 0, defaultCostThb: 105, quantityUnit: 'item' })
+    expect(state.local.tickets.get(saved.id)).toEqual(saved)
+    expect(getTicketAmounts(saved).profitThb).toBe(110)
+    expect(await ledgerRepository.updateProjectPrices(project.id, { defaultCostThb: 105, defaultAgentPriceThb: 160, manualAgentPrice: false })).toMatchObject({ manualAgentPrice: false, defaultAgentPriceThb: 160 })
+  })
+  it('can create a manual-price item package without assigning a fictitious actual selling price', async () => {
+    const { project } = prepare()
+    const created = await ledgerRepository.createProject({ supplierId: project.supplierId, name: '药品', subItemName: '新测试规格', defaultCostThb: 95, defaultAgentPriceThb: NaN, manualAgentPrice: true, quantityUnit: 'item' })
+    expect(created).toMatchObject({ quantityUnit: 'item', manualAgentPrice: true, defaultAgentPriceThb: 0, defaultCostThb: 95 })
+    expect(state.local.tickets.size).toBe(0)
+  })
+})
+
 describe('profit-only entries and time synchronization', () => {
   const prepare = () => {
     const project = { ...localProject(), entryMode: 'profit_only' as const, defaultCostThb: 0, defaultAgentPriceThb: 0 }
