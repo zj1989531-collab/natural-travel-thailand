@@ -4,6 +4,8 @@ export type AmountBasis = 'total' | 'per_person'
 export type QuantityUnit = 'person' | 'item'
 
 export interface Supplier {
+  /** Local-only recoverable duplicate; never uploaded or offered in selectors. */
+  mergedIntoId?: string
   id: string
   userId: string
   name: string
@@ -14,6 +16,7 @@ export interface Supplier {
 }
 
 export interface Project {
+  mergedIntoId?: string
   manualAgentPrice?: boolean
   quantityUnit?: QuantityUnit
   entryMode?: EntryMode

@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type { AppSettings, Project, RefundRecord, Supplier, TicketRecord } from '../types'
 import { validateRefundInput } from './refund-input'
 import { mergeRemoteRecord } from './sync'
+import { reconcileCatalogue } from './catalogue-merge'
 
 interface LedgerDb extends DBSchema {
   ticket_refunds: { key: string; value: RefundRecord; indexes: { 'by-ticket-id': string } }
@@ -88,6 +89,27 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
 }
 
 export const db = {
+  async reconcileCatalogue(userId: string, suppliers: Supplier[], projects: Project[]) {
+    const database = await getDb()
+    const transaction = database.transaction(['suppliers', 'projects', 'tickets', 'settings'], 'readwrite')
+    try {
+      const settings = await transaction.objectStore('settings').get('app')
+      if (settings?.lastCloudUserId !== userId) throw new Error('账号正在切换，请稍后重试同步。')
+      const merged = reconcileCatalogue({
+        suppliers: await transaction.objectStore('suppliers').getAll(),
+        projects: await transaction.objectStore('projects').getAll(),
+        tickets: await transaction.objectStore('tickets').getAll()
+      }, { suppliers, projects }, userId)
+      for (const row of merged.suppliers) await transaction.objectStore('suppliers').put(row)
+      for (const row of merged.projects) await transaction.objectStore('projects').put(row)
+      for (const row of merged.tickets) await transaction.objectStore('tickets').put(row)
+      await transaction.done
+    } catch (error) { try { transaction.abort() } catch { /* Already aborted. */ } await transaction.done.catch(() => undefined); throw error }
+  },
+  async getCatalogueAliases() {
+    const database = await getDb()
+    return { suppliers: (await database.getAll('suppliers')).filter(row => row.mergedIntoId), projects: (await database.getAll('projects')).filter(row => row.mergedIntoId) }
+  },
   async adoptLocalRecords(sourceUserId: string, targetUserId: string, updatedAt: string, settings: AppSettings) {
     const database = await getDb()
     const transaction = database.transaction(['tickets', 'suppliers', 'projects', 'ticket_refunds', 'settings'], 'readwrite')
@@ -156,7 +178,7 @@ export const db = {
     await Promise.all([...tickets.map((ticket) => transaction.store.put(ticket)), transaction.done])
   },
   async getSuppliers() {
-    return (await getDb()).getAll('suppliers')
+    return (await (await getDb()).getAll('suppliers')).filter(row => !row.mergedIntoId)
   },
   async putSupplier(supplier: Supplier) {
     return putLocalRecord('suppliers', supplier)
@@ -168,7 +190,7 @@ export const db = {
   },
   async getProjects() {
     const database = await getDb()
-    const projects = await database.getAll('projects')
+    const projects = (await database.getAll('projects')).filter(row => !row.mergedIntoId)
     const migrated = projects.map((project) => {
       const legacyProject = project as Project
       if (typeof legacyProject.subItemName === 'string') return project

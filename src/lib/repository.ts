@@ -222,7 +222,7 @@ async function synchroniseTable<Local extends VersionedRecord, Cloud>(options: {
 
   for (let offset = 0; offset < pending.length; offset += 100) {
     const { error } = await client.from(table).upsert(pending.slice(offset, offset + 100).map(toCloud), { onConflict: 'id' }).abortSignal(signal)
-    if (error) throw new Error(error.message)
+    if (error) throw Object.assign(new Error(error.message), { code: error.code })
   }
   // A newer write may have reached PostgreSQL after our first pull. The server
   // rejects stale updates; read its actual result instead of acknowledging the
@@ -237,6 +237,11 @@ async function activeUserId() {
 }
 
 export const ledgerRepository = {
+  async getCatalogueAliases() {
+    const userId = await activeUserId()
+    const aliases = await db.getCatalogueAliases()
+    return { suppliers: aliases.suppliers.filter(row => row.userId === userId), projects: aliases.projects.filter(row => row.userId === userId) }
+  },
   async getSettings() {
     return getSettings()
   },
@@ -522,8 +527,21 @@ export const ledgerRepository = {
         await db.adoptLocalRecords(settings.localUserId, user.id, now(), settings)
       }
       const common = { client, userId: user.id, signal: controller.signal }
-      await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier })
-      await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject })
+      for (let attempt = 0; ; attempt++) {
+        const suppliers = (await fetchCloudRows<CloudSupplier>(client, 'suppliers', user.id, controller.signal)).map(toLocalSupplier)
+        const projects = (await fetchCloudRows<CloudProject>(client, 'projects', user.id, controller.signal)).map(toLocalProject)
+        controller.signal.throwIfAborted()
+        await db.reconcileCatalogue(user.id, suppliers, projects)
+        try {
+          await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier })
+          await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject })
+          break
+        } catch (error) {
+          // Another device may create the same catalogue entry after our pull.
+          // Re-read canonical IDs once, rather than retrying conflicting UUIDs.
+          if (attempt || (error as { code?: string }).code !== '23505') throw error
+        }
+      }
       await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket })
       await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund })
       return { synced: true }

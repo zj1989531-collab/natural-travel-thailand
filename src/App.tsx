@@ -648,7 +648,8 @@ export default function App() {
       const [backupSuppliers, backupProjects, backupTickets, backupRefunds] = await Promise.all([
         ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds()
       ])
-      downloadLedgerBackup(createLedgerBackup({ suppliers: backupSuppliers, projects: backupProjects, tickets: backupTickets, refunds: backupRefunds }))
+      const aliases = await ledgerRepository.getCatalogueAliases()
+      downloadLedgerBackup(createLedgerBackup({ suppliers: [...backupSuppliers, ...aliases.suppliers], projects: [...backupProjects, ...aliases.projects], tickets: backupTickets, refunds: backupRefunds }))
       setToast('全部资料备份已导出，包含供货商、项目价格、出票记录及退票明细。')
     } catch (error) {
       setToast(error instanceof Error ? error.message : '备份未完成，请稍后重试。')
@@ -713,7 +714,7 @@ export default function App() {
 
           {cloudConfigured ? (
             <section className={`sync-banner ${user ? 'connected' : ''}`}>
-              <div><strong>{user ? '云端自动同步已启用' : '登录后自动同步电脑与手机'}</strong><span>{user ? `${user.email ?? '当前账号'} · ${unsyncedCount ? `${unsyncedCount} 条待同步` : syncMessage || '正在连接云端…'}` : '请登录同一邮箱。未登录时不能保存修改，避免资料只留在本机。'}</span></div>
+              <div><strong>{user ? '云端自动同步已启用' : '登录后自动同步电脑与手机'}</strong><span>{user ? `${user.email ?? '当前账号'} · ${unsyncedCount ? `${unsyncedCount} 条待同步 · ` : ''}${syncing ? '正在同步…' : syncMessage || '正在连接云端…'}` : '请登录同一邮箱。未登录时不能保存修改，避免资料只留在本机。'}</span></div>
               {user ? <button type="button" onClick={() => void signOut()}>退出</button> : <button type="button" onClick={() => setLoginOpen(true)}>登录</button>}
             </section>
           ) : (

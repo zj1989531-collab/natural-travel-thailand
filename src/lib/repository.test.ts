@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js'
 import type { Project, RefundInput, RefundRecord, TicketInput, TicketRecord } from '../types'
 import { mergeRemoteRecord } from './sync'
 import { getTicketAmounts } from './ticket-amounts'
+import { reconcileCatalogue } from './catalogue-merge'
 
 const state = vi.hoisted(() => ({
   local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>() },
@@ -24,8 +25,14 @@ vi.mock('./db', () => ({ db: {
   getRefund: async (id: string) => state.local.ticket_refunds.get(id),
   putRefund: async (record: RefundRecord) => { state.local.ticket_refunds.set(record.id, copy(record)) },
   mergeRemoteRefunds: async (records: any[]) => records.forEach((remote) => state.local.ticket_refunds.set(remote.id, mergeRemoteRecord(state.local.ticket_refunds.get(remote.id), remote))),
-  getSuppliers: async () => [...state.local.suppliers.values()].map(copy),
-  getProjects: async () => [...state.local.projects.values()].map(copy),
+  getSuppliers: async () => [...state.local.suppliers.values()].filter(row => !row.mergedIntoId).map(copy),
+  getProjects: async () => [...state.local.projects.values()].filter(row => !row.mergedIntoId).map(copy),
+  reconcileCatalogue: async (userId: string, suppliers: any[], projects: any[]) => {
+    const result = reconcileCatalogue({ suppliers: [...state.local.suppliers.values()], projects: [...state.local.projects.values()], tickets: [...state.local.tickets.values()] }, { suppliers, projects }, userId)
+    for (const row of result.suppliers) state.local.suppliers.set(row.id, copy(row))
+    for (const row of result.projects) state.local.projects.set(row.id, copy(row))
+    for (const row of result.tickets) state.local.tickets.set(row.id, copy(row))
+  },
   putProject: async (project: Project) => { state.local.projects.set(project.id, copy(project)) },
   putTicket: async (ticket: TicketRecord) => { state.local.tickets.set(ticket.id, copy(ticket)) },
   mergeRemoteTickets: async (records: any[]) => records.forEach((remote) => state.local.tickets.set(remote.id, mergeRemoteRecord(state.local.tickets.get(remote.id), remote))),
@@ -53,6 +60,10 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
             }
             state.uploads.push({ table, records: write.map(copy) })
             state.duringUpload?.(table)
+            for (const row of write) if (table === 'suppliers' || table === 'projects') {
+              const duplicate = [...state.cloud[table].values()].some(other => other.id !== row.id && other.user_id === row.user_id && other.normalized_name === row.normalized_name && (table === 'suppliers' || other.supplier_id === row.supplier_id && other.normalized_sub_item_name === row.normalized_sub_item_name))
+              if (duplicate) return { error: { code: '23505', message: 'duplicate key value violates unique constraint' }, data: null }
+            }
             for (const record of write) {
               const current = state.cloud[table].get(record.id)
               if (mode === 'insert' && current) return { error: { message: 'duplicate key' }, data: null }
