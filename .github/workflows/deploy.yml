@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: github-pages
-  cancel-in-progress: true
+  # Pages can continue updating after its Actions runner is cancelled. Let the
+  # active release finish before publishing the newest queued source version.
+  cancel-in-progress: false
 
 jobs:
   build:
