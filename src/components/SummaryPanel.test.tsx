@@ -25,4 +25,10 @@ describe('profit-only homepage summaries', () => {
     expect(html).toContain('฿0.00')
     expect(html).toContain('0 张')
   })
+  it('shows ticket, order and item quantities separately without guessing missing numbers', () => {
+    const rows = [ticket, { ...ticket, id: 'order', projectName: '包车' }, { ...ticket, id: 'item', quantityUnit: 'item' as const, personCount: 4 }, { ...ticket, id: 'missing', personCount: null }]
+    const html = renderToStaticMarkup(<SummaryPanel title="本月月报" subtitle="2026-10" tickets={rows} />)
+    for (const text of ['门票 2 张', '整单 1 单', '商品 4 件', '数量未填 1 笔']) expect(html).toContain(text)
+    expect(html).not.toContain('4 张')
+  })
 })
