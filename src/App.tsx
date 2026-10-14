@@ -5,6 +5,7 @@ import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, g
 import { PersonCountField } from './components/PersonCountField'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
+import { DashboardLogo } from './components/DashboardLogo'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
@@ -716,9 +717,9 @@ export default function App() {
       <div className="page-content">
         {view === 'dashboard' ? <>
           <section className="welcome-row">
-            <div>
+            <div className="welcome-brand">
               <p className="eyebrow">{formatDate(today)}</p>
-              <h1>今天的盈利，一眼掌握。</h1>
+              <DashboardLogo />
             </div>
             <div className="heading-actions"><button className="secondary-button small" type="button" aria-label="主页退票" onClick={() => openRefund()}>↶ 退票</button><button className="round-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button></div>
           </section>
