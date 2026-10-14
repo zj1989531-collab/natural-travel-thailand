@@ -55,4 +55,10 @@ describe('recoverable catalogue identity reconciliation', () => {
     expect(() => reconcileCatalogue(local(), { suppliers: [supplier('cloud-1'), supplier('cloud-2')], projects: [] }, 'u')).toThrow('云端有重复')
     expect(() => reconcileCatalogue({ ...local(), suppliers: [supplier('cloud-s', { userId: 'other' })] }, remote(), 'u')).toThrow('其他账号')
   })
+  it('rejects an alias pointing to another account instead of reassigning its ticket', () => {
+    const data = local()
+    data.suppliers[0] = { ...data.suppliers[0], mergedIntoId: 'foreign' }
+    data.suppliers.push(supplier('foreign', { userId: 'other' }))
+    expect(() => reconcileCatalogue(data, { suppliers: [], projects: [] }, 'u')).toThrow('其他账号')
+  })
 })

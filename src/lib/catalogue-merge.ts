@@ -27,7 +27,7 @@ function mergeGroups<T extends CatalogueRow>(rows: T[], remote: T[], userId: str
     const cloud = group.filter(row => remoteIds.has(row.id))
     // Never collapse two existing cloud identities: their historical references
     // may be immutable. That requires explicit server-side reconciliation.
-    if (cloud.length > 1) throw new Error('云端有重复项目编号，需要核对后合并；本机资料已保留。')
+    if (cloud.length > 1) throw new Error('云端有重复资料编号，需要核对后合并；本机资料已保留。')
     const canonical = cloud[0] ?? [...group].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0]
     const latest = group.reduce((a, b) => isNewer(b.updatedAt, a.updatedAt) ? b : a, canonical)
     result.set(canonical.id, { ...latest, id: canonical.id, createdAt: canonical.createdAt, mergedIntoId: undefined,
@@ -40,6 +40,7 @@ function mergeGroups<T extends CatalogueRow>(rows: T[], remote: T[], userId: str
       if (visited.has(id)) throw new Error('重复资料的关联异常，已停止合并。')
       visited.add(id); id = result.get(id)!.mergedIntoId!
     }
+    if (result.has(id) && result.get(id)!.userId !== userId) throw new Error('重复资料关联到其他账号，已停止合并。')
     return id
   }
   return { rows: [...result.values()], resolve }
