@@ -50,7 +50,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     quantityUnit: ticket.quantityUnit ?? 'person',
     amountBasis: ticket.amountBasis ?? 'total',

@@ -11,6 +11,7 @@ create table if not exists public.suppliers (
 );
 
 create table if not exists public.tickets (
+  quantity_unit text not null default 'person' check(quantity_unit in ('person','item')),
   id uuid primary key,
   entry_mode text not null default 'standard',
   manual_profit_thb numeric(14, 2),
@@ -41,6 +42,8 @@ create index if not exists tickets_user_issue_date_idx on public.tickets (user_i
 create index if not exists tickets_user_supplier_idx on public.tickets (user_id, supplier_id);
 
 create table if not exists public.projects (
+  quantity_unit text not null default 'person' check(quantity_unit in ('person','item')),
+  manual_agent_price boolean not null default false,
   id uuid primary key,
   entry_mode text not null default 'standard',
   user_id uuid not null references auth.users(id) on delete cascade,

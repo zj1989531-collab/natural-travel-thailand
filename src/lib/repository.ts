@@ -7,6 +7,7 @@ import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, Projec
 import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
+import { quantityLabels } from './quantity'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -416,9 +417,9 @@ export const ledgerRepository = {
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
     const amountBasis = input.amountBasis ?? (existing ? existing.amountBasis ?? 'total' : 'per_person')
     if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
-    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error('按人数计算时，人数必须是大于或等于1的整数。')
+    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error(`按${quantityLabels(input).label}计算时，${quantityLabels(input).label}必须是大于或等于1的整数。`)
     if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
-      throw new Error('人数必须是大于或等于1的整数。')
+      throw new Error(`${quantityLabels(input).label}必须是大于或等于1的整数。`)
     }
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
@@ -455,7 +456,7 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
-      quantityUnit: project.quantityUnit ?? 'person',
+      quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? project.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
       amountBasis,
       personCount: input.personCount ?? null,
       entryMode,

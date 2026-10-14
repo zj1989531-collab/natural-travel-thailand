@@ -2,6 +2,7 @@ import type { RefundInput, TicketRecord } from '../types'
 import { isValidCalendarDate, isValidIssueTime, isValidPersonCount } from './format'
 import { getRefundState } from './refunds'
 import { getOriginalTicketAmounts, getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
+import { quantityLabels } from './quantity'
 
 export const validateRefundInput = (ticket: TicketRecord, input: RefundInput) => {
   if (ticket.deletedAt || ticket.entryMode === 'profit_only' || ticket.id !== input.ticketId) throw new Error('请选择有效的原出票记录；仅录利润项目不能退票。')
@@ -9,7 +10,7 @@ export const validateRefundInput = (ticket: TicketRecord, input: RefundInput) =>
   const state = getRefundState(ticket)
   if (state.full) throw new Error('此记录已经全部退票，请勿重复办理。')
   const quantity = input.isFull ? state.remainingPeople : input.personCount
-  if (!input.isFull && (quantity == null || !isValidPersonCount(quantity) || state.remainingPeople == null || quantity > state.remainingPeople)) throw new Error('部分退票数量必须是正整数，且不能超过剩余人数；人数未知的旧票只能整单退票。')
+  if (!input.isFull && (quantity == null || !isValidPersonCount(quantity) || state.remainingPeople == null || quantity > state.remainingPeople)) throw new Error(`部分退票数量必须是正整数，且不能超过剩余${quantityLabels(ticket).label}；${quantityLabels(ticket).label}未知的旧票只能整单退票。`)
   validateAmountPrecision([input.refundRevenueThb, input.returnedCostThb])
   const amounts = getTicketAmounts(ticket)
   if (Math.round(input.refundRevenueThb * 100) > Math.round(amounts.agentPriceThb * 100) || Math.round(input.returnedCostThb * 100) > Math.round(amounts.costThb * 100)) throw new Error('退款或成本返还不能超过当前剩余金额。')

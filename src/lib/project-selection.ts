@@ -34,7 +34,7 @@ export const chooseProject = (form: TicketInput, projects: Project[], name: stri
 
 export const chooseProjectOption = (form: TicketInput, projects: Project[], id: string): TicketInput => {
   const selected = projects.find((project) => project.id === id && project.name === form.projectName)
-  return selected ? applyProject(form, selected) : clearSelection(form, form.projectName)
+  return selected ? applyProject(form, selected) : clearSelection(form, form.projectName, form.quantityUnit ?? 'person')
 }
 
 export const projectOptionLabel = (project: Project, choices: Project[]) => {
