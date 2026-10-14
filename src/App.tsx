@@ -7,6 +7,7 @@ import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
+import { BottomNavigation } from './components/BottomNavigation'
 import { isItemQuantity, quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
@@ -708,7 +709,6 @@ export default function App() {
               <p className="eyebrow">{formatDate(today)}</p>
               <DashboardLogo />
             </div>
-            <div className="heading-actions"><button className="secondary-button small" type="button" aria-label="主页退票" onClick={() => openRefund()}>↶ 退票</button><button className="round-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button></div>
           </section>
 
           {cloudConfigured ? (
@@ -779,12 +779,7 @@ export default function App() {
         </>}
       </div>
 
-      <nav className="bottom-nav" aria-label="主导航">
-        <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')} type="button"><span>▦</span>概览</button>
-        <button className="nav-add" onClick={openNewForm} type="button" aria-label="新增出票记录">＋</button>
-        <button className={view === 'records' ? 'active' : ''} onClick={() => setView('records')} type="button"><span>▤</span>记录</button>
-        <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')} type="button"><span>▥</span>报表</button>
-      </nav>
+      <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
       {refundOpen && <RefundSheet tickets={tickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
