@@ -178,7 +178,7 @@ export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onM
             </label>
           </div>}
           {form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
-          <div className={`profit-preview ${profit >= 0 ? 'positive' : 'negative'}`}>
+          <div className={`profit-preview ${profit >= 0 || !amountsComplete ? 'positive' : 'negative'}`}>
             <span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span>
             <strong>{amountsComplete ? formatThb(profit) : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong>
           </div>

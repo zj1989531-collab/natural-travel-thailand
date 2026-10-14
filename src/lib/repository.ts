@@ -394,18 +394,19 @@ export const ledgerRepository = {
   },
 
   async updateProjectPrices(id: string, input: ProjectPricesInput): Promise<Project> {
-    if (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0)) {
-      throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
-    }
     const userId = await activeUserId()
     const current = (await db.getProjects()).find((project) => project.id === id && project.userId === userId)
     if (!current) throw new Error('当前账号无法修改这个项目价格。')
     if (current.entryMode === 'profit_only') throw new Error('仅录利润项目没有默认售价和成本，请在记录中填写利润。')
+    const manualAgentPrice = input.manualAgentPrice ?? current.manualAgentPrice ?? false
+    if (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0)) {
+      throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
+    }
     const updated: Project = {
       ...current,
       defaultCostThb: input.defaultCostThb,
-      defaultAgentPriceThb: input.manualAgentPrice ? 0 : input.defaultAgentPriceThb,
-      manualAgentPrice: input.manualAgentPrice ?? current.manualAgentPrice ?? false,
+      defaultAgentPriceThb: manualAgentPrice ? 0 : input.defaultAgentPriceThb,
+      manualAgentPrice,
       updatedAt: nextModifiedAt(current.updatedAt),
       syncStatus: statusForWrite()
     }
