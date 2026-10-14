@@ -120,8 +120,8 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .metric-card strong { display: block; overflow: hidden; color: #264139; font-size: clamp(12px, 3.5vw, 15px); letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; }
 .metric-card.profit { background: #e9f7ef; }
 .metric-card.profit strong { color: #147c52; }
-.metric-card.cost { background: #fff4ee; }
-.metric-card.cost strong { color: #b3623b; }
+.metric-card.loss { background: #fff1ef; }
+.metric-card.loss strong { color: #c24b42; }
 
 .ranking-section { padding-bottom: 9px; }
 .rank-list { margin: 0 -2px; }

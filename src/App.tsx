@@ -6,6 +6,7 @@ import { PersonCountField } from './components/PersonCountField'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
+import { SummaryPanel } from './components/SummaryPanel'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
@@ -46,36 +47,6 @@ const emptyForm = (): TicketInput => ({
   costThb: Number.NaN,
   note: ''
 })
-
-function MetricCard({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'profit' | 'cost' }) {
-  return (
-    <div className={`metric-card ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  )
-}
-
-function SummaryPanel({ title, subtitle, tickets, note }: { title: string; subtitle: string; tickets: TicketRecord[]; note?: string }) {
-  const summary = summarise(tickets)
-  return (
-    <section className="summary-panel">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">{subtitle}</p>
-          <h2>{title}</h2>
-        </div>
-        <span className="ticket-count">{summary.count} 张</span>
-      </div>
-      <div className="metrics-grid">
-        <MetricCard label="代理售价" value={formatThb(summary.agentPriceThb)} />
-        <MetricCard label="供货商成本" value={formatThb(summary.costThb)} tone="cost" />
-        <MetricCard label="盈利" value={formatThb(summary.profitThb)} tone="profit" />
-      </div>
-      {note && <p className="stats-note">{note}</p>}
-    </section>
-  )
-}
 
 function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
@@ -748,7 +719,7 @@ export default function App() {
                 {monthlySupplierStats.map((supplier, index) => (
                   <div className="rank-row" key={supplier.supplierId}>
                     <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
-                    <div className="rank-name"><strong>{supplier.supplierName}</strong><span>{supplier.count} 张 · 代理售价 {formatThb(supplier.agentPriceThb)}</span></div>
+                    <div className="rank-name"><strong>{supplier.supplierName}</strong><span>{supplier.count} 张</span></div>
                     <strong className={supplier.profitThb >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(supplier.profitThb)}</strong>
                   </div>
                 ))}
