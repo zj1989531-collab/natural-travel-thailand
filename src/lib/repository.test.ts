@@ -203,6 +203,38 @@ beforeEach(() => {
 })
 
 describe('cloud synchronization races', () => {
+  const remoteSupplier = { id: 'cloud-s', user_id: user.id, name: '供货商', normalized_name: '供货商', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }
+  const localSupplier = { id: 'local-s', userId: user.id, name: '供货商', normalizedName: '供货商', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', syncStatus: 'pending' }
+  it('recovers an existing duplicate supplier, downloads projects and tickets, and never uploads its old ID', async () => {
+    state.local.suppliers.set(localSupplier.id, localSupplier)
+    state.cloud.suppliers.set(remoteSupplier.id, remoteSupplier)
+    state.cloud.projects.set('cloud-p', { id: 'cloud-p', user_id: user.id, supplier_id: 'cloud-s', supplier_name: '供货商', name: '项目', normalized_name: '项目', sub_item_name: '', normalized_sub_item_name: '', default_cost_thb: 600, default_agent_price_thb: 650, created_at: remoteSupplier.created_at, updated_at: remoteSupplier.updated_at })
+    state.cloud.tickets.set('ticket-1', cloudTicket(remoteSupplier.updated_at))
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.local.suppliers.get('local-s')).toMatchObject({ mergedIntoId: 'cloud-s' })
+    expect(await ledgerRepository.getSuppliers()).toHaveLength(1)
+    expect(await ledgerRepository.getProjects()).toHaveLength(1)
+    expect(await ledgerRepository.getTickets()).toHaveLength(1)
+    expect(state.uploads).toEqual([])
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+  })
+  it('reconciles a same-name supplier created by another device between pull and upload', async () => {
+    state.local.suppliers.set(localSupplier.id, localSupplier)
+    state.duringUpload = table => { if (table === 'suppliers') { state.cloud.suppliers.set(remoteSupplier.id, remoteSupplier); state.duringUpload = null } }
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.local.suppliers.get('local-s')).toMatchObject({ mergedIntoId: 'cloud-s' })
+    expect(state.cloud.suppliers.size).toBe(1)
+    expect(state.uploads).toHaveLength(1)
+  })
+  it('does not silently discard unique local suppliers while resolving duplicates', async () => {
+    state.local.suppliers.set(localSupplier.id, localSupplier)
+    state.local.suppliers.set('unique-s', { ...localSupplier, id: 'unique-s', name: '另一供货商', normalizedName: '另一供货商' })
+    state.cloud.suppliers.set(remoteSupplier.id, remoteSupplier)
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.suppliers.size).toBe(2)
+    expect(state.cloud.suppliers.get('unique-s').normalized_name).toBe('另一供货商')
+    expect(await ledgerRepository.getSuppliers()).toHaveLength(2)
+  })
   it('does not write unchanged records when realtime requests another pass', async () => {
     state.local.tickets.set('ticket-1', localTicket('2026-10-13T01:00:00.000Z'))
     state.cloud.tickets.set('ticket-1', cloudTicket('2026-10-13T01:00:00+00:00'))
