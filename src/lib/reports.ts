@@ -2,6 +2,7 @@ import type { TicketRecord } from '../types'
 import { activeTickets, bySupplier, isMonthlySettlementProject, monthDateRange, summarise } from './stats'
 import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity } from './quantity'
+import { cleanProjectLabel, ticketDisplay } from './project-labels'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -33,7 +34,8 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
   const selected = active.filter((ticket) =>
     isCalendarDate(ticket.issueDate) && ticket.issueDate >= range.start && ticket.issueDate <= range.end &&
     (!query.supplierId || ticket.supplierId === query.supplierId) &&
-    (!query.projectName || (ticket.projectName || '未分类项目') === query.projectName))
+    (!query.projectName || cleanProjectLabel(ticket.projectName || '未分类项目') === cleanProjectLabel(query.projectName)))
+    .map(ticketDisplay)
     .sort((a, b) => a.issueDate.localeCompare(b.issueDate) || (a.issueTime ?? '').localeCompare(b.issueTime ?? '') || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
   const monthlyRecords = selected.filter((ticket) => ticket.entryMode === 'profit_only' || isMonthlySettlementProject(ticket.projectName))
   const monthlyIds = new Set(monthlyRecords.map((ticket) => ticket.id))
@@ -73,7 +75,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     title: query.mode === 'day' ? '出票盈利日报' : query.mode === 'month' ? '出票盈利月报' : query.mode === 'all' ? '出票盈利累计报表' : '出票盈利区间报表',
     ...range,
     supplierId: query.supplierId,
-    projectName: query.projectName ?? '',
+    projectName: cleanProjectLabel(query.projectName ?? ''),
     itemQuantity: { recordCount: itemRecords.length, quantityCount: itemQuantityDays.reduce((sum, day) => sum + day.quantityCount, 0), unknownCount: itemQuantityDays.reduce((sum, day) => sum + day.unknownCount, 0), days: itemQuantityDays },
     quantity: {
       recordCount: quantityRecords.length,

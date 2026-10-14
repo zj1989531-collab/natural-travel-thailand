@@ -4,6 +4,7 @@ import { getProfit } from './stats'
 import { getOriginalTicketAmounts, getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
 import { isItemQuantity, quantityLabels } from './quantity'
+import { cleanProjectLabel } from './project-labels'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
   Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
@@ -54,7 +55,8 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '计价方式': ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计算` : '整单总额',
       '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
       '供应商': ticket.supplierName,
-      '项目': ticket.projectName || '未分类项目',
+      '项目': cleanProjectLabel(ticket.projectName) || '未分类项目',
+      '子项 / 套餐': cleanProjectLabel(ticket.subItemName),
       '单人代理售价 (THB)': ticket.amountBasis === 'per_person' && ticket.entryMode !== 'profit_only' && !isItemQuantity(ticket) ? ticket.agentPriceThb : '',
       '单人供货商成本 (THB)': ticket.amountBasis === 'per_person' && ticket.entryMode !== 'profit_only' && !isItemQuantity(ticket) ? ticket.costThb : '',
       '单件代理售价 (THB)': ticket.amountBasis === 'per_person' && ticket.entryMode !== 'profit_only' && isItemQuantity(ticket) ? ticket.agentPriceThb : '',

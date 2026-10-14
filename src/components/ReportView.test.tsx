@@ -20,7 +20,7 @@ describe('online formatted report preview', () => {
   })
   it('renders a named report, period, supplier summary, details, totals and sync warning', () => {
     const html = render([record])
-    for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 成人票', '测试备注', '09:35 曼谷', '已录人数', '已录 3 张', '待同步', '฿150.00']) expect(html).toContain(text)
+    for (const text of ['出票盈利月报', '2026-10-01 — 2026-10-31', '供货商汇总', '报表记录明细', '测试项目 · 票', '测试备注', '09:35 曼谷', '已录人数', '已录 3 张', '待同步', '฿150.00']) expect(html).toContain(text)
     expect(html).toContain('<thead>')
     expect(html).toContain('<tfoot>')
     expect(html).toContain('scope="col"')

@@ -8,6 +8,7 @@ import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
 import { isItemQuantity, quantityLabels } from './lib/quantity'
+import { ticketDisplay } from './lib/project-labels'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
@@ -418,7 +419,7 @@ export default function App() {
   const refresh = useCallback(async () => {
     const [nextTickets, nextSuppliers, nextProjects] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects()])
     if (!mountedRef.current) return
-    setTickets(nextTickets)
+    setTickets(nextTickets.map(ticketDisplay))
     setSuppliers(nextSuppliers)
     setProjects(nextProjects)
   }, [])

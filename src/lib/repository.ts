@@ -8,6 +8,7 @@ import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
 import { quantityLabels } from './quantity'
+import { cleanProjectLabel, projectDisplay } from './project-labels'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -120,10 +121,10 @@ const toCloudProject = (project: Project) => ({
   user_id: project.userId,
   supplier_id: project.supplierId,
   supplier_name: project.supplierName,
-  name: project.name,
-  normalized_name: project.normalizedName,
-  sub_item_name: project.subItemName,
-  normalized_sub_item_name: project.normalizedSubItemName,
+  name: cleanProjectLabel(project.name),
+  normalized_name: normalizeSupplier(cleanProjectLabel(project.name)),
+  sub_item_name: cleanProjectLabel(project.subItemName),
+  normalized_sub_item_name: normalizeSupplier(cleanProjectLabel(project.subItemName)),
   default_cost_thb: project.defaultCostThb,
   default_agent_price_thb: project.defaultAgentPriceThb,
   created_at: project.createdAt,
@@ -325,7 +326,7 @@ export const ledgerRepository = {
   async getProjects() {
     const projects = await db.getProjects()
     const userId = await activeUserId()
-    return projects.filter((project) => project.userId === userId).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
+    return projects.filter((project) => project.userId === userId).map(projectDisplay).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
   },
 
   async createSupplier(name: string): Promise<Supplier> {
@@ -352,8 +353,8 @@ export const ledgerRepository = {
   },
 
   async createProject(input: ProjectInput): Promise<Project> {
-    const name = input.name.trim()
-    const subItemName = input.subItemName.trim()
+    const name = cleanProjectLabel(input.name.trim())
+    const subItemName = cleanProjectLabel(input.subItemName.trim())
     if (!name) throw new Error('请输入项目名称。')
     if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
     if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
@@ -367,7 +368,7 @@ export const ledgerRepository = {
     const normalizedName = normalizeSupplier(name)
     const normalizedSubItemName = normalizeSupplier(subItemName)
     const projects = await db.getProjects()
-    if (projects.some((project) => project.supplierId === supplier.id && project.normalizedName === normalizedName && project.normalizedSubItemName === normalizedSubItemName && project.userId === userId)) {
+    if (projects.some((project) => project.supplierId === supplier.id && normalizeSupplier(cleanProjectLabel(project.name)) === normalizedName && normalizeSupplier(cleanProjectLabel(project.subItemName)) === normalizedSubItemName && project.userId === userId)) {
       throw new Error('该供货商的这个项目子项已存在。')
     }
     const timestamp = now()
@@ -403,7 +404,7 @@ export const ledgerRepository = {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
     const updated: Project = {
-      ...current,
+      ...projectDisplay(current),
       defaultCostThb: input.defaultCostThb,
       defaultAgentPriceThb: manualAgentPrice ? 0 : input.defaultAgentPriceThb,
       manualAgentPrice,
@@ -448,7 +449,7 @@ export const ledgerRepository = {
     }
     const projects = await db.getProjects()
     const project = projects.find((item) => item.id === input.projectId && item.supplierId === nextSupplier.id && item.userId === userId)
-    if (!project || project.name !== input.projectName || project.subItemName !== input.subItemName) throw new Error('请选择该供货商已录入的项目子项。')
+    if (!project || cleanProjectLabel(project.name) !== cleanProjectLabel(input.projectName) || cleanProjectLabel(project.subItemName) !== cleanProjectLabel(input.subItemName)) throw new Error('请选择该供货商已录入的项目子项。')
     const entryMode = project.entryMode ?? 'standard'
     if (entryMode === 'profit_only') {
       if (typeof input.manualProfitThb !== 'number' || !Number.isFinite(input.manualProfitThb) || input.manualProfitThb < 0) throw new Error('请填写大于或等于0的利润金额。')
@@ -469,8 +470,8 @@ export const ledgerRepository = {
       supplierId: nextSupplier.id,
       supplierName: nextSupplier.name,
       projectId: input.projectId,
-      projectName: input.projectName,
-      subItemName: input.subItemName,
+      projectName: cleanProjectLabel(input.projectName),
+      subItemName: cleanProjectLabel(input.subItemName),
       agentPriceThb: entryMode === 'profit_only' ? 0 : input.agentPriceThb,
       costThb: entryMode === 'profit_only' ? 0 : input.costThb,
       note: input.note.trim(),

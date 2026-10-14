@@ -62,7 +62,7 @@ describe('project-first ticket selection', () => {
   })
 
   it('automatically chooses a sole named package too', () => {
-    expect(chooseProject(form, [project('1', '项目甲', '成人')], '项目甲').subItemName).toBe('成人')
+    expect(chooseProject(form, [project('1', '项目甲', '成人')], '项目甲').subItemName).toBe('')
   })
 
   it('uses a unique default when the user does not choose an optional subitem', () => {
