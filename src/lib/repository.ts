@@ -3,7 +3,7 @@ import { db } from './db'
 import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AmountBasis, AppSettings, EntryMode, Project, RefundInput, RefundRecord, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
 import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
@@ -20,6 +20,7 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  quantity_unit?: QuantityUnit
   amount_basis?: AmountBasis
   person_count?: number | null
   entry_mode?: EntryMode
@@ -42,6 +43,8 @@ type CloudTicket = {
 }
 
 type CloudProject = {
+  manual_agent_price?: boolean
+  quantity_unit?: QuantityUnit
   entry_mode?: EntryMode
   id: string
   user_id: string
@@ -90,6 +93,8 @@ const toCloudSupplier = (supplier: Supplier) => ({
 })
 
 const toLocalProject = (project: CloudProject): Project => ({
+  manualAgentPrice: project.manual_agent_price ?? false,
+  quantityUnit: project.quantity_unit ?? 'person',
   entryMode: project.entry_mode ?? 'standard',
   id: project.id,
   userId: project.user_id,
@@ -107,6 +112,8 @@ const toLocalProject = (project: CloudProject): Project => ({
 })
 
 const toCloudProject = (project: Project) => ({
+  manual_agent_price: project.manualAgentPrice ?? false,
+  quantity_unit: project.quantityUnit ?? 'person',
   entry_mode: project.entryMode ?? 'standard',
   id: project.id,
   user_id: project.userId,
@@ -123,6 +130,7 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  quantityUnit: ticket.quantity_unit ?? 'person',
   amountBasis: ticket.amount_basis ?? 'total',
   personCount: ticket.person_count ?? null,
   entryMode: ticket.entry_mode ?? 'standard',
@@ -146,6 +154,7 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  quantity_unit: ticket.quantityUnit ?? 'person',
   amount_basis: ticket.amountBasis ?? 'total',
   person_count: ticket.personCount ?? null,
   entry_mode: ticket.entryMode ?? 'standard',
@@ -341,11 +350,12 @@ export const ledgerRepository = {
     return supplier
   },
 
-  async createProject(input: { supplierId: string; name: string; subItemName: string; defaultCostThb: number; defaultAgentPriceThb: number; entryMode?: EntryMode }): Promise<Project> {
+  async createProject(input: ProjectInput): Promise<Project> {
     const name = input.name.trim()
     const subItemName = input.subItemName.trim()
     if (!name) throw new Error('请输入项目名称。')
-    if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || !Number.isFinite(input.defaultAgentPriceThb) || input.defaultCostThb < 0 || input.defaultAgentPriceThb < 0)) {
+    if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
+    if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
     const settings = await getSettings()
@@ -361,6 +371,8 @@ export const ledgerRepository = {
     }
     const timestamp = now()
     const project: Project = {
+      quantityUnit: input.quantityUnit ?? 'person',
+      manualAgentPrice: input.entryMode !== 'profit_only' && Boolean(input.manualAgentPrice),
       entryMode: input.entryMode ?? 'standard',
       id: createId(),
       userId,
@@ -371,7 +383,7 @@ export const ledgerRepository = {
       subItemName,
       normalizedSubItemName,
       defaultCostThb: input.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
-      defaultAgentPriceThb: input.entryMode === 'profit_only' ? 0 : input.defaultAgentPriceThb,
+      defaultAgentPriceThb: input.entryMode === 'profit_only' || input.manualAgentPrice ? 0 : input.defaultAgentPriceThb,
       createdAt: timestamp,
       updatedAt: timestamp,
       syncStatus: statusForWrite()
@@ -380,8 +392,8 @@ export const ledgerRepository = {
     return project
   },
 
-  async updateProjectPrices(id: string, input: { defaultCostThb: number; defaultAgentPriceThb: number }): Promise<Project> {
-    if (!Number.isFinite(input.defaultCostThb) || !Number.isFinite(input.defaultAgentPriceThb) || input.defaultCostThb < 0 || input.defaultAgentPriceThb < 0) {
+  async updateProjectPrices(id: string, input: ProjectPricesInput): Promise<Project> {
+    if (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0)) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
     const userId = await activeUserId()
@@ -391,7 +403,8 @@ export const ledgerRepository = {
     const updated: Project = {
       ...current,
       defaultCostThb: input.defaultCostThb,
-      defaultAgentPriceThb: input.defaultAgentPriceThb,
+      defaultAgentPriceThb: input.manualAgentPrice ? 0 : input.defaultAgentPriceThb,
+      manualAgentPrice: input.manualAgentPrice ?? current.manualAgentPrice ?? false,
       updatedAt: nextModifiedAt(current.updatedAt),
       syncStatus: statusForWrite()
     }
@@ -442,6 +455,7 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
+      quantityUnit: project.quantityUnit ?? 'person',
       amountBasis,
       personCount: input.personCount ?? null,
       entryMode,

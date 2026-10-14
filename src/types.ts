@@ -1,6 +1,7 @@
 export type SyncStatus = 'synced' | 'pending' | 'error'
 export type EntryMode = 'standard' | 'profit_only'
 export type AmountBasis = 'total' | 'per_person'
+export type QuantityUnit = 'person' | 'item'
 
 export interface Supplier {
   id: string
@@ -13,6 +14,8 @@ export interface Supplier {
 }
 
 export interface Project {
+  manualAgentPrice?: boolean
+  quantityUnit?: QuantityUnit
   entryMode?: EntryMode
   id: string
   userId: string
@@ -30,6 +33,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  quantityUnit?: QuantityUnit
   refunds?: RefundRecord[]
   amountBasis?: AmountBasis
   personCount?: number | null
@@ -54,6 +58,7 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  quantityUnit?: QuantityUnit
   amountBasis?: AmountBasis
   personCount?: number | null
   entryMode?: EntryMode
@@ -113,4 +118,21 @@ export interface SupplierSummary extends Summary {
 export interface AppSettings {
   localUserId: string
   lastCloudUserId: string | null
+}
+
+export interface ProjectInput {
+  supplierId: string
+  name: string
+  subItemName: string
+  defaultCostThb: number
+  defaultAgentPriceThb: number
+  entryMode?: EntryMode
+  manualAgentPrice?: boolean
+  quantityUnit?: QuantityUnit
+}
+
+export interface ProjectPricesInput {
+  defaultCostThb: number
+  defaultAgentPriceThb: number
+  manualAgentPrice?: boolean
 }

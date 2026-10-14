@@ -11,16 +11,18 @@ export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) =>
     a.localeCompare(b, 'zh-CN'))
 }
 
-const clearSelection = (form: TicketInput, projectName: string): TicketInput => ({
+const clearSelection = (form: TicketInput, projectName: string, quantityUnit: Project['quantityUnit'] = 'person'): TicketInput => ({
+  quantityUnit,
   ...form, projectName, projectId: '', supplierName: '', subItemName: '',
   agentPriceThb: Number.NaN, costThb: Number.NaN,
   entryMode: 'standard', manualProfitThb: null
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({
+  quantityUnit: project.quantityUnit ?? 'person',
   ...form, projectId: project.id, projectName: project.name, supplierName: project.supplierName,
   subItemName: project.subItemName, entryMode: project.entryMode ?? 'standard', manualProfitThb: null,
-  agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.defaultAgentPriceThb,
+  agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.manualAgentPrice ? Number.NaN : project.defaultAgentPriceThb,
   costThb: project.entryMode === 'profit_only' ? 0 : project.defaultCostThb
 })
 
@@ -29,7 +31,7 @@ export const chooseProject = (form: TicketInput, projects: Project[], name: stri
   const defaults = choices.filter((project) => !project.subItemName)
   // Never silently choose a supplier when several price options are possible.
   const selected = choices.length === 1 ? choices[0] : defaults.length === 1 ? defaults[0] : undefined
-  return selected ? applyProject(form, selected) : clearSelection(form, name)
+  return selected ? applyProject(form, selected) : clearSelection(form, name, choices.length && choices.every((project) => project.quantityUnit === 'item') ? 'item' : 'person')
 }
 
 export const chooseProjectOption = (form: TicketInput, projects: Project[], id: string): TicketInput => {
