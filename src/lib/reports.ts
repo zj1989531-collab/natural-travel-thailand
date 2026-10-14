@@ -3,6 +3,7 @@ import { activeTickets, bySupplier, isMonthlySettlementProject, monthDateRange, 
 import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity } from './quantity'
 import { cleanProjectLabel, ticketDisplay } from './project-labels'
+import { summariseQuantities } from './effective-quantities'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -76,6 +77,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     ...range,
     supplierId: query.supplierId,
     projectName: cleanProjectLabel(query.projectName ?? ''),
+    effectiveQuantity: summariseQuantities(selected),
     itemQuantity: { recordCount: itemRecords.length, quantityCount: itemQuantityDays.reduce((sum, day) => sum + day.quantityCount, 0), unknownCount: itemQuantityDays.reduce((sum, day) => sum + day.unknownCount, 0), days: itemQuantityDays },
     quantity: {
       recordCount: quantityRecords.length,

@@ -8,14 +8,17 @@ import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
 import { BottomNavigation } from './components/BottomNavigation'
-import { isItemQuantity, quantityLabels } from './lib/quantity'
+import { ProjectPicker } from './components/ProjectPicker'
+import { filterProjects, recentProjectOptions } from './lib/project-search'
+import { quantityParts, summariseQuantities } from './lib/effective-quantities'
+import { quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
 import { getTicketAmounts } from './lib/ticket-amounts'
 import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
-import { chooseProject, chooseProjectOption, projectNames, projectOptionLabel } from './lib/project-selection'
+import { chooseProject, chooseProjectOption } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, isMonthlySettlementProject, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, Supplier, TicketInput, TicketRecord } from './types'
 
@@ -29,6 +32,7 @@ interface InstallPromptEvent extends Event {
 interface TicketFormProps {
   ticket?: TicketRecord
   projects: Project[]
+  recentProjects?: Project[]
   cloudLoginRequired: boolean
   onCancel: () => void
   onManageSuppliers: () => void
@@ -52,7 +56,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, recentProjects = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     quantityUnit: ticket.quantityUnit ?? 'person',
     amountBasis: ticket.amountBasis ?? 'total',
@@ -104,8 +108,6 @@ export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onM
     }
   }
 
-  const names = projectNames(projects)
-  const availableSubItems = projects.filter((project) => project.name === form.projectName)
   const perPerson = form.amountBasis === 'per_person'
   const { label: countLabel, single } = quantityLabels(form)
   const manualAgentPrice = projects.find((project) => project.id === form.projectId)?.manualAgentPrice
@@ -144,26 +146,9 @@ export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onM
             </select>
           </label>
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
-          <label>
-            项目
-            <select value={form.projectName} onChange={(event) => {
-              const name = event.target.value
-              setForm((current) => chooseProject(current, projects, name))
-            }} required>
-              <option value="">请选择项目</option>
-              {names.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </label>
-          <label>
-            子项 / 套餐 <span className="muted">（可选）</span>
-            <select value={form.projectId} disabled={!form.projectName} onChange={(event) => {
-              const id = event.target.value
-              setForm((current) => chooseProjectOption(current, projects, id))
-            }} required>
-              <option value="">{form.projectName ? '请选择子项/套餐' : '请先选择项目'}</option>
-              {availableSubItems.map((project) => <option key={project.id} value={project.id}>{projectOptionLabel(project, availableSubItems)}</option>)}
-            </select>
-          </label>
+          <ProjectPicker projects={projects} recent={ticket ? [] : recentProjects} form={form}
+            onName={name => setForm(current => chooseProject(current, projects, name))}
+            onOption={(id, name) => setForm(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
           {manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
           {(form.entryMode === 'profit_only' || isMonthlySettlementProject(form.projectName)) && <p className="sheet-copy">月结返佣项目：仅计入月报，不计入每日票数、售价、成本和利润。</p>}
@@ -199,7 +184,7 @@ export function TicketForm({ ticket, projects, cloudLoginRequired, onCancel, onM
   )
 }
 
-function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpdateProject, onBackup, onClose }: {
+export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpdateProject, onBackup, onClose }: {
   suppliers: Supplier[]
   projects: Project[]
   onAddSupplier: (name: string) => Promise<void>
@@ -221,6 +206,9 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
   const projectFormRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<'supplier' | 'project' | null>(null)
+  const [priceQuery, setPriceQuery] = useState('')
+  const [priceSupplierId, setPriceSupplierId] = useState('')
+  const filteredProjects = filterProjects(projects, priceQuery, priceSupplierId)
 
   useEffect(() => {
     if (editingProject) projectFormRef.current?.scrollIntoView({ block: 'nearest' })
@@ -329,8 +317,9 @@ function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject, onUpd
         {error && <p className="form-error" role="alert">{error}</p>}
 
         <section className="supplier-list" aria-label="已录入的价格表">
-          <div className="supplier-list-heading"><span>已录入子项</span><strong>{projects.length}</strong></div>
-          {projects.length === 0 ? <p className="supplier-empty">还没有项目子项，请先添加一个。</p> : projects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div>{project.entryMode === 'profit_only' ? <strong>仅录利润 · 月结</strong> : <><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {project.manualAgentPrice ? '手动填写' : formatThb(project.defaultAgentPriceThb)}</strong><button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑价格</button></>}</div></div>)}
+          <div className="supplier-list-heading"><span>已录入子项</span><strong>{priceQuery || priceSupplierId ? `${filteredProjects.length} / ${projects.length}` : projects.length}</strong></div>
+          <div className="price-filters" role="region" aria-label="价格表筛选"><label>搜索价格表<input type="search" placeholder="项目、套餐或供货商" value={priceQuery} onChange={event => setPriceQuery(event.target.value)} /></label><label>筛选供货商<select value={priceSupplierId} onChange={event => setPriceSupplierId(event.target.value)}><option value="">全部供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>{(priceQuery || priceSupplierId) && <button className="text-action" type="button" onClick={() => { setPriceQuery(''); setPriceSupplierId('') }}>清除筛选</button>}</div>
+          {filteredProjects.length === 0 ? <p className="supplier-empty">{projects.length ? '没有匹配的项目子项，请调整或清除筛选。' : '还没有项目子项，请先添加一个。'}</p> : filteredProjects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span></div><div>{project.entryMode === 'profit_only' ? <strong>仅录利润 · 月结</strong> : <><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {project.manualAgentPrice ? '手动填写' : formatThb(project.defaultAgentPriceThb)}</strong><button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑价格</button></>}</div></div>)}
         </section>
       </section>
     </div>
@@ -737,7 +726,7 @@ export default function App() {
                 {monthlySupplierStats.map((supplier, index) => (
                   <div className="rank-row" key={supplier.supplierId}>
                     <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
-                    <div className="rank-name"><strong>{supplier.supplierName}</strong><span>{supplier.count} {ticketsInMonth(tickets, month).some((ticket) => !ticket.deletedAt && ticket.supplierId === supplier.supplierId && isItemQuantity(ticket)) ? '条' : '张'}</span></div>
+                    <div className="rank-name"><strong>{supplier.supplierName}</strong><span>{quantityParts(summariseQuantities(ticketsInMonth(tickets, month).filter(ticket => ticket.supplierId === supplier.supplierId))).join(' · ')}</span></div>
                     <strong className={supplier.profitThb >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(supplier.profitThb)}</strong>
                   </div>
                 ))}
@@ -782,7 +771,7 @@ export default function App() {
 
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
       {refundOpen && <RefundSheet tickets={tickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}

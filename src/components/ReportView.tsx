@@ -6,6 +6,7 @@ import { activeTickets, getProfit, monthDateRange } from '../lib/stats'
 import { projectNames } from '../lib/project-selection'
 import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
+import { quantityParts } from '../lib/effective-quantities'
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
@@ -45,7 +46,8 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     {!itemsOnly && <section className="report-quantity" aria-label="项目出票数量查询">
       <h3>项目出票数量查询</h3>
       <div className="report-quantity-metrics"><div><span>出票记录数</span><strong>{formatNumber(report.quantity.recordCount)} 笔</strong></div><div><span>已录人数</span><strong>{formatNumber(report.quantity.peopleCount)} 人</strong></div></div>
-      <p className="report-note">门票类项目按每人1张：已录 {formatNumber(report.quantity.peopleCount)} 张（已扣除退票）；包船、包车等项目仅表示有效人数。数量查询包含月结出票项目，不受每日利润排除规则影响；仅录返佣利润的记录不计出票数量。</p>
+      <p className="report-counts">有效数量：{quantityParts(report.effectiveQuantity).join(' · ')}</p>
+      <p className="report-note">门票按有效人数计张数，包船、包车及整船／整车／包台／包厢套餐按有效记录计单数，商品按件数，均已扣除退票。上方人数包含整单项目的参与人数，不等于门票张数。数量查询包含月结出票项目，不受每日利润排除规则影响；仅录返佣利润的记录不计出票数量。</p>
       {report.quantity.unknownCount > 0 && <p className="report-notice">另有 {report.quantity.unknownCount} 笔出票记录未填写人数，以上数量仅为已录部分，不能作为完整门票总数。</p>}
       {report.quantity.days.length > 0 && <div className="report-table-scroll" role="region" aria-label="每日出票数量" tabIndex={0}><table className="report-table report-quantity-table"><caption>每日出票数量</caption><thead><tr><th scope="col">日期</th><th scope="col">出票记录</th><th scope="col">已录人数</th><th scope="col">人数未填</th></tr></thead><tbody>{report.quantity.days.map((day) => <tr key={day.date}><th scope="row">{day.date}</th><td className="report-number">{day.recordCount}</td><td className="report-number">{formatNumber(day.peopleCount)}</td><td className="report-number">{day.unknownCount}</td></tr>)}</tbody><tfoot><tr><th scope="row">合计</th><td className="report-number">{report.quantity.recordCount}</td><td className="report-number">{formatNumber(report.quantity.peopleCount)}</td><td className="report-number">{report.quantity.unknownCount}</td></tr></tfoot></table></div>}
     </section>}

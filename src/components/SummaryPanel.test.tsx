@@ -8,7 +8,7 @@ const ticket: TicketRecord = { id: 'test-ticket', userId: 'test-user', issueDate
 describe('profit-only homepage summaries', () => {
   it.each(['今日概览', '本月月报', '年度年报'])('shows only profit as money in %s, retaining ticket count and period notes', (title) => {
     const html = renderToStaticMarkup(<SummaryPanel title={title} subtitle="2026-10" tickets={[ticket]} note="按出票日期统计" />)
-    for (const text of [title, '利润', '฿200.00', '1 张', '2026-10', '按出票日期统计']) expect(html).toContain(text)
+    for (const text of [title, '利润', '฿200.00', '门票 2 张', '2026-10', '按出票日期统计']) expect(html).toContain(text)
     for (const text of ['代理售价', '供货商成本', '฿3,100.00', '฿2,900.00']) expect(html).not.toContain(text)
     expect(html.match(/class="metric-card/g)).toHaveLength(1)
     expect(ticket.agentPriceThb).toBe(1550)
