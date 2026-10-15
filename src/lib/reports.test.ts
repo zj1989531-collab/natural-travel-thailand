@@ -20,6 +20,36 @@ const records = [
 ]
 
 describe('formatted ledger reports', () => {
+  it.each(['day', 'month', 'range', 'all'] as const)('filters %s report totals and monthly detail by customer name without matching notes or 79 show', (mode) => {
+    const rows = [
+      ticket('regular', { guestName: 'Jimmy', settlementMode: 'daily' }),
+      ticket('monthly', { guestName: 'JIMMY Tan', settlementMode: 'monthly', personCount: 1 }),
+      ticket('other', { guestName: 'Aditya' }),
+      ticket('note-only', { note: 'Jimmy' }),
+      ticket('deleted', { guestName: 'Jimmy', deletedAt: '2026-10-13T04:00:00Z' }),
+      ticket('independent', { guestName: 'Jimmy', projectName: '79秀' })
+    ]
+    const report = buildReport(rows, query({ mode, guestName: '  ｊｉＭｍｙ  ' }))
+    expect(report.guestName).toBe('ｊｉＭｍｙ')
+    expect(report.records.map(row => row.id)).toEqual(mode === 'day' ? ['regular'] : ['monthly', 'regular'])
+    expect(report.summary.profitThb).toBe(mode === 'day' ? 150 : 200)
+    expect(report.monthlyRecords.map(row => row.id)).toEqual(['monthly'])
+    expect(report.quantity.peopleCount).toBe(4)
+    expect(report.supplierStats[0].profitThb).toBe(mode === 'day' ? 150 : 200)
+  })
+
+  it('combines partial Chinese customer names with project, supplier and date filters', () => {
+    const rows = [
+      ticket('matched', { guestName: '李湘光、龙粉萍' }),
+      ticket('wrong-supplier', { guestName: '龙粉萍', supplierId: 'supplier-b' }),
+      ticket('wrong-project', { guestName: '龙粉萍', projectName: '其他项目' }),
+      ticket('wrong-date', { guestName: '龙粉萍', issueDate: '2026-09-30' })
+    ]
+    expect(buildReport(rows, query({ guestName: '龙粉', projectName: '普通门票', supplierId: 'supplier-a' })).records.map(row => row.id)).toEqual(['matched'])
+    expect(buildReport(rows, query({ guestName: '不存在的客户' })).summary.profitThb).toBe(0)
+    expect(buildReport(rows, query({ guestName: '   ' })).guestName).toBe('')
+  })
+
   it('queries monthly-settlement project ticket quantities daily, monthly and cumulatively', () => {
     const daily = buildReport(records, query({ mode: 'day', projectName: '泰拳' }))
     expect(daily.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })

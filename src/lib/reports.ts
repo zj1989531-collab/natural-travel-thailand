@@ -16,6 +16,7 @@ export interface ReportQuery {
   endDate: string
   supplierId: string
   projectName?: string
+  guestName?: string
 }
 
 const isCalendarDate = (value: string) => {
@@ -25,6 +26,8 @@ const isCalendarDate = (value: string) => {
 }
 
 export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
+  const guestName = (query.guestName ?? '').trim()
+  const guestSearch = guestName.normalize('NFKC').toLocaleLowerCase()
   const active = activeTickets(mainLedgerTickets(tickets)).filter((ticket) => isCalendarDate(ticket.issueDate))
   const allDates = active.map((ticket) => ticket.issueDate).sort()
   const range = query.mode === 'all' ? { start: allDates[0] ?? query.date, end: allDates.at(-1) ?? query.date }
@@ -37,6 +40,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
   const selected = active.filter((ticket) =>
     isCalendarDate(ticket.issueDate) && ticket.issueDate >= range.start && ticket.issueDate <= range.end &&
     (!query.supplierId || ticket.supplierId === query.supplierId) &&
+    (!guestSearch || (ticket.guestName ?? '').normalize('NFKC').toLocaleLowerCase().includes(guestSearch)) &&
     (!query.projectName || cleanProjectLabel(ticket.projectName || '未分类项目') === cleanProjectLabel(query.projectName)))
     .map(ticketDisplay)
     .sort((a, b) => a.issueDate.localeCompare(b.issueDate) || (a.issueTime ?? '').localeCompare(b.issueTime ?? '') || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
@@ -79,6 +83,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     ...range,
     supplierId: query.supplierId,
     projectName: cleanProjectLabel(query.projectName ?? ''),
+    guestName,
     effectiveQuantity: summariseQuantities(selected),
     itemQuantity: { recordCount: itemRecords.length, quantityCount: itemQuantityDays.reduce((sum, day) => sum + day.quantityCount, 0), unknownCount: itemQuantityDays.reduce((sum, day) => sum + day.unknownCount, 0), days: itemQuantityDays },
     quantity: {

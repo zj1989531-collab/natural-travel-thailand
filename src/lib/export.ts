@@ -2,11 +2,12 @@ import type { Project, RefundRecord, Supplier, TicketRecord } from '../types'
 import { getBangkokDate } from './format'
 import { getProfit } from './stats'
 import { getOriginalTicketAmounts, getTicketAmounts } from './ticket-amounts'
-import { getRefundState } from './refunds'
+import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity, quantityLabels } from './quantity'
 import { cleanProjectLabel } from './project-labels'
 import { buildShow79Report, mainLedgerTickets } from './show79'
 import { ticketSettlementMode } from './project-rules'
+import type { LedgerReport } from './reports'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
   Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
@@ -46,7 +47,7 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
     .map((ticket) => ({
       '出票日期': ticket.issueDate,
-      '客户姓名': ticket.guestName ?? '',
+      '客户姓名': ticket.guestName?.trim() || '未填写',
       '曼谷时间': ticket.issueTime || '',
       '人数': isItemQuantity(ticket) ? '' : ticket.personCount ?? '',
       '数量': isItemQuantity(ticket) ? ticket.personCount ?? '' : '',
@@ -73,6 +74,85 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '备注': ticket.note,
       '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
     }))
+
+const reportDetailHeaders = ['出票日期', '曼谷时间', '客户姓名', '项目', '子项 / 套餐', '供货商', '有效人数', '有效数量', '记录类型', '结算方式', '退票状态', '利润 (THB)', '备注']
+
+const reportTicketRows = (tickets: TicketRecord[]) => tickets.map((ticket) => {
+  const refund = getRefundState(ticket)
+  const count = ticket.entryMode === 'profit_only' ? '' : getEffectivePersonCount(ticket) ?? ''
+  return {
+    '出票日期': ticket.issueDate,
+    '曼谷时间': ticket.issueTime || '',
+    '客户姓名': ticket.guestName?.trim() || '未填写',
+    '项目': cleanProjectLabel(ticket.projectName) || '未分类项目',
+    '子项 / 套餐': cleanProjectLabel(ticket.subItemName),
+    '供货商': ticket.supplierName,
+    '有效人数': isItemQuantity(ticket) ? '' : count,
+    '有效数量': isItemQuantity(ticket) ? count : '',
+    '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
+    '结算方式': ticketSettlementMode(ticket) === 'monthly' ? '月结' : '日结',
+    '退票状态': refund.active.length ? refund.full ? '已全部退票' : '部分退票' : '未退票',
+    '利润 (THB)': getProfit(ticket),
+    '备注': ticket.note
+  }
+})
+
+const reportQuantities = (tickets: TicketRecord[]) => tickets.reduce((total, ticket) => {
+  if (ticket.entryMode === 'profit_only') return total
+  const count = getEffectivePersonCount(ticket)
+  if (count == null) total.unknownCount++
+  else if (isItemQuantity(ticket)) total.itemCount += count
+  else total.peopleCount += count
+  return total
+}, { peopleCount: 0, itemCount: 0, unknownCount: 0 })
+
+// Use the already filtered report, including its daily/monthly separation.
+// Report exports intentionally contain profit only; the full-ledger export below
+// remains available separately for the complete accounting backup.
+export const buildReportExportRows = (report: LedgerReport, supplierName: string) => {
+  const quantities = reportQuantities(report.records)
+  const monthlyRecords = report.mode === 'day' ? report.monthlyRecords : []
+  const monthlyQuantities = reportQuantities(monthlyRecords)
+  const summary = [{
+    '报表标题': report.title,
+    '开始日期': report.start,
+    '截止日期': report.end,
+    '客户筛选': report.guestName?.trim() || '全部客户',
+    '供货商': supplierName.trim() || '全部供货商',
+    '项目': report.projectName || '全部项目',
+    '记录数': report.records.length,
+    '有效人数': quantities.peopleCount,
+    '有效商品数量': quantities.itemCount,
+    '数量未填写记录数': quantities.unknownCount,
+    '利润合计 (THB)': report.summary.profitThb,
+    ...(report.mode === 'day' ? {
+      '当日月结另列记录数': monthlyRecords.length,
+      '当日月结另列有效人数': monthlyQuantities.peopleCount,
+      '当日月结另列有效商品数量': monthlyQuantities.itemCount,
+      '当日月结另列数量未填写记录数': monthlyQuantities.unknownCount,
+      '当日月结另列利润 (THB)': report.monthlySummary.profitThb,
+      '日报说明': '月结记录和利润另列，不计入日报记录数、有效人数、有效数量及利润合计。'
+    } : {})
+  }]
+  return { summary, records: reportTicketRows(report.records), monthlyRecords: reportTicketRows(monthlyRecords) }
+}
+
+export const exportReportToXlsx = async (report: LedgerReport, supplierName: string) => {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.utils.book_new()
+  const rows = buildReportExportRows(report, supplierName)
+  const append = (data: Record<string, string | number>[], name: string, headers?: string[]) => {
+    const worksheet = XLSX.utils.json_to_sheet(data, headers ? { header: headers } : undefined)
+    worksheet['!cols'] = Object.keys(data[0] ?? Object.fromEntries((headers ?? []).map((header) => [header, '']))).map((key) => ({
+      wch: key === '备注' || key === '日报说明' ? 52 : key === '项目' || key === '子项 / 套餐' || key === '客户姓名' ? 28 : Math.max(18, key.length * 2)
+    }))
+    XLSX.utils.book_append_sheet(workbook, worksheet, name)
+  }
+  append(rows.summary, '报表汇总')
+  append(rows.records, '记录明细', reportDetailHeaders)
+  if (rows.monthlyRecords.length) append(rows.monthlyRecords, '当日月结另列', reportDetailHeaders)
+  XLSX.writeFile(workbook, `票务盈利报表_${report.start}_${report.end}.xlsx`)
+}
 
 export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
   const tickets = mainLedgerTickets(source)

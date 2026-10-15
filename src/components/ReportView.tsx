@@ -8,37 +8,40 @@ import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
 import { quantityParts } from '../lib/effective-quantities'
 import { isShow79Project } from '../lib/show79'
+import { exportReportToXlsx } from '../lib/export'
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
   return <div className="report-table-scroll" role="region" aria-label={caption} tabIndex={0}>
     <table className="report-table report-record-table">
       <caption>{caption}</caption>
-      <thead><tr><th scope="col">日期 / 时间</th><th scope="col">项目 / 供货商</th><th scope="col">人数 / 数量</th><th scope="col">利润</th></tr></thead>
+      <thead><tr><th scope="col">日期 / 时间</th><th scope="col">客户姓名</th><th scope="col">项目 / 供货商</th><th scope="col">人数 / 数量</th><th scope="col">利润</th></tr></thead>
       <tbody>{records.map((ticket) => {
         const profit = getProfit(ticket)
         const refund = getRefundState(ticket)
         const people = getEffectivePersonCount(ticket)
         return <tr key={ticket.id}>
           <td>{ticket.issueDate}<small>{ticket.issueTime ? `${ticket.issueTime} 曼谷` : '时间未记录'}</small></td>
+          <td className="report-guest-name">{ticket.guestName?.trim() || <span className="muted">未填写</span>}</td>
           <td><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><small>{ticket.supplierName} · {ticket.entryMode === 'profit_only' ? '仅录利润' : ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计价` : '整单总额'}</small>{refund.active.length > 0 && <small>{refund.full ? '已全部退票' : `已退${refund.refundedPeople}${quantityLabels(ticket).unit}`} · 利润回算原出票日期</small>}{ticket.note && <small className="report-record-note">备注：{ticket.note}</small>}</td>
-          <td className="report-number">{people == null ? '—' : `${formatNumber(people)}${isItemQuantity(ticket) ? ' 件' : ''}`}</td>
+          <td className="report-number">{ticket.entryMode === 'profit_only' || people == null ? '—' : `${formatNumber(people)}${isItemQuantity(ticket) ? ' 件' : ' 人'}`}</td>
           <td className={`report-money ${profit < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(profit)}</td>
         </tr>
       })}</tbody>
-      <tfoot><tr><th scope="row" colSpan={3}>合计 · {records.length} 条记录</th><td className="report-money">{formatThb(totalProfit)}</td></tr></tfoot>
+      <tfoot><tr><th scope="row" colSpan={4}>合计 · {records.length} 条记录</th><td className="report-money">{formatThb(totalProfit)}</td></tr></tfoot>
     </table>
   </div>
 }
 
 export function ReportPreview({ report, supplierName, pendingCount = 0, generatedAt }: { report: LedgerReport; supplierName: string; pendingCount?: number; generatedAt: string }) {
   const itemsOnly = report.projectName === '药品' || report.records.length > 0 && report.records.every(isItemQuantity)
+  const unnamedCount = [...report.records, ...(report.mode === 'day' ? report.monthlyRecords : [])].filter(ticket => !ticket.guestName?.trim()).length
   return <article className="report-paper" aria-label="格式化报表预览">
     <header className="report-paper-heading">
       <p className="eyebrow">票务盈利簿 · THB · Asia/Bangkok</p>
       <h2>{report.title}</h2>
       <p>{report.mode === 'all' ? '全部已录日期（累计）' : report.start === report.end ? report.start : `${report.start} — ${report.end}`}</p>
-      <div className="report-meta"><span>项目：{report.projectName || '全部项目'}</span><span>供货商：{supplierName}</span><span>预览时间：{generatedAt}（曼谷）</span></div>
+      <div className="report-meta"><span>项目：{report.projectName || '全部项目'}</span><span>客户：{report.guestName || '全部客户'}</span><span>供货商：{supplierName}</span><span>预览时间：{generatedAt}（曼谷）</span></div>
     </header>
     {pendingCount > 0 && <p className="report-notice">当前账本有 {pendingCount} 条记录待同步；此预览来自本机当前账本，可能包含尚未上传的修改。</p>}
     <div className="report-totals">
@@ -71,17 +74,19 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
         </table>
       </div>}
     </section>
-    <section className="report-section"><h3>记录明细</h3>{report.records.length > 0 ? <RecordTable records={report.records} caption="报表记录明细" /> : <p className="report-empty">没有符合当前报表条件的记录。</p>}</section>
+    <section className="report-section"><h3>记录明细</h3>{unnamedCount > 0 && <p className="report-note">有 {unnamedCount} 条记录未填写客户姓名。</p>}{report.records.length > 0 ? <RecordTable records={report.records} caption="报表记录明细" /> : <p className="report-empty">没有符合当前报表条件的记录。</p>}</section>
     {report.mode === 'day' && report.monthlyRecords.length > 0 && <section className="report-section report-monthly-section"><h3>月结项目另列 · 不计入日报合计</h3><p className="report-note">{report.monthlyRecords.length} 条月结记录 · 利润 {formatThb(report.monthlySummary.profitThb)}，包含在对应月报中。</p><RecordTable records={report.monthlyRecords} caption="当日月结记录（不计入日报合计）" /></section>}
     <footer className="report-footer">按原出票日期统计，退票回算原日/月 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
   </article>
 }
 
 export function ReportView({ tickets, suppliers, projects = [] }: { tickets: TicketRecord[]; suppliers: Supplier[]; projects?: Project[] }) {
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
   const [query, setQuery] = useState<ReportQuery>(() => {
     const month = getBangkokMonth()
     const range = monthDateRange(month)
-    return { mode: 'month', month, date: getBangkokDate(), startDate: range.start, endDate: range.end, supplierId: '', projectName: '' }
+    return { mode: 'month', month, date: getBangkokDate(), startDate: range.start, endDate: range.end, supplierId: '', projectName: '', guestName: '' }
   })
   const result = useMemo(() => {
     try { return { report: buildReport(tickets, query), error: '' } }
@@ -90,9 +95,18 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   const update = <K extends keyof ReportQuery>(key: K, value: ReportQuery[K]) => setQuery((current) => ({ ...current, [key]: value }))
   const generatedAt = `${getBangkokDate()} ${getBangkokTime()}`
   const names = useMemo(() => projectNames([...projects.filter(project => !isShow79Project(project.name)), ...activeTickets(tickets).filter(ticket => !isShow79Project(ticket.projectName)).map((ticket) => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))]), [projects, tickets])
+  const supplierName = suppliers.find((supplier) => supplier.id === query.supplierId)?.name ?? (query.supplierId ? '所选供货商' : '全部供货商')
+  const exportCurrentReport = async () => {
+    if (!result.report || exporting) return
+    setExporting(true); setExportError('')
+    try { await exportReportToXlsx(result.report, supplierName) }
+    catch { setExportError('报表导出失败，请重试。') }
+    finally { setExporting(false) }
+  }
 
   return <>
-    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含79秀独立账本</p><h1>格式化报表</h1></div><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></section>
+    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含79秀独立账本</p><h1>格式化报表</h1></div><div className="heading-actions report-export-actions"><button className="secondary-button small" type="button" disabled={!result.report || exporting} onClick={() => void exportCurrentReport()}>{exporting ? '正在导出…' : '导出当前报表 Excel'}</button><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></div></section>
+    {exportError && <p className="form-error" role="alert">{exportError}</p>}
     <section className="report-controls" aria-label="报表筛选">
       <label>报表类型<select value={query.mode} onChange={(event) => update('mode', event.target.value as ReportMode)}><option value="day">日报</option><option value="month">月报</option><option value="range">自定义日期范围</option><option value="all">全部日期（累计）</option></select></label>
       {query.mode === 'day' && <label>报表日期<input type="date" value={query.date} onChange={(event) => update('date', event.target.value)} /></label>}
@@ -100,9 +114,10 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
       {query.mode === 'range' && <><label>开始日期<input type="date" value={query.startDate} onChange={(event) => update('startDate', event.target.value)} /></label><label>结束日期<input type="date" value={query.endDate} onChange={(event) => update('endDate', event.target.value)} /></label></>}
       <label>查询项目<select value={query.projectName ?? ''} onChange={(event) => update('projectName', event.target.value)}><option value="">全部项目</option>{names.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
       <label>报表供货商<select value={query.supplierId} onChange={(event) => update('supplierId', event.target.value)}><option value="">全部供货商</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>
+      <label>客户姓名<input type="search" value={query.guestName ?? ''} onChange={(event) => update('guestName', event.target.value)} placeholder="输入姓名查询，可输入部分姓名" /></label>
     </section>
     <p className="report-scroll-hint">手机上可左右滑动表格查看完整列；打印时仅保留报表内容。</p>
     {result.error && <p className="form-error report-error" role="alert">{result.error}</p>}
-    {result.report && <ReportPreview report={result.report} supplierName={suppliers.find((supplier) => supplier.id === query.supplierId)?.name ?? (query.supplierId ? '所选供货商' : '全部供货商')} pendingCount={tickets.filter((ticket) => !ticket.deletedAt && ticket.syncStatus !== 'synced').length} generatedAt={generatedAt} />}
+    {result.report && <ReportPreview report={result.report} supplierName={supplierName} pendingCount={tickets.filter((ticket) => !ticket.deletedAt && ticket.syncStatus !== 'synced').length} generatedAt={generatedAt} />}
   </>
 }

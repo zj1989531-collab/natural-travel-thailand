@@ -10,6 +10,20 @@ const project: Project = { id: 'item-project', userId: 'test-user', supplierId: 
 const ticket: TicketRecord = { id: 'item-ticket', userId: project.userId, projectId: project.id, projectName: project.name, supplierId: project.supplierId, supplierName: project.supplierName, subItemName: project.subItemName, personCount: 2, quantityUnit: 'item', amountBasis: 'per_person', agentPriceThb: 150, costThb: 95, issueDate: '2026-10-14', issueTime: '09:30', note: '', createdAt: project.createdAt, updatedAt: project.updatedAt, deletedAt: null, syncStatus: 'synced' }
 
 describe('item entry labels', () => {
+  it('offers an optional customer name for new tickets and every record type, preserving saved names', () => {
+    const renderForm = (record?: TicketRecord) => renderToStaticMarkup(<TicketForm ticket={record} projects={[project]} cloudLoginRequired={false} onCancel={() => {}} onManageSuppliers={() => {}} onSave={async () => {}} />)
+    const records: (TicketRecord | undefined)[] = [undefined, { ...ticket, guestName: '客户 <A>' }, { ...ticket, projectName: '海洋公园', quantityUnit: 'person', guestName: '张三' }, { ...ticket, projectName: '月结返佣', entryMode: 'profit_only', guestName: 'jimmy' }]
+    for (const record of records) {
+      const html = renderForm(record)
+      const nameInput = html.match(/<label>客户姓名 .*?<input[^>]+>/)?.[0]
+      expect(nameInput).toContain('（可选）')
+      expect(nameInput).toContain('maxLength="100"')
+      expect(nameInput).not.toContain('required')
+    }
+    expect(renderForm(records[1])).toContain('value="客户 &lt;A&gt;"')
+    expect(renderForm(records[2])).toContain('value="张三"')
+    expect(renderForm(records[3])).toContain('value="jimmy"')
+  })
   it('uses quantity dropdowns and custom quantity, not number of people', () => {
     const html = renderToStaticMarkup(<PersonCountField quantityUnit="item" value={2} onChange={() => {}} />)
     for (const text of ['数量', '2 件', '其他数量', '单件金额 × 数量']) expect(html).toContain(text)
