@@ -40,12 +40,12 @@ describe('monthly commission settlement statistics', () => {
     expect(isMonthlySettlementProject(name)).toBe(false)
   })
 
-  it('excludes all six categories from every daily metric but keeps them in the monthly report and supplier ranking', () => {
+  it('excludes all six categories from every daily metric but keeps only the five non-79 settlement categories in monthly totals', () => {
     const tickets = ['69秀', '79秀', '泰拳', '东方嘉年华', '格兰岛跟团一日游', '芭提雅潜水（SH）', '普通项目'].map((projectName, index) => makeTicket({ id: `record-${index}`, projectName, agentPriceThb: 100, costThb: 80 }))
     expect(summarise(ticketsForDailyStats(tickets, '2026-10-13'))).toEqual({ count: 1, agentPriceThb: 100, costThb: 80, profitThb: 20 })
     const monthly = ticketsInMonth(tickets, '2026-10')
-    expect(summarise(monthly)).toEqual({ count: 7, agentPriceThb: 700, costThb: 560, profitThb: 140 })
-    expect(bySupplier(monthly)[0]).toMatchObject({ count: 7, profitThb: 140 })
+    expect(summarise(monthly)).toEqual({ count: 6, agentPriceThb: 600, costThb: 480, profitThb: 120 })
+    expect(bySupplier(monthly)[0]).toMatchObject({ count: 6, profitThb: 120 })
     expect(ticketsOnDate(tickets, '2026-10-13')).toHaveLength(7)
   })
 
@@ -66,7 +66,7 @@ describe('monthly commission settlement statistics', () => {
   })
 
   it('includes the 1st and last day, excluding adjacent months', () => {
-    const tickets = ['2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'].map((issueDate) => makeTicket({ id: issueDate, issueDate, projectName: '79秀' }))
+    const tickets = ['2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'].map((issueDate) => makeTicket({ id: issueDate, issueDate, projectName: '泰拳' }))
     expect(ticketsInMonth(tickets, '2026-10').map((ticket) => ticket.issueDate)).toEqual(['2026-10-01', '2026-10-31'])
     expect(monthDateRange('2026-02')).toEqual({ start: '2026-02-01', end: '2026-02-28' })
     expect(monthDateRange('2024-02')).toEqual({ start: '2024-02-01', end: '2024-02-29' })

@@ -5,6 +5,7 @@ import { getOriginalTicketAmounts, getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
 import { isItemQuantity, quantityLabels } from './quantity'
 import { cleanProjectLabel } from './project-labels'
+import { buildShow79Report, mainLedgerTickets } from './show79'
 import { ticketSettlementMode } from './project-rules'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
@@ -25,7 +26,7 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
     projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'manualAgentPrice', 'quantityUnit', 'defaultAmountBasis', 'settlementMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
     // Include deletion markers so a backup does not resurrect deleted tickets.
-    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'quantityUnit', 'amountBasis', 'settlementMode', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+    tickets: data.tickets.map((record) => pickFields(record, ['guestName', 'id', 'userId', 'issueDate', 'issueTime', 'personCount', 'quantityUnit', 'amountBasis', 'settlementMode', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
   }
 }
 
@@ -45,6 +46,7 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
     .map((ticket) => ({
       '出票日期': ticket.issueDate,
+      '客户姓名': ticket.guestName ?? '',
       '曼谷时间': ticket.issueTime || '',
       '人数': isItemQuantity(ticket) ? '' : ticket.personCount ?? '',
       '数量': isItemQuantity(ticket) ? ticket.personCount ?? '' : '',
@@ -72,7 +74,8 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
     }))
 
-export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
+export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
+  const tickets = mainLedgerTickets(source)
   const XLSX = await import('xlsx')
   const rows = buildTicketExportRows(tickets)
   const workbook = XLSX.utils.book_new()
@@ -87,4 +90,14 @@ export const exportTicketsToXlsx = async (tickets: TicketRecord[]) => {
   }))
   if (refundRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(refundRows), '退票明细')
   XLSX.writeFile(workbook, `票务盈利簿_${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
+
+export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, month: string) => {
+  const report = buildShow79Report(tickets, date, month)
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.utils.book_new()
+  const summary = [{ '月份': month, '月订单数': report.records.length, '月人数': report.monthPeople, '人数未填记录': report.monthUnknown, '月实际利润 (THB)': report.profitThb, 'jimmy 40% (THB)': report.jimmyThb, '大狗二狗合计 60% (THB)': report.partnersThb }]
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary), '月度分账')
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(buildTicketExportRows(report.records)), '79秀订单')
+  XLSX.writeFile(workbook, `79秀独立报表_${month}.xlsx`)
 }

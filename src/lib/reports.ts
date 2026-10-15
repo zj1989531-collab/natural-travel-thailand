@@ -5,6 +5,7 @@ import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity } from './quantity'
 import { cleanProjectLabel, ticketDisplay } from './project-labels'
 import { summariseQuantities } from './effective-quantities'
+import { mainLedgerTickets } from './show79'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -24,7 +25,7 @@ const isCalendarDate = (value: string) => {
 }
 
 export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
-  const active = activeTickets(tickets).filter((ticket) => isCalendarDate(ticket.issueDate))
+  const active = activeTickets(mainLedgerTickets(tickets)).filter((ticket) => isCalendarDate(ticket.issueDate))
   const allDates = active.map((ticket) => ticket.issueDate).sort()
   const range = query.mode === 'all' ? { start: allDates[0] ?? query.date, end: allDates.at(-1) ?? query.date }
     : query.mode === 'month' ? monthDateRange(query.month)
