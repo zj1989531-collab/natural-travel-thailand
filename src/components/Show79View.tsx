@@ -27,6 +27,8 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
   const [dayOnly, setDayOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [command, setCommand] = useState('')
+  const [commandError, setCommandError] = useState('')
+  const [commandMessage, setCommandMessage] = useState('')
   const [input, setInput] = useState<Show79VoucherInput>(() => ({ guestName: '', date: getBangkokDate(), people: 1 }))
   const showProjects = useMemo(() => projects.filter(project => isShow79Project(project.name) && project.quantityUnit !== 'item'), [projects])
   const [projectId, setProjectId] = useState('')
@@ -86,8 +88,12 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     finally { if (generation === generationRef.current) setBusy(false) }
   }
   const fillCommand = () => {
-    try { const parsed = parseShow79Command(command); closePreview(); setInput(parsed); setError(''); setMessage('信息已填入，请核对后生成图片或保存订单。') }
-    catch (e) { setError(e instanceof Error ? e.message : '未能识别订单。') }
+    setCommandError(''); setCommandMessage(''); setError(''); setMessage('')
+    try {
+      const parsed = parseShow79Command(command)
+      generationRef.current++; closePreview(); setInput(parsed)
+      setCommandMessage(`已填入：${parsed.guestName} · ${voucherDate(parsed.date)} · ${parsed.people}人。请核对后生成图片或保存订单。`)
+    } catch (e) { setCommandError(e instanceof Error ? e.message : '未能识别订单。') }
   }
   const save = async (acknowledgedKey?: string) => {
     if (saveLock.current) return
@@ -151,7 +157,13 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
       <section className="show79-split"><h2>月度分账</h2><p>{month} · 按实际利润分成</p><div><span>jimmy · 40%</span><strong>{formatThb(report.jimmyThb)}</strong></div><div><span>大狗二狗合计 · 60%</span><strong>{formatThb(report.partnersThb)}</strong></div><small>按当月净利润统一计算，保留两位小数；退票回算原记录月份。此处为分账计算，不会自动转账。</small><button type="button" className="secondary-button" onClick={() => void exportShow79ToXlsx(tickets, date, month).catch(() => setError('导出失败，请重试。'))}>导出当月订单及分账 Excel</button></section>
     </>}
     <section className="show79-entry"><h2>{editing ? '编辑79秀订单' : '生成确认单 / 新增订单'}</h2>
-      {!editing && <div className="show79-command"><label>一句话填写<textarea value={command} onChange={event => setCommand(event.target.value)} placeholder="79 jimmy 2人 今天" /></label><button type="button" className="secondary-button" disabled={busy} onClick={fillCommand}>自动填入</button></div>}
+      {!editing && <div className="show79-command">
+        <label>一句话填写<textarea value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandError ? 'show79-command-help show79-command-error' : 'show79-command-help'} onChange={event => { setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} placeholder="李湘光 龙粉萍 今天 2个79" /></label>
+        <p className="sheet-copy" id="show79-command-help">例如：李湘光 龙粉萍 今天 2个79。人数可写“人、个、位、名、张”，79可放前面或后面。</p>
+        <button type="button" className="secondary-button" disabled={busy} onClick={fillCommand}>自动填入</button>
+        {commandError && <p className="form-error" id="show79-command-error" role="alert">{commandError}</p>}
+        {commandMessage && <p className="sheet-copy" role="status">{commandMessage}</p>}
+      </div>}
       <form onSubmit={(event: FormEvent) => { event.preventDefault(); void save() }} ref={formRef} className="ticket-form">
         <label>客户姓名<input value={input.guestName} maxLength={100} disabled={busy} onChange={event => update('guestName', event.target.value)} required /></label>
         <div className="form-grid"><label>观看日期<input type="date" disabled={busy} value={input.date} onChange={event => update('date', event.target.value)} required /></label><label>人数<input type="number" disabled={busy} min="1" step="1" value={Number.isFinite(input.people) ? input.people : ''} onChange={event => update('people', event.target.value === '' ? Number.NaN : Number(event.target.value))} required /></label></div>
