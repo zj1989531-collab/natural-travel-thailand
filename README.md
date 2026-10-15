@@ -34,7 +34,7 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)。
+1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)。已有数据库另执行 [supabase/show79.sql](./supabase/show79.sql) 添加确认单客户姓名和兼容保护。
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
@@ -48,6 +48,16 @@ pnpm dev:sync
 已有数据库先执行当前版本需要的 `supabase/migrations/` 升级脚本及 `supabase/refunds.sql`，最后执行 `supabase/project-rules.sql`，再发布前端。规则升级只新增可空字段，不回填或重写历史金额；兼容触发器防止旧客户端缺少字段时清空已有规则。电脑与手机都应刷新到新版。
 
 套餐可设置默认按人／件或整单计价，以及日结／月结。旧套餐按名称推荐默认值，保存设置后固定；每次出票可临时改计价，历史记录保留自身金额与结算归属。保存前会合并提示本机缓存中疑似重复或亏损的记录，确认后仍可保存；离线提示不能保证发现另一设备尚未同步的重复业务。
+
+## 79秀独立账本
+
+底部“79秀”入口独立显示所选日期人数、月人数、月实际利润和订单明细。79秀不计入主账本的日报、月报、年报、累计报表、供货商排行及普通 Excel 导出；完整 JSON 备份仍包含79秀订单。历史79秀、79成人秀与全角名称也自动归入独立账本。
+
+按实际净利润计算 jimmy 40%、大狗二狗合计60%，不是固定每人50泰铢。月利润先按分汇总，再统一分账；尾差计入大狗二狗，确保总额一致。保留原退票规则：退票人数及净利润回算原记录日期和月份；历史未录人数会提示，不猜测人数。仅录利润的返佣记录保留利润，不当作入场人数。
+
+在79秀页面输入“79 jimmy 2人 今天”可填入姓名、曼谷日期和人数；核对后生成固定模板的 PNG 图片，日期使用 YYYY/MM/DD，预订单号留空。可下载、打印保存 PDF，或在支持文件分享的手机浏览器调用系统分享菜单选择微信；不支持时可保存图片后从微信发送。确认单不展示成本、利润、分成或内部备注。仅生成图片不会创建记账记录或向供应商下单。
+
+保存订单时选择已有79秀供货商套餐并填写实际金额；新订单按所填观看日期保存到独立账本（历史订单日期不变）。月底可导出包含订单和40%/60%分成的独立 Excel。分账报表随订单修改和退票重新计算，导出文件可作为当次核对凭据，不会自动付款。
 
 ## 功能边界
 

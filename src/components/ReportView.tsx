@@ -7,6 +7,7 @@ import { projectNames } from '../lib/project-selection'
 import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
 import { quantityParts } from '../lib/effective-quantities'
+import { isShow79Project } from '../lib/show79'
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
@@ -88,10 +89,10 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   }, [tickets, query])
   const update = <K extends keyof ReportQuery>(key: K, value: ReportQuery[K]) => setQuery((current) => ({ ...current, [key]: value }))
   const generatedAt = `${getBangkokDate()} ${getBangkokTime()}`
-  const names = useMemo(() => projectNames([...projects, ...activeTickets(tickets).map((ticket) => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))]), [projects, tickets])
+  const names = useMemo(() => projectNames([...projects.filter(project => !isShow79Project(project.name)), ...activeTickets(tickets).filter(ticket => !isShow79Project(ticket.projectName)).map((ticket) => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))]), [projects, tickets])
 
   return <>
-    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 随账本自动更新</p><h1>格式化报表</h1></div><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></section>
+    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含79秀独立账本</p><h1>格式化报表</h1></div><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></section>
     <section className="report-controls" aria-label="报表筛选">
       <label>报表类型<select value={query.mode} onChange={(event) => update('mode', event.target.value as ReportMode)}><option value="day">日报</option><option value="month">月报</option><option value="range">自定义日期范围</option><option value="all">全部日期（累计）</option></select></label>
       {query.mode === 'day' && <label>报表日期<input type="date" value={query.date} onChange={(event) => update('date', event.target.value)} /></label>}
