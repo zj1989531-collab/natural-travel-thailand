@@ -280,9 +280,14 @@ const localProject = (): Project => ({
 })
 
 describe('project price corrections', () => {
-  it('does not allow default sales and costs on a profit-only project', async () => {
+  it('rejects sub-cent project amounts before changing defaults', async () => {
+    state.local.projects.set('project-1', localProject())
+    await expect(ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 95.001, defaultAgentPriceThb: 100 })).rejects.toThrow('两位小数')
+    expect(state.local.projects.get('project-1')).toEqual(localProject())
+  })
+  it('allows commission rule edits but never assigns default sales or costs', async () => {
     state.local.projects.set('project-1', { ...localProject(), entryMode: 'profit_only', defaultCostThb: 0, defaultAgentPriceThb: 0 })
-    await expect(ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 100, defaultAgentPriceThb: 200 })).rejects.toThrow('仅录利润')
+    await expect(ledgerRepository.updateProjectPrices('project-1', { defaultCostThb: 100, defaultAgentPriceThb: 200, defaultAmountBasis: 'total', settlementMode: 'daily' })).resolves.toMatchObject({ defaultCostThb: 0, defaultAgentPriceThb: 0, defaultAmountBasis: 'total', settlementMode: 'monthly' })
   })
   it('updates only the existing project prices, preserving identity, other packages and old tickets', async () => {
     const original = { ...localProject(), updatedAt: '2099-01-01T00:00:00.000Z' }
@@ -337,6 +342,59 @@ describe('project price corrections', () => {
     expect(state.cloud.projects.size).toBe(1)
     expect(state.cloud.projects.get('project-1')).toMatchObject({ id: 'project-1', user_id: user.id, default_cost_thb: 600, default_agent_price_thb: 900 })
     expect(state.local.projects.get('project-1').syncStatus).toBe('synced')
+  })
+})
+
+describe('project default and settlement persistence', () => {
+  const prepare = () => {
+    const row = localProject()
+    state.local.projects.set(row.id, row)
+    state.local.suppliers.set(row.supplierId, { id: row.supplierId, userId: user.id, name: row.supplierName, normalizedName: row.supplierName, createdAt: row.createdAt, updatedAt: row.updatedAt, syncStatus: 'pending' })
+    const input: TicketInput = { supplierName: row.supplierName, projectId: row.id, projectName: row.name, subItemName: row.subItemName, issueDate: '2026-10-15', issueTime: '12:00', amountBasis: 'total', personCount: 4, costThb: 700, agentPriceThb: 900, note: '' }
+    return { row, input }
+  }
+  it('saves explicit project rules and ticket snapshots, then downloads them unchanged to another device', async () => {
+    const { row, input } = prepare()
+    await ledgerRepository.updateProjectPrices(row.id, { defaultCostThb: 700, defaultAgentPriceThb: 900, defaultAmountBasis: 'total', settlementMode: 'monthly' })
+    const saved = await ledgerRepository.createOrUpdateTicket(input)
+    expect(saved).toMatchObject({ settlementMode: 'monthly', amountBasis: 'total', personCount: 4 })
+    expect(getTicketAmounts(saved).profitThb).toBe(200)
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.projects.get(row.id)).toMatchObject({ default_amount_basis: 'total', settlement_mode: 'monthly' })
+    expect(state.cloud.tickets.get(saved.id).settlement_mode).toBe('monthly')
+    state.local.projects.clear(); state.local.tickets.clear()
+    await ledgerRepository.synchronise(user)
+    expect(state.local.projects.get(row.id)).toMatchObject({ defaultAmountBasis: 'total', settlementMode: 'monthly' })
+    expect(state.local.tickets.get(saved.id)).toMatchObject({ settlementMode: 'monthly', personCount: 4, agentPriceThb: 900 })
+  })
+  it('uses the package default when an internal caller omits the price basis', async () => {
+    const { row, input } = prepare()
+    state.local.projects.set(row.id, { ...row, defaultAmountBasis: 'total' })
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, amountBasis: undefined })
+    expect(saved.amountBasis).toBe('total')
+    expect(getTicketAmounts(saved).profitThb).toBe(200)
+  })
+  it('permits cached offline saves with defaults and per-record pricing overrides without changing catalogue', async () => {
+    const { row, input } = prepare()
+    state.local.projects.set(row.id, { ...row, defaultAmountBasis: 'total', settlementMode: 'monthly' })
+    vi.stubGlobal('navigator', { onLine: false })
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, amountBasis: 'per_person', settlementMode: 'monthly' })
+    expect(saved).toMatchObject({ amountBasis: 'per_person', settlementMode: 'monthly', syncStatus: 'pending' })
+    expect(getTicketAmounts(saved).profitThb).toBe(800)
+    expect(state.local.projects.get(row.id).defaultAmountBasis).toBe('total')
+    vi.stubGlobal('navigator', { onLine: true })
+    await ledgerRepository.synchronise(user)
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.size).toBe(1)
+  })
+  it.each([undefined, 'daily', 'monthly'] as const)('preserves historical settlement %s, pricing and quantity when project rules change', async settlementMode => {
+    const { row, input } = prepare()
+    const original = { ...localTicket('2026-10-13T01:00:00Z'), ...input, settlementMode }
+    state.local.tickets.set(original.id, original)
+    await ledgerRepository.updateProjectPrices(row.id, { defaultCostThb: 1, defaultAgentPriceThb: 2, defaultAmountBasis: 'per_person', settlementMode: 'monthly', quantityUnit: 'item' })
+    expect(state.local.tickets.get(original.id)).toEqual(original)
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, note: '仅修改备注', settlementMode: 'monthly' }, original)
+    expect(saved).toMatchObject({ agentPriceThb: 900, costThb: 700, amountBasis: 'total', quantityUnit: 'person', settlementMode, personCount: 4 })
   })
 })
 
@@ -425,7 +483,7 @@ describe('profit-only entries and time synchronization', () => {
     const project = { ...localProject(), entryMode: 'profit_only' as const, defaultCostThb: 0, defaultAgentPriceThb: 0 }
     state.local.projects.set(project.id, project)
     state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: user.id, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
-    const original = localTicket('2026-10-13T01:00:00.000Z')
+    const original = { ...localTicket('2026-10-13T01:00:00.000Z'), entryMode: 'profit_only' as const, manualProfitThb: 100, agentPriceThb: 0, costThb: 0 }
     state.local.tickets.set(original.id, original)
     return { original, input: { issueDate: '2026-10-13', issueTime: '22:37', projectId: project.id, supplierName: project.supplierName, projectName: project.name, subItemName: project.subItemName, manualProfitThb: 123.45, agentPriceThb: NaN, costThb: NaN, note: '示例返佣' } }
   }

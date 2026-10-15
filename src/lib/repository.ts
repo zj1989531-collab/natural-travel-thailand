@@ -3,7 +3,8 @@ import { db } from './db'
 import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, SettlementMode, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import { resolveProjectRules, validateProjectRules } from './project-rules'
 import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
@@ -22,6 +23,7 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  settlement_mode?: SettlementMode | null
   quantity_unit?: QuantityUnit
   amount_basis?: AmountBasis
   person_count?: number | null
@@ -45,6 +47,8 @@ type CloudTicket = {
 }
 
 type CloudProject = {
+  default_amount_basis?: AmountBasis | null
+  settlement_mode?: SettlementMode | null
   manual_agent_price?: boolean
   quantity_unit?: QuantityUnit
   entry_mode?: EntryMode
@@ -95,6 +99,8 @@ const toCloudSupplier = (supplier: Supplier) => ({
 })
 
 const toLocalProject = (project: CloudProject): Project => ({
+  defaultAmountBasis: project.default_amount_basis ?? undefined,
+  settlementMode: project.settlement_mode ?? undefined,
   manualAgentPrice: project.manual_agent_price ?? false,
   quantityUnit: project.quantity_unit ?? 'person',
   entryMode: project.entry_mode ?? 'standard',
@@ -114,6 +120,8 @@ const toLocalProject = (project: CloudProject): Project => ({
 })
 
 const toCloudProject = (project: Project) => ({
+  default_amount_basis: project.defaultAmountBasis ?? null,
+  settlement_mode: project.settlementMode ?? null,
   manual_agent_price: project.manualAgentPrice ?? false,
   quantity_unit: project.quantityUnit ?? 'person',
   entry_mode: project.entryMode ?? 'standard',
@@ -132,6 +140,7 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  settlementMode: ticket.settlement_mode ?? undefined,
   quantityUnit: ticket.quantity_unit ?? 'person',
   amountBasis: ticket.amount_basis ?? 'total',
   personCount: ticket.person_count ?? null,
@@ -156,6 +165,7 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  settlement_mode: ticket.settlementMode ?? null,
   quantity_unit: ticket.quantityUnit ?? 'person',
   amount_basis: ticket.amountBasis ?? 'total',
   person_count: ticket.personCount ?? null,
@@ -358,6 +368,7 @@ export const ledgerRepository = {
   },
 
   async createProject(input: ProjectInput): Promise<Project> {
+    validateProjectRules(input)
     const name = cleanProjectLabel(input.name.trim())
     const subItemName = cleanProjectLabel(input.subItemName.trim())
     if (!name) throw new Error('请输入项目名称。')
@@ -365,6 +376,7 @@ export const ledgerRepository = {
     if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
+    if (input.entryMode !== 'profit_only') validateAmountPrecision(input.manualAgentPrice ? [input.defaultCostThb] : [input.defaultCostThb, input.defaultAgentPriceThb])
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
     const suppliers = await db.getSuppliers()
@@ -378,6 +390,7 @@ export const ledgerRepository = {
     }
     const timestamp = now()
     const project: Project = {
+      ...resolveProjectRules({ ...input, name, subItemName }),
       quantityUnit: input.quantityUnit ?? 'person',
       manualAgentPrice: input.entryMode !== 'profit_only' && Boolean(input.manualAgentPrice),
       entryMode: input.entryMode ?? 'standard',
@@ -400,19 +413,23 @@ export const ledgerRepository = {
   },
 
   async updateProjectPrices(id: string, input: ProjectPricesInput): Promise<Project> {
+    validateProjectRules(input)
     const userId = await activeUserId()
     const current = (await db.getProjects()).find((project) => project.id === id && project.userId === userId)
     if (!current) throw new Error('当前账号无法修改这个项目价格。')
-    if (current.entryMode === 'profit_only') throw new Error('仅录利润项目没有默认售价和成本，请在记录中填写利润。')
+    if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
     const manualAgentPrice = input.manualAgentPrice ?? current.manualAgentPrice ?? false
-    if (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0)) {
+    if (current.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
+    if (current.entryMode !== 'profit_only') validateAmountPrecision(manualAgentPrice ? [input.defaultCostThb] : [input.defaultCostThb, input.defaultAgentPriceThb])
     const updated: Project = {
       ...projectDisplay(current),
-      defaultCostThb: input.defaultCostThb,
-      defaultAgentPriceThb: manualAgentPrice ? 0 : input.defaultAgentPriceThb,
-      manualAgentPrice,
+      ...resolveProjectRules({ ...current, quantityUnit: input.quantityUnit ?? current.quantityUnit, defaultAmountBasis: input.defaultAmountBasis ?? current.defaultAmountBasis, settlementMode: input.settlementMode ?? current.settlementMode }),
+      quantityUnit: current.entryMode === 'profit_only' ? current.quantityUnit ?? 'person' : input.quantityUnit ?? current.quantityUnit ?? 'person',
+      defaultCostThb: current.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
+      defaultAgentPriceThb: current.entryMode === 'profit_only' || manualAgentPrice ? 0 : input.defaultAgentPriceThb,
+      manualAgentPrice: current.entryMode !== 'profit_only' && manualAgentPrice,
       updatedAt: nextModifiedAt(current.updatedAt),
       syncStatus: statusForWrite()
     }
@@ -421,10 +438,8 @@ export const ledgerRepository = {
   },
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
+    validateProjectRules({ settlementMode: input.settlementMode })
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
-    const amountBasis = input.amountBasis ?? (existing ? existing.amountBasis ?? 'total' : 'per_person')
-    if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
-    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error(`按${quantityLabels(input).label}计算时，${quantityLabels(input).label}必须是大于或等于1的整数。`)
     if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
       throw new Error(`${quantityLabels(input).label}必须是大于或等于1的整数。`)
     }
@@ -455,7 +470,10 @@ export const ledgerRepository = {
     const projects = await db.getProjects()
     const project = projects.find((item) => item.id === input.projectId && item.supplierId === nextSupplier.id && item.userId === userId)
     if (!project || cleanProjectLabel(project.name) !== cleanProjectLabel(input.projectName) || cleanProjectLabel(project.subItemName) !== cleanProjectLabel(input.subItemName)) throw new Error('请选择该供货商已录入的项目子项。')
-    const entryMode = project.entryMode ?? 'standard'
+    const amountBasis = input.amountBasis ?? (existing?.projectId === project.id ? existing.amountBasis ?? 'total' : resolveProjectRules(project).defaultAmountBasis)
+    if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
+    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error(`按${quantityLabels(input).label}计算时，${quantityLabels(input).label}必须是大于或等于1的整数。`)
+    const entryMode = existing?.projectId === project.id ? existing.entryMode ?? 'standard' : project.entryMode ?? 'standard'
     if (entryMode === 'profit_only') {
       if (typeof input.manualProfitThb !== 'number' || !Number.isFinite(input.manualProfitThb) || input.manualProfitThb < 0) throw new Error('请填写大于或等于0的利润金额。')
     } else if (!Number.isFinite(input.agentPriceThb) || !Number.isFinite(input.costThb) || input.agentPriceThb < 0 || input.costThb < 0) {
@@ -463,7 +481,8 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
-      quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? project.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
+      settlementMode: existing?.projectId === project.id ? (currentTicket ?? existing).settlementMode : entryMode === 'profit_only' ? 'monthly' : input.settlementMode ?? resolveProjectRules(project).settlementMode,
+      quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
       amountBasis,
       personCount: input.personCount ?? null,
       entryMode,

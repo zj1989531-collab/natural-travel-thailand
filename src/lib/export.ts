@@ -5,6 +5,7 @@ import { getOriginalTicketAmounts, getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
 import { isItemQuantity, quantityLabels } from './quantity'
 import { cleanProjectLabel } from './project-labels'
+import { ticketSettlementMode } from './project-rules'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
   Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
@@ -22,9 +23,9 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     refunds: refunds.map((record) => pickFields(record, ['id', 'userId', 'ticketId', 'personCount', 'isFull', 'refundRevenueThb', 'returnedCostThb', 'refundDate', 'refundTime', 'note', 'cancelledAt', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Explicit fields exclude authentication sessions and any future secret fields.
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
-    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'manualAgentPrice', 'quantityUnit', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
+    projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'manualAgentPrice', 'quantityUnit', 'defaultAmountBasis', 'settlementMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
     // Include deletion markers so a backup does not resurrect deleted tickets.
-    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'quantityUnit', 'amountBasis', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
+    tickets: data.tickets.map((record) => pickFields(record, ['id', 'userId', 'issueDate', 'issueTime', 'personCount', 'quantityUnit', 'amountBasis', 'settlementMode', 'entryMode', 'manualProfitThb', 'supplierId', 'supplierName', 'projectId', 'projectName', 'subItemName', 'agentPriceThb', 'costThb', 'note', 'createdAt', 'updatedAt', 'deletedAt', 'syncStatus']))
   }
 }
 
@@ -54,6 +55,7 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '累计成本返还 (THB)': getRefundState(ticket).returnedCostThb,
       '计价方式': ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计算` : '整单总额',
       '记录类型': ticket.entryMode === 'profit_only' ? '月结返佣（仅录利润）' : '出票',
+      '结算方式': ticketSettlementMode(ticket) === 'monthly' ? '月结' : '日结',
       '供应商': ticket.supplierName,
       '项目': cleanProjectLabel(ticket.projectName) || '未分类项目',
       '子项 / 套餐': cleanProjectLabel(ticket.subItemName),

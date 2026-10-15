@@ -34,7 +34,7 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 执行 [supabase/schema.sql](./supabase/schema.sql)。
+1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)。
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
@@ -45,7 +45,9 @@ pnpm dev:sync
 
 线上构建在 GitHub 仓库的 Settings → Secrets and variables → Actions 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`，然后重新运行 Deploy ticket ledger。两端登录同一邮箱，在线修改会自动同步；离线修改会排队，联网后自动上传。页面恢复前台时会重新核对数据，另有定时重试。
 
-新项目执行 `schema.sql` 即可。若此前已经建库，按当前版本执行需要的 `supabase/migrations/` 升级脚本，再执行 `005_enable_realtime_sync.sql` 启用实时订阅和最新修改优先的数据库保护。
+已有数据库先执行当前版本需要的 `supabase/migrations/` 升级脚本及 `supabase/refunds.sql`，最后执行 `supabase/project-rules.sql`，再发布前端。规则升级只新增可空字段，不回填或重写历史金额；兼容触发器防止旧客户端缺少字段时清空已有规则。电脑与手机都应刷新到新版。
+
+套餐可设置默认按人／件或整单计价，以及日结／月结。旧套餐按名称推荐默认值，保存设置后固定；每次出票可临时改计价，历史记录保留自身金额与结算归属。保存前会合并提示本机缓存中疑似重复或亏损的记录，确认后仍可保存；离线提示不能保证发现另一设备尚未同步的重复业务。
 
 ## 功能边界
 

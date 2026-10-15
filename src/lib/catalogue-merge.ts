@@ -1,7 +1,7 @@
 import type { Project, Supplier, TicketRecord } from '../types'
 import { normalizeSupplier } from './format'
 import { cleanProjectLabel } from './project-labels'
-import { isNewer, mergeRemoteRecord, nextModifiedAt } from './sync'
+import { isNewer, mergeRemoteRecord, nextModifiedAt, preserveRuleFields } from './sync'
 
 type CatalogueRow = Supplier | Project
 
@@ -30,7 +30,8 @@ function mergeGroups<T extends CatalogueRow>(rows: T[], remote: T[], userId: str
     if (cloud.length > 1) throw new Error('云端有重复资料编号，需要核对后合并；本机资料已保留。')
     const canonical = cloud[0] ?? [...group].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0]
     const latest = group.reduce((a, b) => isNewer(b.updatedAt, a.updatedAt) ? b : a, canonical)
-    result.set(canonical.id, { ...latest, id: canonical.id, createdAt: canonical.createdAt, mergedIntoId: undefined,
+    const withRules = [...group].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).reduce((preferred, row) => preserveRuleFields(preferred, row), latest)
+    result.set(canonical.id, { ...withRules, id: canonical.id, createdAt: canonical.createdAt, mergedIntoId: undefined,
       syncStatus: latest.id === canonical.id ? latest.syncStatus : 'pending' })
     for (const row of group) if (row.id !== canonical.id) result.set(row.id, { ...row, mergedIntoId: canonical.id, syncStatus: 'synced' })
   }

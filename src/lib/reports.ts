@@ -1,5 +1,6 @@
 import type { TicketRecord } from '../types'
-import { activeTickets, bySupplier, isMonthlySettlementProject, monthDateRange, summarise } from './stats'
+import { activeTickets, bySupplier, monthDateRange, summarise } from './stats'
+import { ticketSettlementMode } from './project-rules'
 import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity } from './quantity'
 import { cleanProjectLabel, ticketDisplay } from './project-labels'
@@ -38,7 +39,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     (!query.projectName || cleanProjectLabel(ticket.projectName || '未分类项目') === cleanProjectLabel(query.projectName)))
     .map(ticketDisplay)
     .sort((a, b) => a.issueDate.localeCompare(b.issueDate) || (a.issueTime ?? '').localeCompare(b.issueTime ?? '') || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
-  const monthlyRecords = selected.filter((ticket) => ticket.entryMode === 'profit_only' || isMonthlySettlementProject(ticket.projectName))
+  const monthlyRecords = selected.filter((ticket) => ticketSettlementMode(ticket) === 'monthly')
   const monthlyIds = new Set(monthlyRecords.map((ticket) => ticket.id))
   const records = query.mode === 'day' ? selected.filter((ticket) => !monthlyIds.has(ticket.id)) : selected
   const headcountRecords = records.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && !isItemQuantity(ticket))

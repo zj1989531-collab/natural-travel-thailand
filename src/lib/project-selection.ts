@@ -1,5 +1,6 @@
 import type { Project, TicketInput } from '../types'
 import { cleanProjectLabel, projectDisplay } from './project-labels'
+import { resolveProjectRules } from './project-rules'
 
 export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) => {
   projects = projects.map((project) => ({ ...project, name: cleanProjectLabel(project.name) }))
@@ -16,11 +17,12 @@ export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) =>
 const clearSelection = (form: TicketInput, projectName: string, quantityUnit: Project['quantityUnit'] = 'person'): TicketInput => ({
   ...form, quantityUnit, projectName, projectId: '', supplierName: '', subItemName: '',
   agentPriceThb: Number.NaN, costThb: Number.NaN,
-  entryMode: 'standard', manualProfitThb: null
+  entryMode: 'standard', manualProfitThb: null, settlementMode: null
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({
   ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.supplierName,
+  amountBasis: resolveProjectRules(project).defaultAmountBasis, settlementMode: resolveProjectRules(project).settlementMode,
   subItemName: project.subItemName, entryMode: project.entryMode ?? 'standard', manualProfitThb: null,
   agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.manualAgentPrice ? Number.NaN : project.defaultAgentPriceThb,
   costThb: project.entryMode === 'profit_only' ? 0 : project.defaultCostThb

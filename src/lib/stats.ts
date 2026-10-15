@@ -2,6 +2,8 @@ import type { SupplierSummary, Summary, TicketRecord } from '../types'
 import { getTicketAmounts } from './ticket-amounts'
 import { getRefundState } from './refunds'
 import { isValidCalendarDate } from './format'
+import { ticketSettlementMode } from './project-rules'
+export { isMonthlySettlementProject } from './project-rules'
 
 export const getProfit = (ticket: Parameters<typeof getTicketAmounts>[0]): number => getTicketAmounts(ticket).profitThb
 
@@ -22,15 +24,10 @@ export const summarise = (tickets: TicketRecord[]): Summary =>
 export const ticketsOnDate = (tickets: TicketRecord[], date: string): TicketRecord[] =>
   tickets.filter((ticket) => ticket.issueDate === date)
 
-export const isMonthlySettlementProject = (projectName: string): boolean => {
-  const name = projectName.normalize('NFKC').replace(/\s+/g, '').toLowerCase()
-  return /^(69|79)秀/.test(name) || /泰拳|嘉年华|潜水/.test(name) || /格兰岛.*一日游/.test(name)
-}
-
 // Settlement classification affects the daily dashboard only. Keep the source
 // records unchanged so the full ledger, monthly report and export retain them.
 export const ticketsForDailyStats = (tickets: TicketRecord[], date: string): TicketRecord[] =>
-  activeTickets(ticketsOnDate(tickets, date)).filter((ticket) => ticket.entryMode !== 'profit_only' && !isMonthlySettlementProject(ticket.projectName))
+  activeTickets(ticketsOnDate(tickets, date)).filter((ticket) => ticketSettlementMode(ticket) !== 'monthly')
 
 export const monthDateRange = (month: string): { start: string; end: string } => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('月份格式必须为 YYYY-MM。')

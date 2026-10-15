@@ -2,6 +2,7 @@ export type SyncStatus = 'synced' | 'pending' | 'error'
 export type EntryMode = 'standard' | 'profit_only'
 export type AmountBasis = 'total' | 'per_person'
 export type QuantityUnit = 'person' | 'item'
+export type SettlementMode = 'daily' | 'monthly'
 
 export interface Supplier {
   /** Local-only recoverable duplicate; never uploaded or offered in selectors. */
@@ -16,6 +17,8 @@ export interface Supplier {
 }
 
 export interface Project {
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
   mergedIntoId?: string
   manualAgentPrice?: boolean
   quantityUnit?: QuantityUnit
@@ -36,6 +39,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   refunds?: RefundRecord[]
   amountBasis?: AmountBasis
@@ -61,6 +65,7 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   amountBasis?: AmountBasis
   personCount?: number | null
@@ -124,6 +129,8 @@ export interface AppSettings {
 }
 
 export interface ProjectInput {
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
   supplierId: string
   name: string
   subItemName: string
@@ -135,6 +142,9 @@ export interface ProjectInput {
 }
 
 export interface ProjectPricesInput {
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
+  quantityUnit?: QuantityUnit
   defaultCostThb: number
   defaultAgentPriceThb: number
   manualAgentPrice?: boolean
