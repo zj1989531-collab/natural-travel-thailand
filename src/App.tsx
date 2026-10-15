@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
+import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
+import { ProfitTrendPanel } from './components/ProfitTrendPanel'
+import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { ProjectPicker } from './components/ProjectPicker'
 import { SaveWarning } from './components/SaveWarning'
@@ -442,6 +444,13 @@ function LoginSheet({ onClose, onSent }: { onClose: () => void; onSent: (message
 }
 
 export default function App() {
+  const today = useBangkokDate()
+  const [offline, setOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false)
+  useEffect(() => {
+    const check = () => setOffline(navigator.onLine === false)
+    window.addEventListener('online', check); window.addEventListener('offline', check)
+    return () => { window.removeEventListener('online', check); window.removeEventListener('offline', check) }
+  }, [])
   const [tickets, setTickets] = useState<TicketRecord[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -604,8 +613,7 @@ export default function App() {
     return () => window.clearTimeout(timeout)
   }, [toast])
 
-  const today = getBangkokDate()
-  const month = getBangkokMonth()
+  const month = today.slice(0, 7)
   const monthRange = monthDateRange(month)
   const year = today.slice(0, 4)
   const yearRange = yearDateRange(year)
@@ -776,6 +784,7 @@ export default function App() {
 
           <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；月结计入月报、年报，不计每日概览。" />
           <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含月结返佣项目。" />
+          <ProfitTrendPanel tickets={tickets} today={today} pendingCount={unsyncedCount} offline={offline} />
           <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年1月1日至12月31日统计，包含月结返佣及商品利润，退票回算原记录年份。" />
 
           <section className="ranking-section">
