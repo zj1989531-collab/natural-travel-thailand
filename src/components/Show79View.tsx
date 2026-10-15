@@ -114,15 +114,31 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     setProjectId(ticket.projectId ?? ''); setBasis(ticket.amountBasis ?? 'total'); setPrice(String(ticket.agentPriceThb)); setCost(String(ticket.costThb)); setCommission(ticket.manualProfitThb == null ? '' : String(ticket.manualProfitThb)); setNote(ticket.note); setError(''); setMessage('')
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+  const copyImage = async () => {
+    if (!preview) return
+    setError(''); setMessage('')
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      setError('当前浏览器不支持复制图片。可长按预览图片选择“复制”，或用手机 Safari / Chrome 打开系统再试。')
+      return
+    }
+    try {
+      // The PNG is already generated, so writing starts within the button click.
+      // Copy image bytes only: no filename, download link or text representation.
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': preview.blob })])
+      setMessage('图片已复制。切换到微信，长按聊天输入框尝试粘贴，无需保存到相册。')
+    } catch {
+      setError('图片未能复制。请允许浏览器访问剪贴板后重试，或长按预览图片选择“复制”。')
+    }
+  }
   const share = async () => {
     if (!preview) return
     try {
       const file = new File([preview.blob], voucherFilename(preview.input), { type: 'image/png' })
       if (!navigator.canShare?.({ files: [file] }) || !navigator.share) {
-        setMessage('此浏览器不支持直接分享图片。请下载或长按图片保存，再从微信相册发送。'); return
+        setMessage('此浏览器不支持直接分享图片。可尝试“复制图片”，再切换到微信粘贴。'); return
       }
       await navigator.share({ files: [file], title: '79秀确认单' })
-    } catch (e) { if (!(e instanceof DOMException && e.name === 'AbortError')) setError('分享未完成，请下载图片后从微信发送。') }
+    } catch (e) { if (!(e instanceof DOMException && e.name === 'AbortError')) setError('分享未完成，可尝试“复制图片”后到微信粘贴。') }
   }
 
   return <section className="show79-view">
@@ -154,7 +170,7 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
         {editing && <button type="button" className="text-action" onClick={() => { setEditing(undefined); setRecordTime(getBangkokTime()); setInput({ guestName: '', date: getBangkokDate(), people: 1 }); closePreview(); setNote('') }}>取消编辑</button>}
       </form>
       {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="sheet-copy" role="status">{message}</p>}
-      {preview && <div className="show79-voucher"><p>确认单预览 · {preview.input.guestName} · {preview.input.people}人 · {voucherDate(preview.input.date)}</p><img src={preview.url} alt={`${preview.input.guestName}的79秀确认单，${voucherDate(preview.input.date)}，${preview.input.people}人`} /><div className="show79-share"><button type="button" className="primary-button" onClick={() => void share()}>分享图片（可选择微信）</button><button type="button" className="secondary-button" onClick={() => downloadVoucher(preview.url, voucherFilename(preview.input))}>下载图片</button><button type="button" className="secondary-button" onClick={() => { try { printVoucher(preview.url) } catch (e) { setError(e instanceof Error ? e.message : "打印失败。") } }}>打印 / 保存 PDF</button></div><p className="sheet-copy">微信是否出现在分享菜单中取决于手机和浏览器，也可长按图片保存后发送。</p></div>}
+      {preview && <div className="show79-voucher"><p>确认单预览 · {preview.input.guestName} · {preview.input.people}人 · {voucherDate(preview.input.date)}</p><img src={preview.url} alt={`${preview.input.guestName}的79秀确认单，${voucherDate(preview.input.date)}，${preview.input.people}人`} /><div className="show79-share"><button type="button" className="primary-button" onClick={() => void copyImage()}>复制图片（无需保存）</button><button type="button" className="secondary-button" onClick={() => void share()}>分享图片（可选择微信）</button><button type="button" className="secondary-button" onClick={() => downloadVoucher(preview.url, voucherFilename(preview.input))}>下载图片</button><button type="button" className="secondary-button" onClick={() => { try { printVoucher(preview.url) } catch (e) { setError(e instanceof Error ? e.message : "打印失败。") } }}>打印 / 保存 PDF</button></div><p className="sheet-copy">复制图片后可切换微信，长按聊天输入框尝试粘贴，无需保存到相册。能否粘贴成图片取决于手机和微信的支持。</p></div>}
     </section>
     <section className="show79-orders"><h2>79秀订单</h2><div className="show79-filters"><label>订单范围<select value={dayOnly ? 'day' : 'month'} onChange={event => setDayOnly(event.target.value === 'day')}><option value="month">所选月份</option><option value="day">所选日期</option></select></label><label>搜索客户 / 备注<input value={search} onChange={event => setSearch(event.target.value)} /></label></div>
       {!records.length && <p className="empty-card">当前范围没有79秀订单。</p>}
