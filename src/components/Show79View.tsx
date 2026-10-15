@@ -29,6 +29,7 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
   const [command, setCommand] = useState('')
   const [commandError, setCommandError] = useState('')
   const [commandMessage, setCommandMessage] = useState('')
+  const [pasting, setPasting] = useState(false)
   const [input, setInput] = useState<Show79VoucherInput>(() => ({ guestName: '', date: getBangkokDate(), people: 1 }))
   const showProjects = useMemo(() => projects.filter(project => isShow79Project(project.name) && project.quantityUnit !== 'item'), [projects])
   const [projectId, setProjectId] = useState('')
@@ -48,8 +49,11 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
   const [preview, setPreview] = useState<{ url: string; blob: Blob; input: Show79VoucherInput }>()
   const urlRef = useRef<string | undefined>(undefined)
   const generationRef = useRef(0)
+  const pasteRequestRef = useRef(0)
+  const pasteLock = useRef(false)
+  const commandRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  useEffect(() => () => { generationRef.current++; if (urlRef.current) URL.revokeObjectURL(urlRef.current) }, [])
+  useEffect(() => () => { generationRef.current++; pasteRequestRef.current++; if (urlRef.current) URL.revokeObjectURL(urlRef.current) }, [])
   const project = showProjects.find(project => project.id === projectId)
   useEffect(() => {
     if (!projectId && showProjects.length === 1 && !editing) {
@@ -68,7 +72,8 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     if (urlRef.current) URL.revokeObjectURL(urlRef.current)
     urlRef.current = undefined; setPreview(undefined)
   }
-  const update = <K extends keyof Show79VoucherInput>(key: K, value: Show79VoucherInput[K]) => { generationRef.current++; closePreview(); setInput(current => ({ ...current, [key]: value })) }
+  const cancelPaste = () => { pasteRequestRef.current++; pasteLock.current = false; setPasting(false) }
+  const update = <K extends keyof Show79VoucherInput>(key: K, value: Show79VoucherInput[K]) => { cancelPaste(); generationRef.current++; closePreview(); setInput(current => ({ ...current, [key]: value })) }
   const selectProject = (id: string) => {
     setProjectId(id)
     const selected = showProjects.find(project => project.id === id)
@@ -87,16 +92,46 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     } catch (e) { if (generation === generationRef.current) setError(e instanceof Error ? e.message : '图片生成失败。') }
     finally { if (generation === generationRef.current) setBusy(false) }
   }
-  const fillCommand = () => {
+  const fillCommand = (text: string) => {
+    if (busy) return
+    cancelPaste()
     setCommandError(''); setCommandMessage(''); setError(''); setMessage('')
     try {
-      const parsed = parseShow79Command(command)
+      const parsed = parseShow79Command(text)
       generationRef.current++; closePreview(); setInput(parsed)
       setCommandMessage(`已填入：${parsed.guestName} · ${voucherDate(parsed.date)} · ${parsed.people}人。请核对后生成图片或保存订单。`)
     } catch (e) { setCommandError(e instanceof Error ? e.message : '未能识别订单。') }
   }
+  const pasteAndFill = async () => {
+    if (busy || pasteLock.current) return
+    setCommandError(''); setCommandMessage(''); setError(''); setMessage('')
+    if (!navigator.clipboard?.readText) {
+      setCommandError('当前浏览器无法直接读取剪贴板。请长按上方输入框黏贴，系统会自动识别；也可输入文字后点“识别当前文字”。')
+      commandRef.current?.focus({ preventScroll: true })
+      return
+    }
+    const request = ++pasteRequestRef.current
+    pasteLock.current = true; setPasting(true)
+    try {
+      // Start inside the click gesture; Safari may show its native Paste prompt.
+      const text = await navigator.clipboard.readText()
+      if (request !== pasteRequestRef.current) return
+      if (!text.trim()) {
+        setCommandError('剪贴板没有文字。请先复制客户姓名、日期和人数，再点“黏贴/自动填入”。')
+        return
+      }
+      setCommand(text)
+      fillCommand(text)
+    } catch {
+      if (request !== pasteRequestRef.current) return
+      setCommandError('未能读取剪贴板。请允许浏览器黏贴，或长按上方输入框黏贴，系统会自动识别。')
+      commandRef.current?.focus({ preventScroll: true })
+    } finally {
+      if (request === pasteRequestRef.current) { pasteLock.current = false; setPasting(false) }
+    }
+  }
   const save = async (acknowledgedKey?: string) => {
-    if (saveLock.current) return
+    if (saveLock.current || pasteLock.current) return
     setError(''); setMessage('')
     try {
       validateShow79Voucher(input)
@@ -116,6 +151,7 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     finally { saveLock.current = false; setBusy(false) }
   }
   const edit = (ticket: TicketRecord) => {
+    cancelPaste()
     closePreview(); setEditing(ticket); setInput({ guestName: ticket.guestName ?? '', date: ticket.issueDate, people: ticket.personCount ?? 1 })
     setProjectId(ticket.projectId ?? ''); setBasis(ticket.amountBasis ?? 'total'); setPrice(String(ticket.agentPriceThb)); setCost(String(ticket.costThb)); setCommission(ticket.manualProfitThb == null ? '' : String(ticket.manualProfitThb)); setNote(ticket.note); setError(''); setMessage('')
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -158,9 +194,10 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     </>}
     <section className="show79-entry"><h2>{editing ? '编辑79秀订单' : '生成确认单 / 新增订单'}</h2>
       {!editing && <div className="show79-command">
-        <label>一句话填写<textarea value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandError ? 'show79-command-help show79-command-error' : 'show79-command-help'} onChange={event => { setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} placeholder="李湘光 龙粉萍 今天 2个79" /></label>
-        <p className="sheet-copy" id="show79-command-help">例如：李湘光 龙粉萍 今天 2个79。人数可写“人、个、位、名、张”，79可放前面或后面。</p>
-        <button type="button" className="secondary-button" disabled={busy} onClick={fillCommand}>自动填入</button>
+        <label>一句话填写<textarea ref={commandRef} disabled={busy} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandError ? 'show79-command-help show79-command-error' : 'show79-command-help'} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => { const text = event.clipboardData.getData('text/plain'); if (!text.trim()) return; event.preventDefault(); setCommand(text); fillCommand(text) }} placeholder="李湘光 龙粉萍 今天 2个79" /></label>
+        <p className="sheet-copy" id="show79-command-help">先复制订单文字，再点“黏贴/自动填入”；也可长按输入框黏贴。例如：李湘光 龙粉萍 今天 2个79。</p>
+        <button type="button" className="secondary-button" disabled={busy || pasting} aria-busy={pasting} onClick={() => void pasteAndFill()}>{pasting ? '正在黏贴…' : '黏贴/自动填入'}</button>
+        {command.trim() && <button type="button" className="text-action" disabled={busy || pasting} onClick={() => fillCommand(command)}>识别当前文字</button>}
         {commandError && <p className="form-error" id="show79-command-error" role="alert">{commandError}</p>}
         {commandMessage && <p className="sheet-copy" role="status">{commandMessage}</p>}
       </div>}
@@ -168,7 +205,7 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
         <label>客户姓名<input value={input.guestName} maxLength={100} disabled={busy} onChange={event => update('guestName', event.target.value)} required /></label>
         <div className="form-grid"><label>观看日期<input type="date" disabled={busy} value={input.date} onChange={event => update('date', event.target.value)} required /></label><label>人数<input type="number" disabled={busy} min="1" step="1" value={Number.isFinite(input.people) ? input.people : ''} onChange={event => update('people', event.target.value === '' ? Number.NaN : Number(event.target.value))} required /></label></div>
         <p className="sheet-copy">时间：18:30–21:30【循环表演】 · 预订单号留空</p>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => void showPreview(input)}>{busy ? '处理中…' : '预览确认单图片'}</button>
+        <button type="button" className="secondary-button" disabled={busy || pasting} onClick={() => void showPreview(input)}>{busy ? '处理中…' : '预览确认单图片'}</button>
         <details open={Boolean(editing)}><summary>保存到独立账本 · 填写实际金额</summary>
           <label>供货商套餐<select value={projectId} onChange={event => selectProject(event.target.value)}><option value="">请选择79秀套餐</option>{showProjects.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name} · {project.subItemName || '不分套餐'}</option>)}</select></label>
           {!showProjects.length && <button type="button" className="text-action" onClick={onManageProjects}>先录入79秀项目及供货商价格</button>}
@@ -176,10 +213,10 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
           {project?.entryMode === 'profit_only' ? <label>{basis === 'per_person' ? '每人实际利润' : '整单实际利润'}（THB）<input type="number" min="0" step="0.01" value={commission} onChange={event => setCommission(event.target.value)} /></label> : <div className="form-grid"><label>{basis === 'per_person' ? '每人售价' : '整单售价'}（THB）<input type="number" min="0" step="0.01" value={price} onChange={event => setPrice(event.target.value)} /></label><label>{basis === 'per_person' ? '每人成本' : '整单成本'}（THB）<input type="number" min="0" step="0.01" value={cost} onChange={event => setCost(event.target.value)} /></label></div>}
           <label>内部备注<textarea value={note} maxLength={300} onChange={event => setNote(event.target.value)} /></label>
           <p className="sheet-copy">按观看日期归入日/月统计；只生成确认单不会新增账本记录，也不会向供应商下单。</p>
-          {!warning && <button type="submit" className="primary-button" disabled={busy}>{busy ? '处理中…' : editing ? '保存订单修改' : '保存79秀订单'}</button>}
+          {!warning && <button type="submit" className="primary-button" disabled={busy || pasting}>{busy ? '处理中…' : editing ? '保存订单修改' : '保存79秀订单'}</button>}
         </details>
-        {warning && <SaveWarning messages={warning.messages} saving={busy} onBack={() => setWarning(null)} onContinue={() => void save(warning.key)} />}
-        {editing && <button type="button" className="text-action" onClick={() => { setEditing(undefined); setRecordTime(getBangkokTime()); setInput({ guestName: '', date: getBangkokDate(), people: 1 }); closePreview(); setNote('') }}>取消编辑</button>}
+        {warning && <SaveWarning messages={warning.messages} saving={busy || pasting} onBack={() => setWarning(null)} onContinue={() => void save(warning.key)} />}
+        {editing && <button type="button" className="text-action" onClick={() => { cancelPaste(); setEditing(undefined); setRecordTime(getBangkokTime()); setInput({ guestName: '', date: getBangkokDate(), people: 1 }); closePreview(); setNote('') }}>取消编辑</button>}
       </form>
       {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="sheet-copy" role="status">{message}</p>}
       {preview && <div className="show79-voucher"><p>确认单预览 · {preview.input.guestName} · {preview.input.people}人 · {voucherDate(preview.input.date)}</p><img src={preview.url} alt={`${preview.input.guestName}的79秀确认单，${voucherDate(preview.input.date)}，${preview.input.people}人`} /><div className="show79-share"><button type="button" className="primary-button" onClick={() => void copyImage()}>复制图片（无需保存）</button><button type="button" className="secondary-button" onClick={() => void share()}>分享图片（可选择微信）</button><button type="button" className="secondary-button" onClick={() => downloadVoucher(preview.url, voucherFilename(preview.input))}>下载图片</button><button type="button" className="secondary-button" onClick={() => { try { printVoucher(preview.url) } catch (e) { setError(e instanceof Error ? e.message : "打印失败。") } }}>打印 / 保存 PDF</button></div><p className="sheet-copy">复制图片后可切换微信，长按聊天输入框尝试粘贴，无需保存到相册。能否粘贴成图片取决于手机和微信的支持。</p></div>}
@@ -188,7 +225,7 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
       {!records.length && <p className="empty-card">当前范围没有79秀订单。</p>}
       <div className="records-list">{records.map(ticket => {
         const refund = getRefundState(ticket)
-        return <article className="ticket-card" key={ticket.id}><div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')} · {ticket.supplierName}</p><strong>{ticket.guestName || '旧记录 · 姓名未填'}</strong></div><strong className={getTicketAmounts(ticket).profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(getTicketAmounts(ticket).profitThb)}</strong></div><div className="ticket-meta"><span>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数' : `有效人数：${refund.remainingPeople ?? '未填'}`}</span><span>{refund.full ? '已全部退票' : refund.active.length ? '部分退票' : '未退票'}</span>{ticket.syncStatus !== 'synced' && <span>等待同步</span>}</div>{ticket.note && <p className="ticket-note">{ticket.note}</p>}<RefundHistory ticket={ticket} onCancel={onCancelRefund} /><div className="ticket-actions"><button type="button" disabled={busy || !ticket.guestName || !refund.remainingPeople || ticket.entryMode === 'profit_only'} onClick={() => void showPreview({ guestName: ticket.guestName ?? '', date: ticket.issueDate, people: refund.remainingPeople ?? 0 }).then(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))}>确认单</button>{ticket.entryMode !== 'profit_only' && !refund.full && <button type="button" onClick={() => onRefund(ticket.id)}>退票</button>}<button type="button" disabled={busy || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" disabled={busy || Boolean(ticket.refunds?.length)} className="danger-action" onClick={() => void onDelete(ticket)}>删除</button></div></article>
+        return <article className="ticket-card" key={ticket.id}><div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')} · {ticket.supplierName}</p><strong>{ticket.guestName || '旧记录 · 姓名未填'}</strong></div><strong className={getTicketAmounts(ticket).profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(getTicketAmounts(ticket).profitThb)}</strong></div><div className="ticket-meta"><span>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数' : `有效人数：${refund.remainingPeople ?? '未填'}`}</span><span>{refund.full ? '已全部退票' : refund.active.length ? '部分退票' : '未退票'}</span>{ticket.syncStatus !== 'synced' && <span>等待同步</span>}</div>{ticket.note && <p className="ticket-note">{ticket.note}</p>}<RefundHistory ticket={ticket} onCancel={onCancelRefund} /><div className="ticket-actions"><button type="button" disabled={busy || pasting || !ticket.guestName || !refund.remainingPeople || ticket.entryMode === 'profit_only'} onClick={() => void showPreview({ guestName: ticket.guestName ?? '', date: ticket.issueDate, people: refund.remainingPeople ?? 0 }).then(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))}>确认单</button>{ticket.entryMode !== 'profit_only' && !refund.full && <button type="button" onClick={() => onRefund(ticket.id)}>退票</button>}<button type="button" disabled={busy || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" disabled={busy || Boolean(ticket.refunds?.length)} className="danger-action" onClick={() => void onDelete(ticket)}>删除</button></div></article>
       })}</div>
     </section>
   </section>
