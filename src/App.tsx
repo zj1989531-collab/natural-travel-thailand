@@ -133,7 +133,10 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
 
   const selectProject = (select: (current: TicketInput) => TicketInput) => {
     if (saveLock.current) return
-    setWarning(null); setError(''); setForm(select)
+    setWarning(null); setError(''); setForm(current => {
+      const next = select(current)
+      return ticket && next.projectId === ticket.projectId ? { ...next, settlementMode: ticket.settlementMode, quantityUnit: ticket.quantityUnit ?? 'person', entryMode: ticket.entryMode ?? 'standard' } : next
+    })
   }
 
   const perPerson = form.amountBasis === 'per_person'

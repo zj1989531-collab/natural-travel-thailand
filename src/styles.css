@@ -7,7 +7,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: #f5f6f2; }
+body { margin: 0; min-width: 0; min-height: 100vh; background: #f5f6f2; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .62; }
@@ -167,6 +167,8 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 @media (min-width: 700px) { .app-shell { padding-bottom: 32px; }.app-header { max-width: 760px; margin: auto; }.page-content { padding: 24px 20px 30px; }.bottom-nav { position: sticky; bottom: 14px; width: 410px; height: 60px; padding: 5px 18px; border: 1px solid #dfe6e1; border-radius: 18px; }.bottom-nav .nav-action { width: 44px; height: 44px; font-size: 27px; transform: translateY(-12px); }.export-button { right: max(22px, calc((100vw - 760px) / 2)); bottom: 23px; }.toast { bottom: 94px; } }
 /* Shared form grouping keeps native disabled behavior without extra chrome. */
 .form-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 14px; }
+.form-fields > * { min-width: 0; }
+.form-fields .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .save-warning { border: 1px solid #e1bb75; border-radius: 16px; padding: 16px; background: #fff8e9; color: #624517; }
 .save-warning h3 { margin: 0 0 10px; font-size: 16px; }
 .save-warning p { font-size: 14px; line-height: 1.6; margin: 8px 0; overflow-wrap: anywhere; }
