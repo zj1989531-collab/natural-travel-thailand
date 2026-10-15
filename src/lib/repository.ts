@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { db } from './db'
-import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
+import { createId, isValidCalendarDate, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
 import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, SettlementMode, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
@@ -23,6 +23,7 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  guest_name?: string
   settlement_mode?: SettlementMode | null
   quantity_unit?: QuantityUnit
   amount_basis?: AmountBasis
@@ -140,6 +141,7 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  guestName: ticket.guest_name ?? '',
   settlementMode: ticket.settlement_mode ?? undefined,
   quantityUnit: ticket.quantity_unit ?? 'person',
   amountBasis: ticket.amount_basis ?? 'total',
@@ -165,6 +167,7 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  guest_name: ticket.guestName ?? '',
   settlement_mode: ticket.settlementMode ?? null,
   quantity_unit: ticket.quantityUnit ?? 'person',
   amount_basis: ticket.amountBasis ?? 'total',
@@ -438,6 +441,8 @@ export const ledgerRepository = {
   },
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
+    if (!isValidCalendarDate(input.issueDate)) throw new Error('请填写有效的日期。')
+    if ((input.guestName ?? '').trim().length > 100) throw new Error('客户姓名最多100个字符。')
     validateProjectRules({ settlementMode: input.settlementMode })
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
     if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
@@ -481,6 +486,7 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
+      guestName: input.guestName?.trim() ?? currentTicket?.guestName ?? existing?.guestName ?? '',
       settlementMode: existing?.projectId === project.id ? (currentTicket ?? existing).settlementMode : entryMode === 'profit_only' ? 'monthly' : input.settlementMode ?? resolveProjectRules(project).settlementMode,
       quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
       amountBasis,

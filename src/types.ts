@@ -39,6 +39,7 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  guestName?: string
   settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   refunds?: RefundRecord[]
@@ -65,6 +66,7 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  guestName?: string
   settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   amountBasis?: AmountBasis

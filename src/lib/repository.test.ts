@@ -530,6 +530,21 @@ describe('person count persistence', () => {
     return input
   }
 
+  it('keeps customer names through save, cloud upload, pull and amount-only edits', async () => {
+    const input = prepare()
+    const saved = await ledgerRepository.createOrUpdateTicket({ ...input, guestName: ' jimmy ', personCount: 2 })
+    expect(saved.guestName).toBe('jimmy')
+    await ledgerRepository.synchronise(user)
+    expect(state.cloud.tickets.get(saved.id).guest_name).toBe('jimmy')
+    state.local.tickets.clear()
+    await ledgerRepository.synchronise(user)
+    const pulled = state.local.tickets.get(saved.id)
+    expect(pulled.guestName).toBe('jimmy')
+    const updated = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 3 }, pulled)
+    expect(updated.guestName).toBe('jimmy')
+    expect(getTicketAmounts(updated).profitThb).toBe(600)
+  })
+
   it('saves unit prices and updates totals when headcount changes, without repeated multiplication on sync', async () => {
     const input = prepare()
     const original = await ledgerRepository.createOrUpdateTicket({ ...input, personCount: 3 })

@@ -15,7 +15,7 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 
 1. 打开 https://supabase.com/dashboard ，使用自己的账号登录或注册。账号、验证码和数据库密码自己保存，无需发给任何人。
 2. 新建 Free 组织和项目；项目可命名为 natural-travel-thailand，区域选 Singapore（若可用）。保存生成的数据库密码，等待项目创建完成。
-3. 打开项目 SQL Editor，新建查询，依次执行仓库 `supabase/schema.sql`、`supabase/refunds.sql`、`supabase/project-rules.sql`。它们会创建供货商、项目套餐、票务记录、退票明细表，以及账号行级权限、默认规则和实时同步配置。已有项目先执行需要的升级迁移，最后执行 `project-rules.sql`，再发布新版页面；不回填历史金额。发布后电脑和手机均刷新。
+3. 打开项目 SQL Editor，新建查询，依次执行仓库 `supabase/schema.sql`、`supabase/refunds.sql`、`supabase/project-rules.sql`、`supabase/show79.sql`。它们会创建供货商、项目套餐、票务记录、退票明细表，以及账号行级权限、默认规则和实时同步配置。已有项目先执行需要的升级迁移，最后执行 `project-rules.sql`，再发布新版页面；不回填历史金额。发布后电脑和手机均刷新。
 4. 在 Authentication → URL Configuration 设置 Site URL 为 https://zj1989531-collab.github.io/natural-travel-thailand/ ，Redirect URLs 添加这个完整地址和 http://localhost:5173/ 。
 5. 保留默认 Magic Link 邮件模板，先用注册 Supabase 时的邮箱登录；默认发信服务只允许组织成员的邮箱。其他邮箱需要配置自定义 SMTP 后才可使用。两台设备登录同一个邮箱。
 
@@ -56,3 +56,9 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 ## 7. 商品数量与手填售价
 
 已有数据库执行 `supabase/project-quantities.sql` 升级（本项目云端已执行）。项目可设置数量单位为“商品数量（件）”及“每次录入时手动填写售价”。此时选择子项只带入成本，售价留空并在保存前要求手填；已有门票仍按人数计算，不改变历史金额。数量沿用原 `person_count` 数字字段，用 `quantity_unit` 区分件数和人数；报表与 Excel 分开展示商品数量，药品等商品不会算进门票数量。
+
+## 8. 79秀确认单与独立分账
+
+已有数据库执行 `supabase/show79.sql` 添加 `tickets.guest_name`；保留现有账号权限、实时同步、历史价格及退票记录。新数据库的 `schema.sql` 已包含此字段。客户端代码更新前先完成这一步，避免新增姓名字段上传失败。
+
+底部79秀入口提供独立订单、日人数、月人数、月利润及 jimmy 40% / 大狗二狗合计60%的月度分账。主账本所有报表和普通 Excel 排除79秀；完整 JSON 备份保留79秀及客户姓名。新79秀订单以观看日期作为记录统计日期，历史日期不作自动迁移。手机分享需要 HTTPS 和浏览器文件分享支持；实际微信接收需在目标手机验收，未支持时使用下载或长按保存图片。

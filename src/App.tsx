@@ -10,6 +10,8 @@ import { SummaryPanel } from './components/SummaryPanel'
 import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
+import { Show79View } from './components/Show79View'
+import { isShow79Project, mainLedgerTickets } from './lib/show79'
 import { ProjectPicker } from './components/ProjectPicker'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
@@ -27,7 +29,7 @@ import { chooseProject, chooseProjectOption } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, SettlementMode, Supplier, TicketInput, TicketRecord } from './types'
 
-type View = 'dashboard' | 'records' | 'reports'
+type View = 'dashboard' | 'records' | 'reports' | 'show79'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -64,6 +66,7 @@ const emptyForm = (): TicketInput => ({
 
 export function TicketForm({ ticket, projects, recentProjects = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
+    guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
     amountBasis: ticket.amountBasis ?? 'total',
     settlementMode: ticket.settlementMode,
@@ -171,6 +174,7 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
             <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
             {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
           </label>
+          {isShow79Project(form.projectName) && <label>客户姓名<input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>}
           <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />
           <label>
             计价方式
@@ -185,7 +189,8 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
           {manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
-          {form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
+          {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
+          {!isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
           {form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
@@ -617,13 +622,15 @@ export default function App() {
   const monthRange = monthDateRange(month)
   const year = today.slice(0, 4)
   const yearRange = yearDateRange(year)
-  const visibleTickets = useMemo(() => activeTickets(tickets).filter((ticket) => {
+  const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter((ticket) => {
     const dateMatches = !dateFilter || ticket.issueDate === dateFilter
     const supplierMatches = !supplierFilter || ticket.supplierId === supplierFilter
     const normalizedQuery = query.trim().toLocaleLowerCase()
     const queryMatches = !normalizedQuery || ticket.supplierName.toLocaleLowerCase().includes(normalizedQuery) || ticket.projectName.toLocaleLowerCase().includes(normalizedQuery) || ticket.note.toLocaleLowerCase().includes(normalizedQuery)
     return dateMatches && supplierMatches && queryMatches
   }).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, supplierFilter, query])
+
+  const mainTickets = useMemo(() => mainLedgerTickets(tickets), [tickets])
 
   const monthlySupplierStats = useMemo(() => bySupplier(ticketsInMonth(tickets, month)), [tickets, month])
   const unsyncedCount = [...tickets, ...suppliers, ...projects, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length
@@ -672,9 +679,16 @@ export default function App() {
     const saved = await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
     await refresh()
     setFormOpen(false)
-    setToast(ticketSettlementMode(saved) === 'monthly'
+    setToast(isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
       ? '月结记录已保存，计入所属月报、年报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
+    void synchronise()
+  }
+
+  const saveShow79 = async (input: TicketInput, existing?: TicketRecord) => {
+    requireCloudLogin()
+    await ledgerRepository.createOrUpdateTicket(input, existing)
+    await refresh()
     void synchronise()
   }
 
@@ -782,10 +796,10 @@ export default function App() {
             </section>
           )}
 
-          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；月结计入月报、年报，不计每日概览。" />
-          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含月结返佣项目。" />
-          <ProfitTrendPanel tickets={tickets} today={today} pendingCount={unsyncedCount} offline={offline} />
-          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年1月1日至12月31日统计，包含月结返佣及商品利润，退票回算原记录年份。" />
+          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含79秀独立账本及其他月结返佣项目。" />
+          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；79秀独立统计。" />
+          <ProfitTrendPanel tickets={mainTickets} today={today} pendingCount={unsyncedCount} offline={offline} />
+          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；79秀独立统计，退票回算原记录年份。" />
 
           <section className="ranking-section">
             <div className="section-heading">
@@ -806,7 +820,7 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : view === 'reports' ? <ReportView tickets={tickets} suppliers={suppliers} projects={projects} /> : <>
+        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} tickets={tickets} projects={projects} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
@@ -843,11 +857,11 @@ export default function App() {
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
-      {refundOpen && <RefundSheet tickets={tickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
+      {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {toast && <div className="toast" role="status">{toast}</div>}
-      <button className="export-button" onClick={() => void exportTicketsToXlsx(tickets)} type="button" title="导出全部有效记录到 Excel">{view === 'reports' ? '导出全部 Excel' : '导出 Excel'} · {formatNumber(activeTickets(tickets).length)}</button>
+      {view !== 'show79' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">{view === 'reports' ? '导出全部 Excel' : '导出 Excel'} · {formatNumber(activeTickets(mainTickets).length)}</button>}
     </main>
   )
 }

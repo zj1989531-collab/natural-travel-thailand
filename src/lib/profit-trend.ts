@@ -3,6 +3,7 @@ import { isValidCalendarDate } from './format'
 import { monthDateRange } from './stats'
 import { ticketSettlementMode } from './project-rules'
 import { getTicketAmounts } from './ticket-amounts'
+import { mainLedgerTickets } from './show79'
 
 export interface ProfitTotals {
   dailyProfitThb: number
@@ -47,7 +48,7 @@ export function buildProfitTrend(tickets: TicketRecord[], month: string, today: 
   const days = Array.from({ length: Number(currentRange.end.slice(8)) }, (_, index) => ({ date: `${month}-${String(index + 1).padStart(2, '0')}`, ...empty() }))
   const currentCents = empty()
   const previousCents = empty()
-  for (const ticket of tickets) {
+  for (const ticket of mainLedgerTickets(tickets)) {
     if (ticket.deletedAt || !isValidCalendarDate(ticket.issueDate)) continue
     const current = ticket.issueDate >= currentRange.start && ticket.issueDate <= currentRange.end
     const previous = ticket.issueDate >= previousRange.start && ticket.issueDate <= previousRange.end

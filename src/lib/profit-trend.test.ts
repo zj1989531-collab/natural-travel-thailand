@@ -43,6 +43,12 @@ describe('profit trend ranges', () => {
 })
 
 describe('profit trend money and settlement', () => {
+  it('keeps the newly published 79 show independent in both comparison periods', () => {
+    const rows = ['79秀', '79成人秀', '７９秀', '79 show', 'IMAGINE79SHOW', '普通门票'].flatMap((projectName, index) => [ticket({ id: `now-${index}`, projectName }), ticket({ id: `old-${index}`, projectName, issueDate: '2026-09-15' })])
+    const result = buildProfitTrend(rows, '2026-10', '2026-10-15')
+    expect(result.current.totalProfitThb).toBe(150); expect(result.previous.totalProfitThb).toBe(150)
+    expect(result.current.totalProfitThb).toBe(summarise(ticketsInMonth(rows, '2026-10')).profitThb)
+  })
   it('sums person, item, whole-order and manual commission profits without multiplying totals again', () => {
     const rows = [ticket(), ticket({ id: 'item', quantityUnit: 'item', personCount: 2, agentPriceThb: 105, costThb: 95 }), ticket({ id: 'boat', projectName: '包船', amountBasis: 'total', personCount: 8, agentPriceThb: 9000, costThb: 8000 }), ticket({ id: 'commission', entryMode: 'profit_only', manualProfitThb: 25.15, personCount: 2, agentPriceThb: 0, costThb: 0 }), ticket({ id: 'month', settlementMode: 'monthly' })]
     const result = buildProfitTrend(rows, '2026-10', '2026-10-15')
