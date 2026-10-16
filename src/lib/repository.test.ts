@@ -256,7 +256,8 @@ describe('confirmed cloud refunds', () => {
     expect(state.local.ticket_refunds.size).toBe(1)
     await expect(ledgerRepository.deleteTicket(ticket)).rejects.toThrow('不可删除')
     await expect(ledgerRepository.createOrUpdateTicket({ issueDate: ticket.issueDate, issueTime: '09:30', supplierName: ticket.supplierName, projectId: ticket.projectId!, projectName: ticket.projectName, subItemName: '', agentPriceThb: 650, costThb: 600, personCount: 3, note: '' }, ticket)).rejects.toThrow('不可编辑')
-    await expect(ledgerRepository.createRefund(input)).rejects.toThrow('编号已使用')
+    expect((await ledgerRepository.createRefund(input)).cancelledAt).toBeTruthy()
+    expect(state.cloud.ticket_refunds.size).toBe(1)
   })
   it('leaves local statistics unchanged when cloud cancellation is rejected', async () => {
     const { input } = prepare()

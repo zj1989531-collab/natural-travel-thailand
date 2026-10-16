@@ -253,3 +253,19 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .trend-details { margin-top: 14px; }.trend-details > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: #176a59; font-size: 12px; font-weight: 700; }
 .profit-trend-panel button:focus-visible, .profit-trend-panel select:focus-visible, .profit-trend-panel input:focus-visible, .profit-trend-panel summary:focus-visible, .trend-table-scroll:focus-visible { outline: 2px solid #176a59; outline-offset: 3px; }
 @media (max-width: 360px) { .profit-trend-panel { padding: 14px 12px; }.trend-period { padding: 10px; }.trend-table th, .trend-table td { padding-inline: 7px; } }
+
+/* Keep phone controls legible and long customer details within their cards. */
+.app-shell input:not([type="checkbox"]), .app-shell select, .app-shell textarea { font-size: 16px; }
+.records-list, .ticket-card, .ticket-card-main > div, .ticket-meta > span { min-width: 0; }
+.ticket-card { width: 100%; overflow-wrap: anywhere; }
+.ticket-card-main > div { flex: 1; }
+.ticket-card-main > .profit-value, .ticket-card-main > .loss-value { white-space: nowrap; }
+.ticket-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-summary { flex-wrap: wrap; gap: 8px 12px; }
+.sheet { overscroll-behavior: contain; }
+.sheet .icon-button { min-width: 44px; min-height: 44px; }
+.ticket-actions { flex-wrap: wrap; gap: 8px; }
+.ticket-actions button { min-width: 44px; min-height: 44px; padding: 8px; }
+.financial-pending { margin: 12px 0; padding: 12px; border: 1px solid #e1bb75; border-radius: 12px; color: #624517; background: #fff8e9; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.financial-pending > p { margin-bottom: 12px; }
+.sheet :focus-visible { outline: 2px solid #176a59; outline-offset: 3px; }

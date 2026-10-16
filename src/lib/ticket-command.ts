@@ -168,12 +168,12 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
     nameText = remaining.slice(explicitName.index + explicitName[0].length)
   }
   const segments = nameText.split(/[\s,，;；、|]+/).filter(Boolean)
-  const suspicious = /(?:VIP|VVIP|SVIP|standard|premium|deluxe|luxury|普通|标准|豪华|钻石|白金|黄金|儿童|成人|套餐|座位|接送|门票|项目|售价|成本|利润|返佣|未知|未填|^无$|^不详$)/i
+  const suspicious = /^(?:VIP|VVIP|SVIP|standard|premium|deluxe|luxury|无|不详)$|(?:普通|标准|豪华|钻石|白金|黄金|儿童|成人|套餐|座位|接送|门票|项目|售价|成本|利润|返佣|未知|未填)/i
   const namesFound: string[] = []
   const leftovers: string[] = []
   for (const segment of segments) {
     const token = strip(segment)
-    const plausible = !suspicious.test(token) && (explicitName ? /^[\p{L}][\p{L}.'’·-]*$/u.test(token) : /^(?:[\p{Script=Han}]{2,4}|[A-Za-z][A-Za-z.'’·-]*)$/u.test(token))
+    const plausible = !(explicitName ? /^(?:未知|未填|无|不详)$/.test(token) : suspicious.test(token)) && /^[\p{L}][\p{L}\p{M}.'’·-]*$/u.test(token)
     if (plausible) namesFound.push(token)
     else leftovers.push(token)
   }
@@ -182,7 +182,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
     if (name.length > 100) throw new Error('客户姓名过长，请控制在 100 个字符以内。')
     fields.guestName = name
     if (!explicitName) warnings.push('客户姓名由剩余文字识别，请核对。')
-  } else warnings.push('未识别客户姓名，保留当前姓名，请核对。')
+  } else { fields.guestName = ''; warnings.push('未识别客户姓名，已清空原姓名，请填写本次客户姓名后再核对保存。') }
   if (leftovers.length) warnings.push(`未识别内容：${leftovers.join(' ')}，请手动核对。`)
   if (candidates.length > 1) warnings.push('目录中有多个匹配套餐或供货商，请明确选择后填入。')
   if (fields.agentPriceThb == null && candidates.some((project) => project.manualAgentPrice)) warnings.push('匹配项目包含手动售价项目，未提供售价时仍需手动填写，请核对。')

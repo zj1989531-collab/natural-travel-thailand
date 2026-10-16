@@ -20,6 +20,8 @@ import { isShow79Project, mainLedgerTickets } from './lib/show79'
 import type { Show79SettlementInput, Show79SettlementRecord } from './lib/show79-settlement'
 import { ProjectPicker } from './components/ProjectPicker'
 import { TicketQuickFill } from './components/TicketQuickFill'
+import { useDialog } from './lib/use-dialog'
+import { readFinancialSubmission } from './lib/financial-submission'
 import './components/ticket-entry.css'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
@@ -120,6 +122,7 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
     if (pendingMedicineSave && !window.confirm('本次保存结果尚未确认，建议先重试确认，避免重复新增。仍要关闭吗？')) return
     onCancel()
   }
+  const dialogRef = useDialog(requestCancel)
 
   const update = <K extends keyof TicketInput>(key: K, value: TicketInput[K]) => {
     if (saveLock.current || fillLock.current || pendingMedicineSave) return
@@ -219,7 +222,7 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
 
   return (
     <div className="sheet-backdrop" role="presentation" onMouseDown={requestCancel}>
-      <section className="sheet ticket-entry-sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet ticket-entry-sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div>
@@ -333,6 +336,10 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   const projectFormRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<'supplier' | 'project' | null>(null)
+  const supplierBusy = useRef(false)
+  supplierBusy.current = saving !== null
+  const requestClose = () => { if (!supplierBusy.current && !projectSaveLock.current) onClose() }
+  const dialogRef = useDialog(requestClose)
   const [priceQuery, setPriceQuery] = useState('')
   const [priceSupplierId, setPriceSupplierId] = useState('')
   const filteredProjects = filterProjects(projects, priceQuery, priceSupplierId)
@@ -421,12 +428,12 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   }
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sheet compact-sheet" aria-modal="true" aria-labelledby="supplier-sheet-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestClose}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet compact-sheet" aria-modal="true" aria-labelledby="supplier-sheet-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div><p className="eyebrow">预先维护价格表</p><h2 id="supplier-sheet-title">供货商与项目</h2></div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={saving !== null} onClick={requestClose} aria-label="关闭">×</button>
         </div>
         <p className="sheet-copy">先添加供货商，再为每个项目建立子项/套餐、成本和代理售价。出票时选择子项会自动带入这两个价格。</p>
         <button className="secondary-button full-width" type="button" onClick={() => void onBackup()} disabled={saving !== null}>导出全部资料备份</button>
@@ -481,46 +488,57 @@ function LoginSheet({ onClose, onSent }: { onClose: () => void; onSent: (message
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  const requestClose = () => { if (!sendingRef.current) onClose() }
+  const dialogRef = useDialog(requestClose)
 
   const sendLoginLink = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const client = getSupabase()
     if (!client) return
+    if (sendingRef.current) return
+    sendingRef.current = true
     setSending(true)
     setError('')
-    const { error: authError } = await client.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href }
-    })
-    setSending(false)
-    if (authError) {
-      setError(/email address not authorized/i.test(authError.message)
+    try {
+      const { error: authError } = await client.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href }
+      })
+      if (authError) {
+        setError(/email address not authorized/i.test(authError.message)
         ? '请使用注册 Supabase 时的邮箱。其他邮箱需要先配置云端邮件服务。'
         : /email rate limit exceeded/i.test(authError.message)
           ? '登录邮件发送过于频繁，请稍后再试。'
           : authError.message)
-      return
+        return
+      }
+      onSent('登录链接已发送，请到邮箱打开链接完成同步。')
+      onClose()
+    } catch {
+      setError('登录邮件尚未确认发送，请检查网络后重试。')
+    } finally {
+      sendingRef.current = false
+      setSending(false)
     }
-    onSent('登录链接已发送，请到邮箱打开链接完成同步。')
-    onClose()
   }
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sheet compact-sheet" aria-modal="true" aria-labelledby="login-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestClose}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet compact-sheet" aria-modal="true" aria-labelledby="login-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div>
             <p className="eyebrow">私有云端备份</p>
             <h2 id="login-title">登录并同步</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={sending} onClick={requestClose} aria-label="关闭">×</button>
         </div>
         <p className="sheet-copy">输入你的邮箱，我们会发送一次性登录链接。你的票务记录只会归属于这个账号。</p>
         <form className="ticket-form" onSubmit={sendLoginLink}>
           <label>
             邮箱
-            <input autoComplete="email" inputMode="email" placeholder="name@example.com" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <input autoComplete="email" inputMode="email" placeholder="name@example.com" type="email" disabled={sending} value={email} onChange={(event) => setEmail(event.target.value)} required />
           </label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="primary-button full-width" type="submit" disabled={sending}>{sending ? '发送中…' : '发送登录链接'}</button>
@@ -543,6 +561,7 @@ export default function App() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('dashboard')
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | undefined>()
   const [formOpen, setFormOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
@@ -550,6 +569,7 @@ export default function App() {
   const [supplierSheetOpen, setSupplierSheetOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
+  const [localUserId, setLocalUserId] = useState('')
   const [ready, setReady] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
@@ -664,7 +684,8 @@ export default function App() {
     })
     const initialise = async () => {
       try {
-        await ledgerRepository.getSettings()
+        const settings = await ledgerRepository.getSettings()
+        if (alive) setLocalUserId(settings.localUserId)
         if (client) {
           const { data } = await client.auth.getSession()
           if (!authChanged) await applyUser(data.session?.user ?? null)
@@ -779,9 +800,13 @@ export default function App() {
     if (requestLoginForWrite()) throw new Error('请先登录云端账号，再保存修改。')
   }
 
+  const financialAccountId = user?.id ?? (cloudConfigured ? '' : localUserId)
   const openRefund = (id = '') => {
     if (requestLoginForWrite()) return
-    setRefundTicketId(id); setRefundOpen(true)
+    try {
+      const pending = readFinancialSubmission(window.localStorage, financialAccountId, 'refund')
+      setRefundTicketId(pending?.ticketId ?? id); setRefundOpen(true)
+    } catch { setToast('无法读取待核对的退票，请先检查浏览器储存权限，避免重复登记。') }
   }
   const saveRefund = async (input: RefundInput) => {
     requireCloudLogin()
@@ -790,11 +815,13 @@ export default function App() {
     await synchronise()
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     requireCloudLogin()
-    await ledgerRepository.createRefund(input)
-    await refresh()
-    if (epoch !== accountEpochRef.current) return
-    setRefundOpen(false)
-    setToast(`退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`)
+    const saved = await ledgerRepository.createRefund(input)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开原账号核对此笔退票。')
+    setTickets(current => current.map(ticket => ticket.id !== saved.ticketId ? ticket : { ...ticket, refunds: [...(ticket.refunds ?? []).filter(refund => refund.id !== saved.id), saved] }))
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开原账号核对此笔退票。')
+    setToast(saved.cancelledAt ? '已核对：原退票已撤销，未新增退票。' : refreshed ? `退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。` : '退票已确认；页面刷新未完成，请同步核对，无需再次登记。')
     void synchronise()
   }
   const cancelRefund = async (id: string) => {
@@ -861,12 +888,13 @@ export default function App() {
     await synchronise()
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     requireCloudLogin()
-    await ledgerRepository.createShow79Settlement(input)
+    const saved = await ledgerRepository.createShow79Settlement(input)
     if (epoch !== accountEpochRef.current) return
-    try { await refresh() }
-    catch { throw new Error('本次分账已登记，但页面刷新失败，请同步后核对；请勿重新付款。重试相同登记不会重复记账。') }
+    setShow79Settlements(current => [...current.filter(row => row.id !== saved.id), saved])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
     if (epoch !== accountEpochRef.current) return
-    setToast('分账登记已保存；此操作只记录已发生的付款，不会转账。')
+    setToast(refreshed ? '分账登记已保存；此操作只记录已发生的付款，不会转账。' : '分账已确认登记；页面刷新未完成，请同步核对，无需再次登记或付款。')
     void synchronise()
   }
 
@@ -1019,7 +1047,7 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
+        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
@@ -1058,7 +1086,7 @@ export default function App() {
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} />}
-      {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
+      {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}

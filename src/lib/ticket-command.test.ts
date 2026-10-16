@@ -91,13 +91,21 @@ describe('catalogue ticket command parsing', () => {
     expect(parse('79 Jimmy 今天 1人 备注泰拳 明天 99人 售价999').fields.note).toBe('泰拳 明天 99人 售价999')
   })
 
-  it('warns about missing date, customer and quantity while preserving existing fields', () => {
+  it('clears an unidentified customer instead of retaining the previous guest, preserving other missing fields with warnings', () => {
     const parsed = parse('泰拳 VIP 官方')
     expect(parsed.candidates.map((item) => item.id)).toEqual(['vip'])
     expect(parsed.warnings.join(' ')).toContain('未识别日期')
     expect(parsed.warnings.join(' ')).toContain('未识别客户姓名')
     expect(parsed.warnings.join(' ')).toContain('未识别人数')
-    expect(applyTicketCommand(current, parsed, vip)).toMatchObject({ guestName: '上次客户', issueDate: '2026-10-14', issueTime: '08:30', personCount: 9, note: '原备注', agentPriceThb: 900, costThb: 700 })
+    expect(applyTicketCommand(current, parsed, vip)).toMatchObject({ guestName: '', issueDate: '2026-10-14', issueTime: '08:30', personCount: 9, note: '原备注', agentPriceThb: 900, costThb: 700 })
+  })
+
+  it.each(['Vipin', 'José', 'Jose\u0301', 'O’Connor', 'สมชาย', 'कुमार'])('recognizes international customer %s without confusing a substring with VIP', name => {
+    for (const label of ['', '客户姓名：']) {
+      const parsed = parse(`泰拳 ${label}${name} 今天 60人`, [boxing, vip])
+      expect(parsed.fields.guestName).toBe(name.normalize('NFKC'))
+      expect(applyTicketCommand(current, parsed, boxing)).toMatchObject({ guestName: name.normalize('NFKC'), personCount: 60 })
+    }
   })
 
   it('does not silently create projects, absorb unknown packages into names or interpret bare money', () => {

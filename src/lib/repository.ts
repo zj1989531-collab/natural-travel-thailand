@@ -523,7 +523,7 @@ export const ledgerRepository = {
     try {
       const existing = await receipt()
       if (existing) {
-        if (!sameRequest(existing) || existing.cancelledAt) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
+        if (!sameRequest(existing)) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
         await db.putRefund(existing, owner)
         return existing
       }

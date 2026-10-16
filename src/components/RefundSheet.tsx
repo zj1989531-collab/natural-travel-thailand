@@ -5,6 +5,8 @@ import { getRefundState } from '../lib/refunds'
 import { defaultRefundAmounts, validateRefundInput } from '../lib/refund-input'
 import { getTicketAmounts } from '../lib/ticket-amounts'
 import { quantityLabels } from '../lib/quantity'
+import { useFinancialSubmission } from '../lib/use-financial-submission'
+import { useDialog } from '../lib/use-dialog'
 
 const customerName = (ticket: TicketRecord) => ticket.guestName?.trim() || '姓名未填写'
 
@@ -28,24 +30,34 @@ export function RefundHistory({ ticket, onCancel }: { ticket: TicketRecord; onCa
   </div>)}</details>
 }
 
-export function RefundSheet({ tickets, initialTicketId = '', onClose, onSave }: { tickets: TicketRecord[]; initialTicketId?: string; onClose: () => void; onSave: (input: RefundInput) => Promise<void> }) {
-  const initial = tickets.find((ticket) => ticket.id === initialTicketId)
-  const [operationId] = useState(createId)
-  const [selectedId, setSelectedId] = useState(initialTicketId)
+export function RefundSheet({ tickets, initialTicketId = '', accountId, onClose, onSave }: { tickets: TicketRecord[]; initialTicketId?: string; accountId?: string; onClose: () => void; onSave: (input: RefundInput) => Promise<void> }) {
+  const journal = useFinancialSubmission(accountId ?? tickets[0]?.userId ?? '', 'refund')
+  const resumed = journal.pending
+  const initial = tickets.find((ticket) => ticket.id === (resumed?.ticketId ?? initialTicketId))
+  const [operationId] = useState(() => resumed?.operationId ?? createId())
+  const operationRef = useRef<RefundInput | null>(resumed)
+  const [selectedId, setSelectedId] = useState(resumed?.ticketId ?? initialTicketId)
   const [search, setSearch] = useState('')
-  const [isFull, setIsFull] = useState(true)
-  const [people, setPeople] = useState(1)
-  const [amounts, setAmounts] = useState(() => initial ? defaultRefundAmounts(initial, true, 1) : { refundRevenueThb: NaN, returnedCostThb: NaN })
-  const [date, setDate] = useState(getBangkokDate)
-  const [time, setTime] = useState(getBangkokTime)
-  const [note, setNote] = useState('')
+  const [isFull, setIsFull] = useState(resumed?.isFull ?? true)
+  const [people, setPeople] = useState(resumed?.personCount ?? 1)
+  const [amounts, setAmounts] = useState(() => resumed ? { refundRevenueThb: resumed.refundRevenueThb, returnedCostThb: resumed.returnedCostThb } : initial ? defaultRefundAmounts(initial, true, 1) : { refundRevenueThb: NaN, returnedCostThb: NaN })
+  const [date, setDate] = useState(resumed?.refundDate ?? getBangkokDate())
+  const [time, setTime] = useState(resumed?.refundTime ?? getBangkokTime())
+  const [note, setNote] = useState(resumed?.note ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const savingRef = useRef(false)
+  const pending = Boolean(journal.pending)
+  const requestClose = () => {
+    if (savingRef.current) return
+    if (pending && !window.confirm('本次退票结果尚待核对，原提交已保留。关闭后请再次打开退票核对原笔，避免重新登记。仍要关闭吗？')) return
+    onClose()
+  }
+  const dialogRef = useDialog(requestClose)
   const ticket = tickets.find((row) => row.id === selectedId)
   const { label, unit } = quantityLabels(ticket ?? {})
   const state = ticket ? getRefundState(ticket) : undefined
-  const refundable = tickets.filter((row) => !row.deletedAt && row.entryMode !== 'profit_only' && !getRefundState(row).full)
+  const refundable = tickets.filter((row) => pending && row.id === selectedId || !row.deletedAt && row.entryMode !== 'profit_only' && !getRefundState(row).full)
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
     .filter((row) => row.id === selectedId || matchesRefundTicketSearch(row, search))
   const currentProfit = ticket ? getTicketAmounts(ticket).profitThb : 0
@@ -58,20 +70,30 @@ export function RefundSheet({ tickets, initialTicketId = '', onClose, onSave }: 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (savingRef.current) return
-    if (!ticket) { setError('请先选择原出票记录。'); return }
-    const input: RefundInput = { operationId, ticketId: ticket.id, personCount: isFull ? state?.remainingPeople ?? null : people, isFull, ...amounts, refundDate: date, refundTime: time, note }
     try {
-      validateRefundInput(ticket, input)
-      if (!window.confirm(refundConfirmationText(ticket, input, afterProfit))) return
+      let input = operationRef.current
+      if (!input) {
+        if (!ticket) throw new Error('请先选择原出票记录。')
+        input = { operationId, ticketId: ticket.id, personCount: isFull ? state?.remainingPeople ?? null : people, isFull, ...amounts, refundDate: date, refundTime: time, note }
+        validateRefundInput(ticket, input)
+        if (!window.confirm(refundConfirmationText(ticket, input, afterProfit))) return
+        input = journal.stage(input)
+        operationRef.current = input
+      }
       savingRef.current = true; setSaving(true); setError('')
       await onSave(input)
+      journal.clear(input.operationId)
+      operationRef.current = null
+      onClose()
     } catch (reason) { setError(reason instanceof Error ? reason.message : '退票未确认，请刷新核对后重试。') }
     finally { savingRef.current = false; setSaving(false) }
   }
-  return <div className="sheet-backdrop" role="presentation" onMouseDown={onClose}><section className="sheet" role="dialog" aria-modal="true" aria-labelledby="refund-sheet-title" onMouseDown={(event) => event.stopPropagation()}>
-    <div className="sheet-handle" /><div className="sheet-title-row"><div><p className="eyebrow">保留原票 · 回算原日 / 原月</p><h2 id="refund-sheet-title">办理退票</h2></div><button className="icon-button" type="button" aria-label="关闭退票" onClick={onClose}>×</button></div>
+  return <div className="sheet-backdrop" role="presentation" onMouseDown={requestClose}><section ref={dialogRef} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-labelledby="refund-sheet-title" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-handle" /><div className="sheet-title-row"><div><p className="eyebrow">保留原票 · 回算原日 / 原月</p><h2 id="refund-sheet-title">办理退票</h2></div><button className="icon-button" type="button" aria-label="关闭退票" disabled={saving} onClick={requestClose}>×</button></div>
     <p className="sheet-copy">这里只登记退票，不会实际转账。退票需联网确认；原出票记录不会删除，仅录利润的返佣项目不能按门票退票。</p>
+    {pending && <p className="financial-pending" role="status">本次退票结果待核对，原内容已锁定。请核对／重试本次登记；即使已退票或已刷新，也会核对原笔，不会新增另一笔。</p>}
     <form className="ticket-form" onSubmit={submit}>
+      <fieldset className="form-fields" disabled={saving || pending || Boolean(journal.error)}>
       <label>查找原票<input type="search" placeholder="搜索客户、日期、项目、供货商或备注" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
       <label>原出票记录<select value={selectedId} onChange={(event) => changeTicket(event.target.value)} required><option value="">请选择需要退票的记录</option>{refundable.map((row) => <option key={row.id} value={row.id}>{customerName(row)} · {row.issueDate} {row.issueTime ?? ''} · {row.projectName}{row.subItemName ? ` / ${row.subItemName}` : ''} · {row.supplierName} · 剩余{getRefundState(row).remainingPeople ?? '未知'}{quantityLabels(row).unit} · #{row.id.slice(0, 6)}</option>)}</select></label>
       {!refundable.length && <p className="sheet-copy">没有符合条件的可退票记录。已全部退票和仅录利润的记录不会列在此处。</p>}
@@ -89,8 +111,9 @@ export function RefundSheet({ tickets, initialTicketId = '', onClose, onSave }: 
         <label>退票备注（可选）<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：客人取消、手续费、供货商不返还" /></label>
         <RefundHistory ticket={ticket} />
       </>}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="sheet-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>取消</button><button className="primary-button" type="submit" disabled={saving || !ticket || state?.full}>{saving ? '正在确认…' : '确认登记退票'}</button></div>
+      </fieldset>
+      {(error || journal.error) && <p className="form-error" role="alert">{error || journal.error}</p>}
+      <div className="sheet-actions"><button className="secondary-button" type="button" onClick={requestClose} disabled={saving}>取消</button><button className="primary-button" type="submit" disabled={saving || Boolean(journal.error) || !pending && (!ticket || state?.full)}>{saving ? '正在确认…' : pending ? '核对／重试本次退票' : '确认登记退票'}</button></div>
     </form>
   </section></div>
 }

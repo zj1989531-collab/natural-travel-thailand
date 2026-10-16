@@ -55,8 +55,8 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '曼谷时间': ticket.issueTime || '',
       '人数': isItemQuantity(ticket) ? '' : ticket.personCount ?? '',
       '数量': isItemQuantity(ticket) ? ticket.personCount ?? '' : '',
-      '有效人数': isItemQuantity(ticket) ? '' : getRefundState(ticket).remainingPeople ?? '',
-      '有效数量': isItemQuantity(ticket) ? getRefundState(ticket).remainingPeople ?? '' : '',
+      '有效人数': ticket.entryMode === 'profit_only' || isItemQuantity(ticket) ? '' : getRefundState(ticket).remainingPeople ?? '',
+      '有效数量': ticket.entryMode === 'profit_only' ? '' : isItemQuantity(ticket) ? getRefundState(ticket).remainingPeople ?? '' : '',
       '退票状态': getRefundState(ticket).active.length ? getRefundState(ticket).full ? '已全部退票' : '部分退票' : '未退票',
       '累计退代理 (THB)': getRefundState(ticket).refundRevenueThb,
       '累计成本返还 (THB)': getRefundState(ticket).returnedCostThb,
@@ -76,7 +76,8 @@ export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
       '利润 (THB)': getProfit(ticket),
       '原始利润 (THB)': getOriginalTicketAmounts(ticket).profitThb,
       '备注': ticket.note,
-      '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
+      '创建时间': new Date(ticket.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' }),
+      '原票编号': ticket.id
     }))
 
 const reportDetailHeaders = ['出票日期', '曼谷时间', '客户姓名', '项目', '子项 / 套餐', '供货商', '有效人数', '有效数量', '记录类型', '结算方式', '退票状态', '利润 (THB)', '备注']
@@ -164,6 +165,26 @@ export const exportReportToXlsx = async (report: LedgerReport, supplierName: str
   XLSX.writeFile(workbook, `票务盈利报表_${report.start}_${report.end}.xlsx`)
 }
 
+export const buildRefundExportRows = (tickets: TicketRecord[]) => {
+  const originals = new Map(tickets.map(ticket => [ticket.id, ticket]))
+  return [...new Map(tickets.flatMap(ticket => ticket.refunds ?? []).map(refund => [refund.id, refund])).values()].map(refund => {
+    const ticket = originals.get(refund.ticketId)
+    const item = ticket ? isItemQuantity(ticket) : undefined
+    return {
+      '退票编号': refund.id, '原票编号': refund.ticketId,
+      '客户姓名': ticket?.guestName?.trim() || '未填写', '项目': cleanProjectLabel(ticket?.projectName ?? '') || '原票未找到',
+      '子项 / 套餐': cleanProjectLabel(ticket?.subItemName ?? ''), '供货商': ticket?.supplierName ?? '',
+      '数量单位': item === undefined ? '未知' : item ? '件' : '人',
+      '原人数': item === false ? ticket?.personCount ?? '未记录' : '', '原数量': item ? ticket?.personCount ?? '未记录' : '',
+      '退票人数': item === false ? refund.personCount ?? '原人数未知' : '',
+      '退回数量': item ? refund.personCount ?? '原数量未知' : '',
+      '退票日期': refund.refundDate, '曼谷时间': refund.refundTime, '范围': refund.isFull ? '全部剩余' : '部分',
+      '退给代理 (THB)': refund.refundRevenueThb, '供货商返还 (THB)': refund.returnedCostThb,
+      '状态': refund.cancelledAt ? '已撤销' : '有效', '撤销时间': refund.cancelledAt ?? '', '备注': refund.note
+    }
+  })
+}
+
 export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
   const tickets = mainLedgerTickets(source)
   const XLSX = await import('xlsx')
@@ -172,14 +193,9 @@ export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
   const worksheet = XLSX.utils.json_to_sheet(rows)
   worksheet['!cols'] = Object.keys(rows[0] ?? {}).map((key) => ({ wch: key === '备注' ? 32 : key === '项目' ? 30 : 22 }))
   XLSX.utils.book_append_sheet(workbook, worksheet, '出票记录')
-  const refundRows = [...new Map(tickets.flatMap((ticket) => ticket.refunds ?? []).map((refund) => [refund.id, refund])).values()].map((refund) => ({
-    '退票编号': refund.id, '原票编号': refund.ticketId, '退票日期': refund.refundDate, '曼谷时间': refund.refundTime,
-    '退票人数': refund.personCount ?? '原人数未知', '范围': refund.isFull ? '全部剩余' : '部分',
-    '退给代理 (THB)': refund.refundRevenueThb, '供货商返还 (THB)': refund.returnedCostThb,
-    '状态': refund.cancelledAt ? '已撤销' : '有效', '撤销时间': refund.cancelledAt ?? '', '备注': refund.note
-  }))
+  const refundRows = buildRefundExportRows(tickets)
   if (refundRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(refundRows), '退票明细')
-  XLSX.writeFile(workbook, `票务盈利簿_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  XLSX.writeFile(workbook, `票务盈利簿_${getBangkokDate()}.xlsx`)
 }
 
 const show79SettlementHeaders = ['结算月份', '实际付款日期', 'jimmy 本次支付 / 收回 (THB)', '大狗二狗本次支付 / 收回 (THB)', '登记时月利润 (THB)', '登记时 jimmy 40% (THB)', '登记时大狗二狗 60% (THB)', '备注', '登记时间（曼谷）']
@@ -216,7 +232,7 @@ export const buildShow79ExportRows = (tickets: TicketRecord[], date: string, mon
     '备注': record.note,
     '登记时间（曼谷）': new Date(record.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
   }))
-  return { summary, records: buildTicketExportRows(report.records), settlementRecords }
+  return { summary, records: buildTicketExportRows(report.records), refundRecords: buildRefundExportRows(report.records), settlementRecords }
 }
 
 export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, month: string, settlements: Show79SettlementRecord[] = []) => {
@@ -241,6 +257,7 @@ export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, 
   }
   append(rows.summary, '月度分账')
   append(rows.records, '79秀订单')
+  if (rows.refundRecords.length) append(rows.refundRecords, '79秀退票明细')
   append(rows.settlementRecords, '分账登记明细', show79SettlementHeaders)
   XLSX.writeFile(workbook, `79秀独立报表_${month}.xlsx`)
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, RefundRecord, Supplier, TicketRecord } from '../types'
-import { buildReportExportRows, buildShow79ExportRows, buildTicketExportRows, createLedgerBackup } from './export'
+import { buildRefundExportRows, buildReportExportRows, buildShow79ExportRows, buildTicketExportRows, createLedgerBackup } from './export'
 import { buildReport, type ReportQuery } from './reports'
 import type { Show79SettlementRecord } from './show79-settlement'
 
@@ -36,6 +36,33 @@ const settlement = (overrides: Partial<Show79SettlementRecord> = {}): Show79Sett
   snapshotJimmyThb: 40, snapshotPartnersThb: 60, jimmyPaidThb: 40, partnersPaidThb: 60,
   paymentDate: '2026-10-31', note: '月底分账', createdAt: '2026-10-31T12:00:00.000Z',
   updatedAt: '2026-10-31T12:00:00.000Z', syncStatus: 'synced', ...overrides
+})
+
+describe('auditable ticket and refund exports', () => {
+  it('keeps commission pricing quantities while excluding them from effective admission and item counts', () => {
+    for (const quantityUnit of ['person', 'item'] as const) {
+      const ticket = reportTicket('commission', { entryMode: 'profit_only', manualProfitThb: 50, personCount: 4, quantityUnit })
+      expect(buildTicketExportRows([ticket])[0]).toMatchObject({ '原票编号': ticket.id, '有效人数': '', '有效数量': '', '利润 (THB)': 200 })
+      expect(buildTicketExportRows([ticket])[0][quantityUnit === 'person' ? '人数' : '数量']).toBe(4)
+    }
+  })
+  it('links refunds to the exact original item, guest and supplier and distinguishes people from items', () => {
+    const male = reportTicket('male', { projectName: '药品', subItemName: '果冻（男）', quantityUnit: 'item', personCount: 3 })
+    const female = reportTicket('female', { projectName: '药品', subItemName: '果冻（女）', quantityUnit: 'item', personCount: 2, refunds: [refund('female'), refund('female', { id: 'voided', cancelledAt: supplier.updatedAt })] })
+    const admission = reportTicket('admission', { refunds: [refund('admission')] })
+    const tickets = [male, female, admission], original = JSON.stringify(tickets)
+    const details = buildRefundExportRows(tickets)
+    const ids = new Set(buildTicketExportRows(tickets).map(row => row['原票编号']))
+    expect(details.every(row => ids.has(row['原票编号']))).toBe(true)
+    expect(details[0]).toMatchObject({ '原票编号': 'female', '客户姓名': 'Jimmy', '项目': '药品', '子项 / 套餐': '果冻（女）', '供货商': supplier.name, '数量单位': '件', '原数量': 2, '原人数': '', '退回数量': 1, '退票人数': '', '退票日期': '2026-10-16', '状态': '有效' })
+    expect(details[1]).toMatchObject({ '状态': '已撤销', '退回数量': 1 })
+    expect(details[2]).toMatchObject({ '数量单位': '人', '原人数': 3, '退票人数': 1, '退回数量': '' })
+    expect(JSON.stringify(tickets)).toBe(original)
+  })
+  it('keeps unknown historical quantities and canonical original IDs without guessing', () => {
+    const ticket = reportTicket('legacy', { personCount: null, quantityUnit: 'item', refunds: [refund('legacy', { personCount: null, isFull: true })] })
+    expect(buildRefundExportRows([ticket])[0]).toMatchObject({ '原票编号': 'legacy', '原数量': '未记录', '退回数量': '原数量未知', '退票人数': '' })
+  })
 })
 
 describe('complete ledger backup', () => {
