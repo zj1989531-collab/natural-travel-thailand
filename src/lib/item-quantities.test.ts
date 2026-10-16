@@ -49,7 +49,7 @@ describe('item quantities and manual selling prices', () => {
     expect(buildReport([row], query).itemQuantity.quantityCount).toBe(1)
     expect(buildReport([row], query).quantity.peopleCount).toBe(0)
     expect(getTicketAmounts(row).profitThb).toBe(55)
-    expect(() => validateRefundInput(row, { ...row.refunds[0], operationId: 'second', personCount: 2 })).toThrow('剩余数量')
+    expect(() => validateRefundInput(row, { ...row.refunds[0], operationId: 'second', personCount: 2 }, '2026-11-01')).toThrow('剩余数量')
   })
   it('exports item quantities, unit prices and metadata without relabeling them as people', () => {
     expect(buildTicketExportRows([ticket])[0]).toMatchObject({ '人数': '', '数量': 2, '有效数量': 2, '有效人数': '', '计价方式': '按数量计算', '单件代理售价 (THB)': 150, '单件供货商成本 (THB)': 95, '单人代理售价 (THB)': '', '利润 (THB)': 110 })

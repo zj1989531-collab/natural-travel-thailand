@@ -1,12 +1,14 @@
 import type { RefundInput, TicketRecord } from '../types'
-import { isValidCalendarDate, isValidIssueTime, isValidPersonCount } from './format'
+import { getBangkokDate, isValidCalendarDate, isValidIssueTime, isValidPersonCount } from './format'
 import { getRefundState } from './refunds'
 import { getOriginalTicketAmounts, getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { quantityLabels } from './quantity'
 
-export const validateRefundInput = (ticket: TicketRecord, input: RefundInput) => {
+export const validateRefundInput = (ticket: TicketRecord, input: RefundInput, today = getBangkokDate()) => {
   if (ticket.deletedAt || ticket.entryMode === 'profit_only' || ticket.id !== input.ticketId) throw new Error('请选择有效的原出票记录；仅录利润项目不能退票。')
-  if (!isValidCalendarDate(input.refundDate) || input.refundDate < ticket.issueDate || !isValidIssueTime(input.refundTime)) throw new Error('请填写有效的曼谷退票日期和时间，日期不能早于出票日期。')
+  // The original date can be a future viewing/travel date. A refund records
+  // when money was actually returned, while its profit stays in the original period.
+  if (!isValidCalendarDate(today) || !isValidCalendarDate(input.refundDate) || input.refundDate > today || !isValidIssueTime(input.refundTime)) throw new Error('请填写有效的曼谷实际退款日期和时间，退款日期不能晚于今天。')
   const state = getRefundState(ticket)
   if (state.full) throw new Error('此记录已经全部退票，请勿重复办理。')
   const quantity = input.isFull ? state.remainingPeople : input.personCount

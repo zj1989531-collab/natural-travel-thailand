@@ -3,7 +3,10 @@ import type { User } from '@supabase/supabase-js'
 import type { Project, RefundInput, RefundRecord, TicketInput, TicketRecord } from '../types'
 import { mergeRemoteRecord } from './sync'
 import { getTicketAmounts } from './ticket-amounts'
+import { getRefundState } from './refunds'
 import { reconcileCatalogue } from './catalogue-merge'
+import { assertLedgerOwner, type LedgerOwnerContext } from './ledger-account'
+import { makeSyncConflict, meaningfulRecordChanged, shouldArchiveRemoteConflict } from './sync-conflicts'
 
 const state = vi.hoisted(() => ({
   local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>(), show79_settlements: new Map<string, any>() },
@@ -11,22 +14,84 @@ const state = vi.hoisted(() => ({
   rejectRefundWrite: false,
   loseRefundResponse: false,
   uploads: [] as { table: string; records: any[] }[],
-  duringUpload: null as null | ((table: string) => void)
+  duringUpload: null as null | ((table: string) => void),
+  settings: { localUserId: 'anonymous', lastCloudUserId: 'user-1' as string | null, activeCloudUserId: null as string | null },
+  operations: new Map<string, any>(),
+  conflicts: new Map<string, any>(),
+  baselines: new Map<string, any>(),
+  rejectTicketIds: new Set<string>(),
+  beforeTicketWrite: null as null | (() => Promise<void>),
+  beforeTicketRead: null as null | (() => Promise<void>)
 }))
 
 type Table = keyof typeof state.local
 const copy = (value: any) => ({ ...value })
+const guard = (owner?: LedgerOwnerContext, userId?: string) => { if (owner) assertLedgerOwner(state.settings, owner, userId) }
+const mergeRows = async (table: Table, records: any[], owner?: LedgerOwnerContext, locked: Set<string> = new Set(), acknowledged: any[] = []) => {
+  guard(owner)
+  for (const remote of records) {
+    guard(owner, remote.userId)
+    const current = state.local[table].get(remote.id)
+    const baseKey = `${table}:${remote.userId}:${remote.id}`
+    const base = state.baselines.get(baseKey)
+    const ownAck = acknowledged.some(row => row.id === remote.id && !meaningfulRecordChanged(row, remote))
+    const refundLocked = table === 'tickets' && locked.has(remote.id) && current?.syncStatus !== 'synced' && current && meaningfulRecordChanged(current, remote)
+    const changedBase = current && current.syncStatus !== 'synced' && base && meaningfulRecordChanged(base, remote) && meaningfulRecordChanged(current, remote)
+    const adopt = refundLocked || !ownAck && (changedBase || current && table !== 'show79_settlements' && shouldArchiveRemoteConflict(current, remote))
+    if (current && table !== 'show79_settlements' && adopt) {
+      const conflict = makeSyncConflict(table, current, remote, refundLocked ? 'refund_locked' : 'remote_newer', '本机修改已保留', new Date().toISOString())
+      if (!state.conflicts.has(conflict.id)) state.conflicts.set(conflict.id, conflict)
+    }
+    state.local[table].set(remote.id, adopt ? { ...remote, syncStatus: 'synced' } : mergeRemoteRecord(current, remote))
+    state.baselines.set(baseKey, copy(remote))
+  }
+}
 
 vi.mock('./db', () => ({ db: {
-  getSettings: async () => ({ localUserId: 'anonymous', lastCloudUserId: 'user-1' }),
-  getTickets: async () => [...state.local.tickets.values()].map(copy),
+  getSettings: async () => ({ ...state.settings }),
+  getOrCreateSettings: async () => ({ ...state.settings }),
+  activateAccount: async (userId: string | null, cloud: boolean, isCurrent: () => boolean) => {
+    if (!isCurrent()) throw new Error('账号已切换')
+    state.settings.activeCloudUserId = cloud ? userId : null
+    if (cloud && userId) state.settings.lastCloudUserId = userId
+    return { ...state.settings }
+  },
+  getTicketCreateOperation: async (id: string, owner: LedgerOwnerContext) => {
+    guard(owner)
+    const receipt = state.operations.get(`${owner.userId}:${id}`)
+    return receipt ? { receipt, ticket: state.local.tickets.get(receipt.ticketId) ?? receipt.acceptedRecord } : undefined
+  },
+  putNewTicketOnce: async (record: TicketRecord, fingerprint: string, owner: LedgerOwnerContext) => {
+    await state.beforeTicketWrite?.()
+    guard(owner, record.userId)
+    const key = `${owner.userId}:${record.id}`
+    const receipt = state.operations.get(key)
+    if (receipt) {
+      if (receipt.fingerprint !== fingerprint) throw new Error('这次提交已经保存过不同内容')
+      return state.local.tickets.get(record.id) ?? receipt.acceptedRecord
+    }
+    state.local.tickets.set(record.id, copy(record))
+    state.operations.set(key, { fingerprint, ticketId: record.id, acceptedRecord: copy(record) })
+    return copy(record)
+  },
+  getSyncConflicts: async () => [...state.conflicts.values()],
+  resolveSyncConflict: async (id: string, owner: LedgerOwnerContext) => { guard(owner); const row = state.conflicts.get(id); if (!row || row.userId !== owner.userId) throw new Error('当前账号'); state.conflicts.set(id, { ...row, resolvedAt: new Date().toISOString() }) },
+  quarantineTicket: async (id: string, remote: TicketRecord | undefined, message: string, owner: LedgerOwnerContext) => {
+    guard(owner)
+    const current = state.local.tickets.get(id)
+    if (current?.userId !== owner.userId || current.syncStatus === 'synced') return
+    const conflict = makeSyncConflict('tickets', current, remote ?? null, 'upload_rejected', message, new Date().toISOString())
+    if (!state.conflicts.has(conflict.id)) state.conflicts.set(conflict.id, conflict)
+    state.local.tickets.set(id, remote ? { ...remote, syncStatus: 'synced' } : { ...current, syncStatus: 'error' })
+  },
+  getTickets: async () => { await state.beforeTicketRead?.(); return [...state.local.tickets.values()].map(copy) },
   getTicket: async (id: string) => state.local.tickets.get(id),
   getRefunds: async () => [...state.local.ticket_refunds.values()].map(copy),
   getShow79Settlements: async () => [...state.local.show79_settlements.values()].map(copy),
-  mergeRemoteShow79Settlements: async (records: any[]) => records.forEach((remote) => state.local.show79_settlements.set(remote.id, mergeRemoteRecord(state.local.show79_settlements.get(remote.id), remote))),
+  mergeRemoteShow79Settlements: (records: any[], owner?: LedgerOwnerContext) => mergeRows('show79_settlements', records, owner),
   getRefund: async (id: string) => state.local.ticket_refunds.get(id),
-  putRefund: async (record: RefundRecord) => { state.local.ticket_refunds.set(record.id, copy(record)) },
-  mergeRemoteRefunds: async (records: any[]) => records.forEach((remote) => state.local.ticket_refunds.set(remote.id, mergeRemoteRecord(state.local.ticket_refunds.get(remote.id), remote))),
+  putRefund: async (record: RefundRecord, owner?: LedgerOwnerContext) => { guard(owner, record.userId); state.local.ticket_refunds.set(record.id, copy(record)) },
+  mergeRemoteRefunds: (records: any[], owner?: LedgerOwnerContext) => mergeRows('ticket_refunds', records, owner),
   getSuppliers: async () => [...state.local.suppliers.values()].filter(row => !row.mergedIntoId).map(copy),
   getProjects: async () => [...state.local.projects.values()].filter(row => !row.mergedIntoId).map(copy),
   reconcileCatalogue: async (userId: string, suppliers: any[], projects: any[]) => {
@@ -35,11 +100,11 @@ vi.mock('./db', () => ({ db: {
     for (const row of result.projects) state.local.projects.set(row.id, copy(row))
     for (const row of result.tickets) state.local.tickets.set(row.id, copy(row))
   },
-  putProject: async (project: Project) => { state.local.projects.set(project.id, copy(project)) },
-  putTicket: async (ticket: TicketRecord) => { state.local.tickets.set(ticket.id, copy(ticket)) },
-  mergeRemoteTickets: async (records: any[]) => records.forEach((remote) => state.local.tickets.set(remote.id, mergeRemoteRecord(state.local.tickets.get(remote.id), remote))),
-  mergeRemoteSuppliers: async (records: any[]) => records.forEach((remote) => state.local.suppliers.set(remote.id, mergeRemoteRecord(state.local.suppliers.get(remote.id), remote))),
-  mergeRemoteProjects: async (records: any[]) => records.forEach((remote) => state.local.projects.set(remote.id, mergeRemoteRecord(state.local.projects.get(remote.id), remote)))
+  putProject: async (project: Project, owner?: LedgerOwnerContext) => { guard(owner, project.userId); state.local.projects.set(project.id, copy(project)) },
+  putTicket: async (ticket: TicketRecord, owner?: LedgerOwnerContext) => { await state.beforeTicketWrite?.(); guard(owner, ticket.userId); state.local.tickets.set(ticket.id, copy(ticket)) },
+  mergeRemoteTickets: (records: any[], owner?: LedgerOwnerContext, locked?: Set<string>, ack?: any[]) => mergeRows('tickets', records, owner, locked, ack),
+  mergeRemoteSuppliers: (records: any[], owner?: LedgerOwnerContext, locked?: Set<string>, ack?: any[]) => mergeRows('suppliers', records, owner, locked, ack),
+  mergeRemoteProjects: (records: any[], owner?: LedgerOwnerContext, locked?: Set<string>, ack?: any[]) => mergeRows('projects', records, owner, locked, ack)
 } }))
 
 vi.mock('./supabase', () => ({ getSupabase: () => ({
@@ -53,15 +118,18 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
         order: () => builder,
         range: (start: number, last: number) => { offset = start; end = last; return builder },
         abortSignal: async () => {
-          const matches = (row: any) => Object.entries(filters).every(([key, value]) => row[key] === value)
+          const matches = (row: any) => Object.entries(filters).every(([key, value]) => key === 'updated_at' ? Date.parse(row[key]) === Date.parse(value) : row[key] === value)
           if (write) {
             if (table === 'ticket_refunds' && state.rejectRefundWrite) return { error: { message: '云端拒绝退票' }, data: null }
-            if (mode === 'update') {
-              for (const [id, row] of state.cloud[table]) if (matches(row)) state.cloud[table].set(id, { ...row, ...write[0] })
-              return { error: null, data: null }
-            }
             state.uploads.push({ table, records: write.map(copy) })
             state.duringUpload?.(table)
+            if (mode === 'insert' && write.some(row => state.cloud[table].has(row.id))) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+            const matchedWrite = mode === 'update' ? write.filter(row => state.cloud[table].has(row.id ?? filters.id) && matches(state.cloud[table].get(row.id ?? filters.id))) : write
+            if (table === 'tickets' && matchedWrite.some(row => state.rejectTicketIds.has(row.id) || (state.cloud.tickets.has(row.id) && [...state.cloud.ticket_refunds.values()].some(refund => refund.ticket_id === row.id && refund.user_id === row.user_id) && ['note', 'agent_price_thb', 'cost_thb', 'deleted_at'].some(key => row[key] !== state.cloud.tickets.get(row.id)?.[key])))) return { data: null, error: { code: 'P0001', message: '原票已有退票，或记录校验失败' } }
+            if (mode === 'update') {
+              for (const [id, row] of state.cloud[table]) if (matches(row) && Date.parse(write[0].updated_at) > Date.parse(row.updated_at)) state.cloud[table].set(id, { ...row, ...write[0] })
+              return { error: null, data: null }
+            }
             for (const row of write) if (table === 'suppliers' || table === 'projects') {
               const duplicate = [...state.cloud[table].values()].some(other => other.id !== row.id && other.user_id === row.user_id && other.normalized_name === row.normalized_name && (table === 'suppliers' || other.supplier_id === row.supplier_id && other.normalized_sub_item_name === row.normalized_sub_item_name))
               if (duplicate) return { error: { code: '23505', message: 'duplicate key value violates unique constraint' }, data: null }
@@ -84,7 +152,7 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
       }
       return builder
     }
-    return { select: () => query(), upsert: (rows: any[]) => query(rows), insert: (row: any) => query([row], 'insert'), update: (row: any) => query([row], 'update') }
+    return { select: () => query(), upsert: (rows: any[]) => query(rows), insert: (row: any) => query(Array.isArray(row) ? row : [row], 'insert'), update: (row: any) => query([row], 'update') }
   }
 }) }))
 
@@ -192,7 +260,7 @@ describe('confirmed cloud refunds', () => {
   })
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('navigator', { onLine: true })
   for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds'] as const) {
     state.local[table].clear()
@@ -202,6 +270,14 @@ beforeEach(() => {
   state.duringUpload = null
   state.rejectRefundWrite = false
   state.loseRefundResponse = false
+  state.beforeTicketWrite = null
+  state.beforeTicketRead = null
+  state.rejectTicketIds.clear()
+  state.operations.clear()
+  state.conflicts.clear()
+  state.baselines.clear()
+  await ledgerRepository.activateAccount(null)
+  await ledgerRepository.activateAccount(user.id)
 })
 
 describe('cloud synchronization races', () => {
@@ -432,9 +508,10 @@ describe('manual selling prices and item quantity sync', () => {
   it('retains manual-price mode when correcting costs and never changes old transactions', async () => {
     const { project, input } = prepare()
     const saved = await ledgerRepository.createOrUpdateTicket(input)
+    const storedOriginal = structuredClone(state.local.tickets.get(saved.id))
     const corrected = await ledgerRepository.updateProjectPrices(project.id, { defaultCostThb: 105, defaultAgentPriceThb: NaN })
     expect(corrected).toMatchObject({ manualAgentPrice: true, defaultAgentPriceThb: 0, defaultCostThb: 105, quantityUnit: 'item' })
-    expect(state.local.tickets.get(saved.id)).toEqual(saved)
+    expect(state.local.tickets.get(saved.id)).toEqual(storedOriginal)
     expect(getTicketAmounts(saved).profitThb).toBe(110)
     expect(await ledgerRepository.updateProjectPrices(project.id, { defaultCostThb: 105, defaultAgentPriceThb: 160, manualAgentPrice: false })).toMatchObject({ manualAgentPrice: false, defaultAgentPriceThb: 160 })
   })
@@ -516,6 +593,207 @@ describe('profit-only entries and time synchronization', () => {
     await ledgerRepository.synchronise(user)
     expect(state.cloud.tickets.get(saved.id)).toMatchObject({ amount_basis: 'per_person', person_count: 3, manual_profit_thb: 123.45 })
     expect(getTicketAmounts(state.local.tickets.get(saved.id)).profitThb).toBe(370.35)
+  })
+})
+
+describe('stable new-order submissions and authenticated ownership', () => {
+  const prepare = (owner = user.id) => {
+    const project = { ...localProject(), userId: owner }
+    state.local.projects.set(project.id, project)
+    state.local.suppliers.set(project.supplierId, { id: project.supplierId, userId: owner, name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' })
+    return { guestName: '测试客户', personCount: 2, issueDate: '2026-10-13', issueTime: '10:30', projectId: project.id, supplierName: project.supplierName, projectName: project.name, subItemName: project.subItemName, agentPriceThb: 900, costThb: 700, note: '' } satisfies TicketInput
+  }
+
+  it('uses one accepted record for concurrent identical submissions and a retry after UI refresh failed', async () => {
+    const input = prepare()
+    const [first, second] = await Promise.all([ledgerRepository.createOrUpdateTicket(input, undefined, 'stable-new-order'), ledgerRepository.createOrUpdateTicket(input, undefined, 'stable-new-order')])
+    expect(first.id).toBe('stable-new-order')
+    expect(second).toEqual(first)
+    // App can fail refreshing after the accepted write; its retained operation ID
+    // still acknowledges the existing order after catalogue defaults have changed.
+    state.local.projects.clear()
+    const retry = await ledgerRepository.createOrUpdateTicket(input, undefined, 'stable-new-order')
+    expect(retry).toEqual(first)
+    expect(state.local.tickets.size).toBe(1)
+    expect(state.operations.size).toBe(1)
+  })
+
+  it('rejects changed payload for an accepted operation rather than changing the saved ticket', async () => {
+    const input = prepare()
+    const original = await ledgerRepository.createOrUpdateTicket(input, undefined, 'accepted-new-order')
+    const storedOriginal = structuredClone(state.local.tickets.get(original.id))
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, guestName: '另一位客户' }, undefined, original.id)).rejects.toThrow('不同内容')
+    expect(state.local.tickets.get(original.id)).toEqual(storedOriginal)
+    expect(state.local.tickets.size).toBe(1)
+  })
+
+  it('returns current same-owner refunds on an accepted creation retry without changing its original ticket', async () => {
+    const input = prepare()
+    const original = await ledgerRepository.createOrUpdateTicket(input, undefined, 'refunded-accepted-order')
+    const refund: RefundRecord = { id: 'later-refund', userId: user.id, ticketId: original.id, personCount: 1, isFull: false,
+      refundRevenueThb: 900, returnedCostThb: 700, refundDate: '2026-10-14', refundTime: '10:30', note: '', cancelledAt: null,
+      createdAt: '2026-10-14T03:30:00Z', updatedAt: '2026-10-14T03:30:00Z', syncStatus: 'synced' }
+    state.local.ticket_refunds.set(refund.id, refund)
+    state.local.ticket_refunds.set('foreign-refund', { ...refund, id: 'foreign-refund', userId: 'user-2' })
+    state.local.ticket_refunds.set('other-ticket-refund', { ...refund, id: 'other-ticket-refund', ticketId: 'another-ticket' })
+    const retried = await ledgerRepository.createOrUpdateTicket(input, undefined, original.id)
+    expect(retried.refunds).toEqual([refund])
+    expect(getRefundState(retried).remainingPeople).toBe(1)
+    expect(getTicketAmounts(retried).profitThb).toBe(200)
+    expect(state.local.tickets.size).toBe(1)
+    expect(state.local.tickets.get(original.id).personCount).toBe(2)
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, personCount: 3 }, retried)).rejects.toThrow('已有退票明细')
+  })
+
+  it('switches the local owner before any network work, including offline login to another account', async () => {
+    const inputA = prepare()
+    await ledgerRepository.createOrUpdateTicket(inputA, undefined, 'a-order')
+    vi.stubGlobal('navigator', { onLine: false })
+    await ledgerRepository.activateAccount('user-2')
+    expect(state.settings.activeCloudUserId).toBe('user-2')
+    expect(await ledgerRepository.getTickets()).toEqual([])
+    expect(await ledgerRepository.getProjects()).toEqual([])
+    expect((await ledgerRepository.synchronise({ id: 'user-2' } as User)).synced).toBe(false)
+    expect(state.uploads).toEqual([])
+    const inputB = prepare('user-2')
+    const saved = await ledgerRepository.createOrUpdateTicket(inputB, undefined, 'b-order')
+    expect(saved.userId).toBe('user-2')
+    expect(state.local.tickets.get('a-order').userId).toBe(user.id)
+    expect((await ledgerRepository.getTickets()).map(row => row.id)).toEqual(['b-order'])
+  })
+
+  it('returns no cached financial data and rejects writes immediately after logout', async () => {
+    const input = prepare()
+    await ledgerRepository.createOrUpdateTicket(input, undefined, 'own-order')
+    await ledgerRepository.activateAccount(null)
+    expect(await ledgerRepository.getTickets()).toEqual([])
+    expect(await ledgerRepository.getSuppliers()).toEqual([])
+    expect(await ledgerRepository.getProjects()).toEqual([])
+    await expect(ledgerRepository.createOrUpdateTicket(input, undefined, 'after-logout')).rejects.toThrow('账号已切换')
+    expect(state.local.tickets.size).toBe(1)
+  })
+
+  it('rejects a delayed old-account write when authentication changes before its transaction', async () => {
+    const input = prepare()
+    state.beforeTicketWrite = () => ledgerRepository.activateAccount('user-2')
+    await expect(ledgerRepository.createOrUpdateTicket(input, undefined, 'old-account-late-write')).rejects.toThrow('账号已切换')
+    expect(state.local.tickets.size).toBe(0)
+    expect(state.operations.size).toBe(0)
+  })
+
+  it('does not return a delayed old-account read after authentication changes', async () => {
+    const input = prepare()
+    await ledgerRepository.createOrUpdateTicket(input, undefined, 'own-order')
+    let entered!: () => void
+    let finish!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { finish = resolve })
+    state.beforeTicketRead = async () => { entered(); await held }
+    const read = ledgerRepository.getTickets()
+    const expectedFailure = expect(read).rejects.toThrow('账号已切换')
+    await started
+    await ledgerRepository.activateAccount('user-2')
+    finish()
+    await expectedFailure
+  })
+
+  it('does not merge an old account acknowledgement after switching during an upload', async () => {
+    const input = prepare()
+    await ledgerRepository.createOrUpdateTicket(input, undefined, 'old-account-order')
+    let changed = false
+    state.duringUpload = () => {
+      if (!changed) { changed = true; void ledgerRepository.activateAccount('user-2') }
+    }
+    const result = await ledgerRepository.synchronise(user)
+    expect(result.synced).toBe(false)
+    expect(result.message).toMatch(/账号已切换/)
+    expect(await ledgerRepository.getTickets()).toEqual([])
+    expect((await ledgerRepository.synchronise(user)).synced).toBe(false)
+    expect(state.local.tickets.get('old-account-order').userId).toBe(user.id)
+  })
+})
+
+describe('recoverable ticket sync conflicts', () => {
+  const seed = () => {
+    const original = localTicket('2026-10-13T01:00:00Z')
+    state.local.tickets.set(original.id, { ...original, syncStatus: 'synced' })
+    state.cloud.tickets.set(original.id, cloudTicket(original.updatedAt))
+    return original
+  }
+  const remoteRefund = () => ({ id: 'other-device-refund', user_id: user.id, ticket_id: 'ticket-1', person_count: null, is_full: true, refund_revenue_thb: 1000, returned_cost_thb: 700, refund_date: '2026-10-14', refund_time: '10:30:00', note: '', cancelled_at: null, created_at: '2026-10-14T00:00:00Z', updated_at: '2026-10-14T00:00:00Z' })
+
+  it('archives an offline edit to a now-refunded original and uploads an unrelated order', async () => {
+    const original = seed()
+    state.local.tickets.set(original.id, { ...original, updatedAt: '2099-01-01T00:00:00Z', note: '离线修改' })
+    state.local.tickets.set('normal-new', { ...original, id: 'normal-new' })
+    state.cloud.ticket_refunds.set('other-device-refund', remoteRefund())
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.tickets.has('normal-new')).toBe(true)
+    expect(state.cloud.tickets.get(original.id).note).toBe('')
+    expect(state.local.ticket_refunds.has('other-device-refund')).toBe(true)
+    expect(state.local.tickets.get(original.id)).toMatchObject({ note: '', syncStatus: 'synced' })
+    const [conflict] = await ledgerRepository.getSyncConflicts()
+    expect(conflict).toMatchObject({ recordId: original.id, reason: 'refund_locked', localRecord: { note: '离线修改' }, remoteRecord: { note: '' } })
+    await ledgerRepository.synchronise(user)
+    expect(await ledgerRepository.getSyncConflicts()).toHaveLength(1)
+  })
+
+  it('isolates a refund created during an upload without blocking the rest of the batch', async () => {
+    const original = seed()
+    state.local.tickets.set(original.id, { ...original, updatedAt: '2099-01-01T00:00:00Z', note: '离线修改' })
+    state.local.tickets.set('normal-new', { ...original, id: 'normal-new' })
+    state.duringUpload = table => { if (table === 'tickets') state.cloud.ticket_refunds.set('other-device-refund', remoteRefund()) }
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.tickets.has('normal-new')).toBe(true)
+    expect(state.local.ticket_refunds.has('other-device-refund')).toBe(true)
+    expect(state.local.tickets.get(original.id)).toMatchObject({ note: '', syncStatus: 'synced' })
+    expect(await ledgerRepository.getSyncConflicts()).toMatchObject([{ reason: 'upload_rejected', localRecord: { note: '离线修改' } }])
+  })
+
+  it('uses the pulled cloud version as a compare-and-swap guard even when the local clock is faster', async () => {
+    const original = seed()
+    state.local.tickets.set(original.id, { ...original, updatedAt: '2099-01-01T00:00:00Z', note: '本机时钟较快' })
+    let raced = false
+    state.duringUpload = table => {
+      if (table === 'tickets' && !raced) {
+        raced = true
+        state.cloud.tickets.set(original.id, cloudTicket('2026-10-13T01:00:01Z', '拉取后另一设备保存'))
+      }
+    }
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.tickets.get(original.id).note).toBe('拉取后另一设备保存')
+    expect(state.local.tickets.get(original.id)).toMatchObject({ note: '拉取后另一设备保存', syncStatus: 'synced' })
+    expect(await ledgerRepository.getSyncConflicts()).toMatchObject([{ localRecord: { note: '本机时钟较快' }, remoteRecord: { note: '拉取后另一设备保存' } }])
+  })
+
+  it('quarantines a rejected new draft once, while successful orders keep synchronising', async () => {
+    const original = seed()
+    state.local.tickets.set('rejected-new', { ...original, id: 'rejected-new' })
+    state.local.tickets.set('normal-new', { ...original, id: 'normal-new' })
+    state.rejectTicketIds.add('rejected-new')
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.local.tickets.get('rejected-new').syncStatus).toBe('error')
+    expect(state.cloud.tickets.has('normal-new')).toBe(true)
+    const attempts = state.uploads.filter(write => write.records.some(row => row.id === 'rejected-new')).length
+    await ledgerRepository.synchronise(user)
+    expect(state.uploads.filter(write => write.records.some(row => row.id === 'rejected-new'))).toHaveLength(attempts)
+    expect(await ledgerRepository.getSyncConflicts()).toMatchObject([{ reason: 'upload_rejected', remoteRecord: null }])
+  })
+
+  it('retains a losing local pending snapshot and keeps conflict history after acknowledgement', async () => {
+    const original = seed()
+    state.local.tickets.set(original.id, { ...original, note: '本机修改', updatedAt: '2026-10-13T01:00:01Z' })
+    state.cloud.tickets.set(original.id, cloudTicket('2026-10-13T01:00:02Z', '另一个设备修改'))
+    await ledgerRepository.synchronise(user)
+    const [conflict] = await ledgerRepository.getSyncConflicts()
+    expect(conflict).toMatchObject({ reason: 'remote_newer', localRecord: { note: '本机修改' }, remoteRecord: { note: '另一个设备修改' } })
+    await ledgerRepository.resolveSyncConflict(conflict.id)
+    expect(await ledgerRepository.getSyncConflicts()).toEqual([])
+    expect(await ledgerRepository.getSyncConflicts(true)).toHaveLength(1)
+    expect(state.local.tickets.get(original.id).note).toBe('另一个设备修改')
+    await ledgerRepository.activateAccount('user-2')
+    expect(await ledgerRepository.getSyncConflicts(true)).toEqual([])
+    await expect(ledgerRepository.resolveSyncConflict(conflict.id)).rejects.toThrow('当前账号')
   })
 })
 

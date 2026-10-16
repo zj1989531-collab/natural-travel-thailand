@@ -4,7 +4,7 @@ import type { Show79SettlementInput, Show79SettlementRecord } from './show79-set
 
 const state = vi.hoisted(() => ({
   cloudEnabled: true,
-  settings: { localUserId: 'local-user', lastCloudUserId: 'owner-a' as string | null },
+  settings: { localUserId: 'local-user', lastCloudUserId: 'owner-a' as string | null, activeCloudUserId: null as string | null },
   tickets: [] as TicketRecord[],
   refunds: [] as RefundRecord[],
   localReceipts: new Map<string, Show79SettlementRecord>(),
@@ -20,6 +20,13 @@ const state = vi.hoisted(() => ({
 
 vi.mock('./db', () => ({ db: {
   getSettings: async () => ({ ...state.settings }),
+  getOrCreateSettings: async () => ({ ...state.settings }),
+  activateAccount: async (userId: string | null, cloud: boolean, isCurrent: () => boolean) => {
+    if (!isCurrent()) throw new Error('账号已切换')
+    state.settings.activeCloudUserId = cloud ? userId : null
+    if (cloud && userId) state.settings.lastCloudUserId = userId
+    return { ...state.settings }
+  },
   getTickets: async () => structuredClone(state.tickets),
   getRefunds: async () => structuredClone(state.refunds),
   getShow79Settlements: async () => [...state.localReceipts.values()].map(row => ({ ...row })),
@@ -94,12 +101,12 @@ const receipt = (overrides: Partial<Show79SettlementRecord> = {}): Show79Settlem
   updatedAt: '2026-10-16T05:00:00.000Z', syncStatus: 'synced', ...overrides
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-10-16T05:00:00.000Z'))
   vi.stubGlobal('navigator', { onLine: true })
   state.cloudEnabled = true
-  state.settings = { localUserId: 'local-user', lastCloudUserId: 'owner-a' }
+  state.settings = { localUserId: 'local-user', lastCloudUserId: 'owner-a', activeCloudUserId: null }
   state.tickets = [ticket()]
   state.refunds = []
   state.localReceipts.clear()
@@ -111,6 +118,8 @@ beforeEach(() => {
   state.rpcMode = 'success'
   state.rpcError = '云端分账未确认，请重试。'
   state.rpcArray = false
+  await ledgerRepository.activateAccount(null)
+  await ledgerRepository.activateAccount('owner-a')
 })
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -144,9 +153,9 @@ describe('confirmed 79 show settlement repository', () => {
     state.localReceipts.set('own', receipt({ id: 'own' }))
     state.localReceipts.set('foreign', receipt({ id: 'foreign', userId: 'owner-b' }))
     expect(await ledgerRepository.getShow79Settlements()).toEqual([receipt({ id: 'own' })])
-    state.settings.lastCloudUserId = null
+    await ledgerRepository.activateAccount(null)
     state.localReceipts.set('local', receipt({ id: 'local', userId: 'local-user' }))
-    expect(await ledgerRepository.getShow79Settlements()).toEqual([receipt({ id: 'local', userId: 'local-user' })])
+    expect(await ledgerRepository.getShow79Settlements()).toEqual([])
   })
 
   it('requires online confirmation rather than caching a pending cloud payment', async () => {

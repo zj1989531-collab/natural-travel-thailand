@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
+import { createId, formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
@@ -11,6 +11,8 @@ import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { Show79View } from './components/Show79View'
+import { SyncConflictPanel } from './components/SyncConflictPanel'
+import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
 import type { Show79SettlementInput, Show79SettlementRecord } from './lib/show79-settlement'
 import { ProjectPicker } from './components/ProjectPicker'
@@ -47,7 +49,7 @@ interface TicketFormProps {
   cloudLoginRequired: boolean
   onCancel: () => void
   onManageSuppliers: () => void
-  onSave: (input: TicketInput) => Promise<void>
+  onSave: (input: TicketInput, operationId?: string) => Promise<void>
 }
 
 const emptyForm = (): TicketInput => ({
@@ -90,6 +92,7 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const saveLock = useRef(false)
+  const operationRef = useRef<string | undefined>(undefined)
   const [filling, setFilling] = useState(false)
   const fillLock = useRef(false)
   const onFillBusy = useCallback((busy: boolean) => { fillLock.current = busy; setFilling(busy) }, [])
@@ -137,7 +140,8 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
       }
       saveLock.current = true
       setSaving(true)
-      await onSave({ ...form, supplierName })
+      operationRef.current ??= createId()
+      await onSave({ ...form, supplierName }, operationRef.current)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后重试。')
       setWarning(null)
@@ -501,7 +505,11 @@ export default function App() {
   const [recordDateRange, setRecordDateRange] = useState<TicketDateRange>('all')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [query, setQuery] = useState('')
+  const [syncConflicts, setSyncConflicts] = useState<SyncConflictRecord[]>([])
+  const [conflictsOpen, setConflictsOpen] = useState(false)
   const userRef = useRef<User | null>(null)
+  const accountEpochRef = useRef(0)
+  const accountReadyRef = useRef(!cloudConfigured)
   const mountedRef = useRef(false)
   const syncAbortRef = useRef<AbortController | null>(null)
   const syncRunnerRef = useRef<() => Promise<void>>(async () => undefined)
@@ -509,25 +517,29 @@ export default function App() {
   syncQueueRef.current ??= createSyncQueue(() => syncRunnerRef.current())
 
   const refresh = useCallback(async () => {
-    const [nextTickets, nextSuppliers, nextProjects, nextSettlements] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getShow79Settlements()])
-    if (!mountedRef.current) return
+    const epoch = accountEpochRef.current
+    const [nextTickets, nextSuppliers, nextProjects, nextSettlements, nextConflicts] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getShow79Settlements(), ledgerRepository.getSyncConflicts(true)])
+    if (!mountedRef.current || epoch !== accountEpochRef.current) return
     setTickets(nextTickets.map(ticketDisplay))
     setSuppliers(nextSuppliers)
     setProjects(nextProjects)
     setShow79Settlements(nextSettlements)
+    setSyncConflicts(nextConflicts)
+    return nextConflicts
   }, [])
 
   syncRunnerRef.current = async () => {
     const targetUser = userRef.current
-    if (!targetUser || !mountedRef.current) return
+    if (!targetUser || !mountedRef.current || !accountReadyRef.current) return
     const controller = new AbortController()
     syncAbortRef.current = controller
     setSyncing(true)
     try {
       const result = await ledgerRepository.synchronise(targetUser, controller.signal)
       if (!mountedRef.current || userRef.current?.id !== targetUser.id || controller.signal.aborted) return
-      setSyncMessage(result.synced ? '已同步到云端' : result.message ?? '同步暂未完成，会自动重试。')
-      await refresh()
+      const refreshedConflicts = await refresh()
+      if (!mountedRef.current || userRef.current?.id !== targetUser.id || controller.signal.aborted) return
+      setSyncMessage(result.synced ? refreshedConflicts?.some(row => !row.resolvedAt) ? '正常记录已同步，有异常记录待核对。' : '已同步到云端' : result.message ?? '同步暂未完成，会自动重试。')
     } catch (error) {
       if (mountedRef.current && !controller.signal.aborted && userRef.current?.id === targetUser.id) {
         setSyncMessage(error instanceof Error ? error.message : '同步暂未完成，本机记录已保留。')
@@ -544,36 +556,70 @@ export default function App() {
     let alive = true
     let authChanged = false
     let authSyncTimer: number | undefined
+    let activeAuthId: string | null | undefined
+    let activationTask: Promise<boolean> = Promise.resolve(false)
     mountedRef.current = true
     const client = getSupabase()
     const applyUser = (nextUser: User | null) => {
-      if (!alive) return
-      if (userRef.current?.id !== nextUser?.id) {
+      if (!alive) return Promise.resolve(false)
+      const nextId = nextUser?.id ?? null
+      if (activeAuthId === nextId) {
+        userRef.current = nextUser; setUser(nextUser)
+        return activationTask
+      }
+      activeAuthId = nextId
+      const epoch = ++accountEpochRef.current
+      accountReadyRef.current = false
+      {
         syncAbortRef.current?.abort()
         syncQueueRef.current?.clearPending()
         setSyncMessage('')
+        setSyncing(false)
         setFormOpen(false)
         setRefundOpen(false)
+        setSupplierSheetOpen(false)
+        setConflictsOpen(false)
         setSelectedTicket(undefined)
+        setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
+        setQuery(''); setSupplierFilter(''); setToast('')
       }
       userRef.current = nextUser
       setUser(nextUser)
+      activationTask = ledgerRepository.activateAccount(nextId).then(async () => {
+        if (!alive || epoch !== accountEpochRef.current) return false
+        accountReadyRef.current = true
+        await refresh()
+        return alive && epoch === accountEpochRef.current
+      }).catch(error => {
+        if (alive && epoch === accountEpochRef.current) {
+          accountReadyRef.current = false
+          setToast(error instanceof Error ? error.message : '账号账本尚未打开，请刷新后重试。')
+        }
+        return false
+      })
+      return activationTask
     }
     const authListener = client?.auth.onAuthStateChange((_event, session) => {
       authChanged = true
-      applyUser(session?.user ?? null)
-      // Supabase auth callbacks must finish before making further client calls.
-      window.clearTimeout(authSyncTimer)
-      authSyncTimer = window.setTimeout(() => { if (alive) void synchronise() }, 0)
+      // Only local activation runs here; defer Supabase calls beyond its auth lock.
+      void applyUser(session?.user ?? null).then(activated => {
+        if (!alive || !activated) return
+        window.clearTimeout(authSyncTimer)
+        authSyncTimer = window.setTimeout(() => { if (alive) void synchronise() }, 0)
+      })
     })
     const initialise = async () => {
       try {
         await ledgerRepository.getSettings()
-        await refresh()
         if (client) {
           const { data } = await client.auth.getSession()
-          if (!authChanged) applyUser(data.session?.user ?? null)
+          if (!authChanged) await applyUser(data.session?.user ?? null)
+          else await activationTask
           if (alive) void synchronise()
+        } else {
+          await ledgerRepository.activateAccount(null)
+          accountReadyRef.current = true
+          await refresh()
         }
       } catch (error) {
         if (alive) setToast(error instanceof Error ? error.message : '打开账本时遇到问题，请刷新后重试。')
@@ -585,6 +631,7 @@ export default function App() {
     return () => {
       alive = false
       mountedRef.current = false
+      accountEpochRef.current++
       window.clearTimeout(authSyncTimer)
       authListener?.data.subscription.unsubscribe()
       syncAbortRef.current?.abort()
@@ -664,6 +711,10 @@ export default function App() {
   }
 
   const requestLoginForWrite = () => {
+    if (!accountReadyRef.current) {
+      setToast('正在切换账号账本，请稍后再操作。')
+      return true
+    }
     if (canWriteLedger(cloudConfigured, userRef.current?.id)) return false
     setLoginOpen(true)
     setToast('请先登录同一邮箱，所有修改才能自动同步到云端。')
@@ -680,47 +731,72 @@ export default function App() {
   }
   const saveRefund = async (input: RefundInput) => {
     requireCloudLogin()
+    const epoch = accountEpochRef.current
     const originalDate = tickets.find((ticket) => ticket.id === input.ticketId)?.issueDate
     await synchronise()
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    requireCloudLogin()
     await ledgerRepository.createRefund(input)
     await refresh()
+    if (epoch !== accountEpochRef.current) return
     setRefundOpen(false)
     setToast(`退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`)
     void synchronise()
   }
   const cancelRefund = async (id: string) => {
     if (requestLoginForWrite()) return
+    const epoch = accountEpochRef.current
     if (!window.confirm('确认撤销这笔退票登记吗？原日期的利润和有效票量会恢复；退票明细仍保留。这只修改账本，不会转账。')) return
     try {
-      await synchronise(); await ledgerRepository.cancelRefund(id); await refresh()
+      await synchronise()
+      if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+      requireCloudLogin()
+      await ledgerRepository.cancelRefund(id); await refresh()
+      if (epoch !== accountEpochRef.current) return
       setToast('退票已撤销，原日期统计已重新计算。'); void synchronise()
     } catch (error) { setToast(error instanceof Error ? error.message : '撤销未完成，请刷新核对。') }
   }
 
-  const saveTicket = async (input: TicketInput) => {
+  const saveTicket = async (input: TicketInput, operationId?: string) => {
     requireCloudLogin()
-    const saved = await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
-    await refresh()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createOrUpdateTicket(input, selectedTicket, operationId)
+    if (epoch !== accountEpochRef.current) return
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) return
     setFormOpen(false)
-    setToast(isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
+    setToast(!refreshed ? '订单已保存；页面刷新未完成，请同步核对，无需再次保存。' : isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
       ? '月结记录已保存，计入所属月报、年报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
     void synchronise()
   }
 
-  const saveShow79 = async (input: TicketInput, existing?: TicketRecord) => {
+  const saveShow79 = async (input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
     requireCloudLogin()
-    await ledgerRepository.createOrUpdateTicket(input, existing)
-    await refresh()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createOrUpdateTicket(input, existing, operationId)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    try { await refresh() }
+    catch { if (epoch === accountEpochRef.current) setToast('79秀订单已保存；页面刷新未完成，请同步核对，无需再次保存。') }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     void synchronise()
+    return saved
   }
 
   const saveShow79Settlement = async (input: Show79SettlementInput) => {
     requireCloudLogin()
+    const epoch = accountEpochRef.current
     await synchronise()
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    requireCloudLogin()
     await ledgerRepository.createShow79Settlement(input)
+    if (epoch !== accountEpochRef.current) return
     try { await refresh() }
     catch { throw new Error('本次分账已登记，但页面刷新失败，请同步后核对；请勿重新付款。重试相同登记不会重复记账。') }
+    if (epoch !== accountEpochRef.current) return
     setToast('分账登记已保存；此操作只记录已发生的付款，不会转账。')
     void synchronise()
   }
@@ -771,6 +847,13 @@ export default function App() {
     } catch (error) { setToast(error instanceof Error ? error.message : '删除未完成，请刷新核对。') }
   }
 
+  const resolveSyncConflict = async (id: string) => {
+    requireCloudLogin()
+    await ledgerRepository.resolveSyncConflict(id)
+    await refresh()
+    void synchronise()
+  }
+
   const install = async () => {
     if (!installPrompt) return
     await installPrompt.prompt()
@@ -782,12 +865,24 @@ export default function App() {
   const signOut = async () => {
     const client = getSupabase()
     if (!client) return
+    const epoch = ++accountEpochRef.current
+    accountReadyRef.current = false
     userRef.current = null
+    setUser(null)
+    setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
+    setFormOpen(false); setRefundOpen(false); setSupplierSheetOpen(false); setConflictsOpen(false)
+    setSelectedTicket(undefined)
     syncAbortRef.current?.abort()
     syncQueueRef.current?.clearPending()
-    await client.auth.signOut()
-    setUser(null)
-    setSyncMessage('已退出云端账号；数据仍保留在本机。')
+    try {
+      await ledgerRepository.activateAccount(null)
+      const { error } = await client.auth.signOut()
+      if (error) throw error
+      if (epoch === accountEpochRef.current) accountReadyRef.current = true
+      setSyncMessage('已退出云端账号；本机缓存已锁定，重新登录后可查看。')
+    } catch (error) {
+      setToast(`退出尚未完成，本机账本仍保持锁定，请刷新后核对。${error instanceof Error ? error.message : ''}`)
+    }
   }
 
   if (!ready) {
@@ -805,9 +900,11 @@ export default function App() {
           </div>
         </div>
         <button className="header-action" type="button" onClick={() => void synchronise()} disabled={!user || syncing}>
-          {syncing ? '同步中' : user ? unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
+          {syncing ? '同步中' : user ? syncConflicts.some(row => !row.resolvedAt) ? '待核对' : unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
         </button>
       </header>
+
+      {syncConflicts.length > 0 && <section className="sync-conflict-banner" aria-label="同步记录核对"><div><strong>{syncConflicts.some(row => !row.resolvedAt) ? `${syncConflicts.filter(row => !row.resolvedAt).length} 条同步记录待核对` : '同步核对历史'}</strong><p>本机修改副本已保留，可查看差异后处理。</p></div><button type="button" className="secondary-button" onClick={() => setConflictsOpen(true)}>查看记录</button></section>}
 
       <div className="page-content">
         {view === 'dashboard' ? <>
@@ -895,6 +992,7 @@ export default function App() {
       {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
+      {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       {view !== 'show79' && view !== 'reports' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(mainTickets).length)}</button>}
     </main>

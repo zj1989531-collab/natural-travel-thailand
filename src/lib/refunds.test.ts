@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RefundInput, RefundRecord, TicketRecord } from '../types'
 import { attachRefunds, getEffectivePersonCount, getRefundState } from './refunds'
 import { defaultRefundAmounts, validateRefundInput } from './refund-input'
@@ -7,6 +7,7 @@ import { summarise, ticketsForDailyStats, ticketsInMonth, bySupplier } from './s
 import { buildReport } from './reports'
 import { buildTicketExportRows, createLedgerBackup } from './export'
 import { isValidCalendarDate } from './format'
+import { buildShow79Report } from './show79'
 
 const ticket: TicketRecord = { id: 't1', userId: 'u1', issueDate: '2026-09-30', issueTime: '23:59', supplierId: 's1', supplierName: '测试', projectId: null, projectName: '普通门票', subItemName: '', personCount: 3, amountBasis: 'per_person', agentPriceThb: 650, costThb: 600, note: '', createdAt: '2026-09-30T16:59:00Z', updatedAt: '2026-09-30T16:59:00Z', syncStatus: 'synced', deletedAt: null }
 const refund: RefundRecord = { id: 'r1', userId: ticket.userId, ticketId: ticket.id, personCount: 1, isFull: false, refundRevenueThb: 650, returnedCostThb: 550, refundDate: '2026-10-01', refundTime: '00:01', note: '手续费50', cancelledAt: null, createdAt: '2026-09-30T17:01:00Z', updatedAt: '2026-09-30T17:01:00Z', syncStatus: 'synced' }
@@ -79,10 +80,34 @@ describe('refund amounts, quantities and original-period accounting', () => {
     { personCount: 0 }, { personCount: 1.5 }, { personCount: 4 },
     { refundRevenueThb: -1 }, { refundRevenueThb: NaN }, { refundRevenueThb: Infinity },
     { refundRevenueThb: 1951 }, { returnedCostThb: 1801 }, { returnedCostThb: 550.001 },
-    { refundDate: '2026-09-29' }, { refundDate: '2026-02-30' }, { refundDate: '2026-13-01' },
+    { refundDate: '2026-10-17' }, { refundDate: '2026-02-30' }, { refundDate: '2026-13-01' },
     { refundTime: '24:00' }, { refundTime: '' }, { ticketId: 'other' }
   ])('rejects invalid inputs %j', (override) => {
-    expect(() => validateRefundInput(ticket, { ...input, ...override })).toThrow()
+    expect(() => validateRefundInput(ticket, { ...input, ...override }, '2026-10-16')).toThrow()
+  })
+  it('permits actual refunds before a future viewing date while keeping 79 profit in the original month', () => {
+    const future = { ...ticket, projectName: '79秀', issueDate: '2026-11-20' }
+    const actualRefund = { ...refund, refundDate: '2026-10-16' }
+    expect(validateRefundInput(future, { ...input, refundDate: actualRefund.refundDate }, '2026-10-16')).toEqual({ personCount: 1, isFull: false })
+    const row = projected([actualRefund], future)
+    expect(row.issueDate).toBe('2026-11-20')
+    expect(row.refunds?.[0].refundDate).toBe('2026-10-16')
+    expect(buildShow79Report([row], '2026-11-20', '2026-11')).toMatchObject({ profitThb: 50, monthPeople: 2, jimmyThb: 20, partnersThb: 30 })
+    expect(buildShow79Report([row], '2026-10-16', '2026-10')).toMatchObject({ profitThb: 0, monthPeople: 0 })
+  })
+  it('accepts earlier actual dates and leap days but rejects future or impossible refund days', () => {
+    for (const refundDate of ['2026-09-29', '2024-02-29', '2026-10-16']) expect(() => validateRefundInput(ticket, { ...input, refundDate }, '2026-10-16')).not.toThrow()
+    for (const refundDate of ['2026-10-17', '2026-02-29', '2026-04-31', '', '2026/10/16']) expect(() => validateRefundInput(ticket, { ...input, refundDate }, '2026-10-16')).toThrow('退款日期')
+  })
+  it('uses Bangkok midnight for the maximum actual refund date independently of the browser zone', () => {
+    vi.useFakeTimers()
+    try {
+      const nextDay = { ...input, refundDate: '2026-10-17' }
+      vi.setSystemTime(new Date('2026-10-16T16:59:59Z'))
+      expect(() => validateRefundInput(ticket, nextDay)).toThrow('退款日期')
+      vi.setSystemTime(new Date('2026-10-16T17:00:00Z'))
+      expect(() => validateRefundInput(ticket, nextDay)).not.toThrow()
+    } finally { vi.useRealTimers() }
   })
   it('validates against remaining quantity and money after previous refunds', () => {
     expect(() => validateRefundInput(projected(), { ...input, personCount: 3 })).toThrow('剩余人数')
