@@ -3,8 +3,8 @@ import type { Project, TicketInput } from '../types'
 import { filterProjects } from '../lib/project-search'
 import { projectNames, projectOptionLabel } from '../lib/project-selection'
 
-export function ProjectPicker({ projects, recent = [], form, onName, onOption }: {
-  projects: Project[]; recent?: Project[]; form: TicketInput; onName: (name: string) => void; onOption: (id: string, name?: string) => void
+export function ProjectPicker({ projects, form, onName, onOption }: {
+  projects: Project[]; form: TicketInput; onName: (name: string) => void; onOption: (id: string, name?: string) => void
 }) {
   const [query, setQuery] = useState('')
   const matching = filterProjects(projects, query)
@@ -13,7 +13,6 @@ export function ProjectPicker({ projects, recent = [], form, onName, onOption }:
   const allOptions = projects.filter(project => project.name === form.projectName)
   const choices = allOptions.filter(project => matching.some(row => row.id === project.id) || project.id === form.projectId)
   return <section className="project-picker" aria-label="项目选择">
-    {recent.length > 0 && <div className="recent-projects"><p className="muted">最近使用 · 点击直接带入套餐</p><div>{recent.map(project => <button type="button" key={project.id} title={`${project.name} · ${project.subItemName || '不分套餐'} · ${project.supplierName}`} onClick={() => { setQuery(''); onOption(project.id, project.name) }}>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ''}<small>{project.supplierName}</small></button>)}</div></div>}
     <label>搜索项目<input type="search" placeholder="项目、套餐或供货商" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }} /></label>
     {query && <div className="project-search-status"><span role="status">找到 {names.length} 个项目 · {matching.length} 个套餐{names.length === 0 ? '，请修改关键词' : ''}</span><button className="text-action" type="button" onClick={() => setQuery('')}>清除搜索</button></div>}
     <label>项目<select value={form.projectName} onChange={event => onName(event.target.value)} required><option value="">请选择项目</option>{visibleNames.map(name => <option key={name} value={name}>{name}{!names.includes(name) ? '（当前已选）' : ''}</option>)}</select></label>

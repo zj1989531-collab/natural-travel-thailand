@@ -17,7 +17,7 @@ import { TicketQuickFill } from './components/TicketQuickFill'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
 import { resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
-import { filterProjects, recentProjectOptions } from './lib/project-search'
+import { filterProjects } from './lib/project-search'
 import { quantityParts, summariseQuantities } from './lib/effective-quantities'
 import { quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
@@ -40,7 +40,6 @@ interface InstallPromptEvent extends Event {
 interface TicketFormProps {
   ticket?: TicketRecord
   projects: Project[]
-  recentProjects?: Project[]
   knownTickets?: TicketRecord[]
   cloudLoginRequired: boolean
   onCancel: () => void
@@ -66,7 +65,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, recentProjects = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -190,7 +189,7 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
             </select>
           </label>
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
-          <ProjectPicker projects={projects} recent={ticket ? [] : recentProjects} form={form}
+          <ProjectPicker projects={projects} form={form}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
           {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
@@ -862,7 +861,7 @@ export default function App() {
 
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
       {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
