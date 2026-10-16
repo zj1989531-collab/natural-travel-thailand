@@ -3,6 +3,9 @@ import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { createId, formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
+import { MedicineItemsField } from './components/MedicineItemsField'
+import { buildMedicineTicketInputs, createMedicineLine, type MedicineLine } from './lib/medicine-selection'
+import { isMedicineProject, type MedicineTicketEntry } from './lib/medicine-batch'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
@@ -50,6 +53,7 @@ interface TicketFormProps {
   onCancel: () => void
   onManageSuppliers: () => void
   onSave: (input: TicketInput, operationId?: string) => Promise<void>
+  onSaveMedicine?: (entries: MedicineTicketEntry[]) => Promise<void>
 }
 
 const emptyForm = (): TicketInput => ({
@@ -70,7 +74,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -93,21 +97,69 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
   const [saving, setSaving] = useState(false)
   const saveLock = useRef(false)
   const operationRef = useRef<string | undefined>(undefined)
+  const [medicineLines, setMedicineLines] = useState<MedicineLine[]>([])
+  const medicineOperationRef = useRef<MedicineTicketEntry[] | null>(null)
+  const [pendingMedicineSave, setPendingMedicineSave] = useState(false)
   const [filling, setFilling] = useState(false)
   const fillLock = useRef(false)
   const onFillBusy = useCallback((busy: boolean) => { fillLock.current = busy; setFilling(busy) }, [])
   const [warning, setWarning] = useState<{ messages: string[]; key: string } | null>(null)
   const moreSettingsRef = useRef<HTMLDetailsElement>(null)
   const timeInputRef = useRef<HTMLInputElement>(null)
+  const medicineMode = !ticket && (pendingMedicineSave || isMedicineProject({ name: form.projectName, quantityUnit: 'item', entryMode: 'standard' }) && projects.some(isMedicineProject))
+
+  const applyFilledForm = (next: TicketInput) => {
+    if (saveLock.current || pendingMedicineSave) return
+    setWarning(null); setError(''); setForm(next)
+    const selected = projects.find(row => row.id === next.projectId)
+    setMedicineLines(!ticket && selected && isMedicineProject(selected) ? [{ ...createMedicineLine(selected), personCount: next.personCount ?? 1, amountBasis: next.amountBasis ?? resolveProjectRules(selected).defaultAmountBasis, agentPriceThb: next.agentPriceThb, costThb: next.costThb }] : [])
+  }
+
+  const requestCancel = () => {
+    if (saveLock.current) return
+    if (pendingMedicineSave && !window.confirm('本次保存结果尚未确认，建议先重试确认，避免重复新增。仍要关闭吗？')) return
+    onCancel()
+  }
 
   const update = <K extends keyof TicketInput>(key: K, value: TicketInput[K]) => {
-    if (saveLock.current || fillLock.current) return
+    if (saveLock.current || fillLock.current || pendingMedicineSave) return
     setWarning(null)
     setError('')
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const attemptMedicineSave = async (acknowledgedKey?: string) => {
+    if (saveLock.current || fillLock.current) return
+    setError('')
+    try {
+      if (!onSaveMedicine) throw new Error('药品多选保存尚未打开，请刷新页面重试。')
+      let entries = medicineOperationRef.current
+      if (!entries) {
+        if (!form.issueDate || !form.issueTime || !isValidIssueTime(form.issueTime)) {
+          if (moreSettingsRef.current) moreSettingsRef.current.open = true
+          timeInputRef.current?.focus()
+          throw new Error('请填写有效的出票日期和曼谷时间。')
+        }
+        const inputs = buildMedicineTicketInputs(form, medicineLines, projects)
+        const checks = inputs.map(input => ticketWarnings(input, projects.find(row => row.id === input.projectId), knownTickets))
+        const messages = checks.flatMap((check, index) => check.messages.map(message => `${inputs[index].subItemName || '药品子项'}：${message}`))
+        const key = JSON.stringify(checks.map(check => check.key))
+        if (messages.length && acknowledgedKey !== key) { setWarning({ messages, key }); return }
+        entries = inputs.map(input => ({ input, operationId: createId() }))
+        medicineOperationRef.current = entries
+      }
+      setWarning(null); saveLock.current = true; setSaving(true)
+      await onSaveMedicine(entries)
+    } catch (saveError) {
+      const pending = Boolean(medicineOperationRef.current)
+      setPendingMedicineSave(pending)
+      setError(`${saveError instanceof Error ? saveError.message : '保存未完成。'}${pending ? ' 重试将使用本次原始内容，请勿重复新增。' : ''}`)
+      setWarning(null)
+    } finally { saveLock.current = false; setSaving(false) }
+  }
+
   const attemptSave = async (acknowledgedKey?: string) => {
+    if (medicineMode) { await attemptMedicineSave(acknowledgedKey); return }
     if (saveLock.current || fillLock.current) return
     setError('')
     const supplierName = form.supplierName.trim()
@@ -152,11 +204,10 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
   }
 
   const selectProject = (select: (current: TicketInput) => TicketInput) => {
-    if (saveLock.current) return
-    setWarning(null); setError(''); setForm(current => {
-      const next = select(current)
-      return ticket && next.projectId === ticket.projectId ? { ...next, settlementMode: ticket.settlementMode, quantityUnit: ticket.quantityUnit ?? 'person', entryMode: ticket.entryMode ?? 'standard' } : next
-    })
+    if (saveLock.current || fillLock.current || pendingMedicineSave) return
+    let next = select(form)
+    if (ticket && next.projectId === ticket.projectId) next = { ...next, settlementMode: ticket.settlementMode, quantityUnit: ticket.quantityUnit ?? 'person', entryMode: ticket.entryMode ?? 'standard' }
+    applyFilledForm(next)
   }
 
   const perPerson = form.amountBasis === 'per_person'
@@ -167,7 +218,7 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
   const profit = totals.profitThb
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onCancel}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestCancel}>
       <section className="sheet ticket-entry-sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
@@ -175,15 +226,16 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
             <p className="eyebrow">THB · 自动计算利润</p>
             <h2 id="ticket-form-title">{ticket ? '编辑记录' : '新增出票记录'}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onCancel} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={saving} onClick={requestCancel} aria-label="关闭">×</button>
         </div>
         {cloudLoginRequired && <p className="sheet-copy">保存前请登录云端账号，之后记录和价格修改会自动同步到电脑与手机。</p>}
         <form className="ticket-form" onInvalidCapture={event => {
           const details = (event.target as HTMLElement).closest('details')
           if (details) details.open = true
         }} onSubmit={event => { event.preventDefault(); void attemptSave() }}>
-          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving} onBusyChange={onFillBusy} onFill={next => { if (!saveLock.current) { setWarning(null); setError(''); setForm(next) } }} />}
-          {form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
+          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} />}
+          {medicineMode && <section className="ticket-order-summary" aria-label="订单核对摘要"><p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')}</p><p>药品 · 已选 {medicineLines.length} 项，各子项数量和利润分别统计。</p></section>}
+          {!medicineMode && form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
             <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
             <p className="ticket-order-project">{form.projectName}{form.subItemName ? ` · ${form.subItemName}` : ''}</p>
             <p className="ticket-order-basis">{perPerson ? `按${countLabel}计算 · ${single}金额 × ${countLabel}` : '整单总额 · 不乘人数／数量'}{form.entryMode === 'profit_only'
@@ -191,24 +243,26 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
               : ` · ${perPerson ? single : '整单'}售价 ${Number.isFinite(form.agentPriceThb) ? formatThb(form.agentPriceThb) : '待填写'} · ${perPerson ? single : '整单'}成本 ${Number.isFinite(form.costThb) ? formatThb(form.costThb) : '待填写'}`}</p>
             <p className="ticket-order-profit"><span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span><strong>{amountsComplete ? formatThb(profit) : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong></p>
           </section>}
-          <fieldset className="form-fields" disabled={saving || filling}>
+          <fieldset className="form-fields" disabled={saving || filling || pendingMedicineSave}>
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
           </label>
           <label>客户姓名 <span className="muted">（可选）</span><input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>
-          <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />
+          {!medicineMode && <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />}
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
           <ProjectPicker projects={projects} form={form}
+            selectedOptionIds={medicineMode ? medicineLines.map(line => line.projectId) : []}
+            renderOptions={medicineMode ? choices => <MedicineItemsField projects={choices} lines={medicineLines} disabled={saving || filling || pendingMedicineSave} onChange={lines => { if (saveLock.current || fillLock.current || pendingMedicineSave) return; setMedicineLines(lines); setWarning(null); setError('') }} /> : undefined}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
-          {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
-          {manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
+          {!medicineMode && form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
+          {!medicineMode && manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
           {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
-          {!isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
+          {!medicineMode && !isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
-          {form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
+          {!medicineMode && (form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
             <label>
               {perPerson ? `${single}代理售价（THB）` : '代理售价总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : ''} onChange={(event) => update('agentPriceThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
@@ -217,8 +271,8 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
               {perPerson ? `${single}供货商成本（THB）` : '供货商成本总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.costThb) ? form.costThb : ''} onChange={(event) => update('costThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
             </label>
-          </div>}
-          {form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
+          </div>)}
+          {!medicineMode && form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
           {ticket && !ticket.issueTime && <p className="muted">旧记录未记录时间，可在“更多设置”中手动补填。</p>}
           <details className="ticket-more-settings" ref={moreSettingsRef}>
             <summary>更多设置 · 时间 / 计价方式 / 备注</summary>
@@ -226,13 +280,13 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
               时间（曼谷 UTC+7）
               <input ref={timeInputRef} type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
             </label>
-            <label>
+            {!medicineMode && <label>
               计价方式
               <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
                 <option value="per_person">按{countLabel}计算（{single}金额 × {countLabel}）</option>
                 <option value="total">整单总额（不乘{countLabel}）</option>
               </select>
-            </label>
+            </label>}
           <label>
             备注 <span className="muted">（可选）</span>
             <textarea maxLength={300} placeholder="例如航线、特殊说明" value={form.note} onChange={(event) => update('note', event.target.value)} />
@@ -243,8 +297,8 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
           {error && <p className="form-error" role="alert">{error}</p>}
           {warning && <SaveWarning messages={warning.messages} saving={saving || filling} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
           {!warning && <div className="sheet-actions">
-            <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
-            <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>
+            <button className="secondary-button" type="button" disabled={saving} onClick={requestCancel}>取消</button>
+            <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : pendingMedicineSave ? '重试本次保存' : '保存记录'}</button>
           </div>}
           </div>
         </form>
@@ -773,6 +827,21 @@ export default function App() {
     void synchronise()
   }
 
+  const saveMedicine = async (entries: MedicineTicketEntry[]) => {
+    requireCloudLogin()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createMedicineTickets(entries)
+    if (epoch !== accountEpochRef.current) return
+    const ids = new Set(saved.map(row => row.id))
+    setTickets(current => [...current.filter(row => !ids.has(row.id)), ...saved.map(ticketDisplay)])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) return
+    setFormOpen(false)
+    setToast(refreshed ? `${saved.length} 项药品明细已保存，数量和利润已分别统计。` : '药品明细已全部保存；页面刷新未完成，请同步核对，无需再次保存。')
+    void synchronise()
+  }
+
   const saveShow79 = async (input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
     requireCloudLogin()
     const epoch = accountEpochRef.current
@@ -988,7 +1057,7 @@ export default function App() {
 
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} />}
       {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}

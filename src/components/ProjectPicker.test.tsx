@@ -16,6 +16,15 @@ describe('project search entry controls', () => {
     const html = renderToStaticMarkup(<ProjectPicker projects={[project]} form={form} onName={() => {}} onOption={() => {}} />)
     expect(html).not.toContain('最近使用')
   })
+  it('lets item multi-selection replace the single required package dropdown', () => {
+    const second = { ...project, id: 'p2', subItemName: '另一子项' }
+    const html = renderToStaticMarkup(<ProjectPicker projects={[project, second]} form={form} onName={() => {}} onOption={() => {}} selectedOptionIds={['p', 'p2']} renderOptions={choices => <div aria-label="药品多选">{choices.map(choice => <span key={choice.id}>{choice.subItemName}</span>)}</div>} />)
+    expect(html.match(/<select/g)).toHaveLength(1)
+    expect(html).toContain('药品多选')
+    expect(html).toContain('儿童票')
+    expect(html).toContain('另一子项')
+    expect(html).not.toContain('请选择子项/套餐')
+  })
   it('adds accessible price search and supplier filter without hiding editing or backup', () => {
     const html = renderToStaticMarkup(<SupplierSheet suppliers={[{ id: 's', userId: 'u', name: project.supplierName, normalizedName: project.supplierName, createdAt: project.createdAt, updatedAt: project.updatedAt, syncStatus: 'synced' }]} projects={[project]} onAddSupplier={async () => {}} onAddProject={async () => {}} onUpdateProject={async () => {}} onBackup={async () => {}} onClose={() => {}} />)
     for (const text of ['搜索价格表', '筛选供货商', '全部供货商', '编辑价格', '导出全部资料备份']) expect(html).toContain(text)

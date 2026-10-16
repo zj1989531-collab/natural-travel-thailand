@@ -74,6 +74,35 @@ vi.mock('./db', () => ({ db: {
     state.operations.set(key, { fingerprint, ticketId: record.id, acceptedRecord: copy(record) })
     return copy(record)
   },
+  putMedicineTicketsOnce: async (rows: { ticket: TicketRecord; fingerprint: string; projectUpdatedAt?: string; supplierUpdatedAt?: string }[], owner: LedgerOwnerContext) => {
+    await state.beforeTicketWrite?.()
+    guard(owner)
+    const additions: { ticket: TicketRecord; fingerprint: string; key: string }[] = []
+    const accepted = rows.map(row => {
+      const ticket = row.ticket
+      guard(owner, ticket.userId)
+      const key = `${owner.userId}:${ticket.id}`
+      const receipt = state.operations.get(key)
+      const current = state.local.tickets.get(ticket.id)
+      if (receipt) {
+        if (receipt.fingerprint !== row.fingerprint) throw new Error('这批药品中有提交编号已保存过不同内容')
+        return current ?? receipt.acceptedRecord
+      }
+      if (current && (current.userId !== owner.userId || meaningfulRecordChanged(current, ticket))) throw new Error('此药品提交编号已有其他记录')
+      const project = state.local.projects.get(ticket.projectId!)
+      const supplier = state.local.suppliers.get(ticket.supplierId)
+      if (!project || !supplier || project.userId !== owner.userId || supplier.userId !== owner.userId || project.updatedAt !== row.projectUpdatedAt || supplier.updatedAt !== row.supplierUpdatedAt) throw new Error('药品套餐或供货商已变化')
+      const record = current ?? ticket
+      additions.push({ ticket: record, fingerprint: row.fingerprint, key })
+      return record
+    })
+    guard(owner)
+    for (const row of additions) {
+      state.local.tickets.set(row.ticket.id, copy(row.ticket))
+      state.operations.set(row.key, { fingerprint: row.fingerprint, ticketId: row.ticket.id, acceptedRecord: copy(row.ticket) })
+    }
+    return accepted.map(copy)
+  },
   getSyncConflicts: async () => [...state.conflicts.values()],
   resolveSyncConflict: async (id: string, owner: LedgerOwnerContext) => { guard(owner); const row = state.conflicts.get(id); if (!row || row.userId !== owner.userId) throw new Error('当前账号'); state.conflicts.set(id, { ...row, resolvedAt: new Date().toISOString() }) },
   quarantineTicket: async (id: string, remote: TicketRecord | undefined, message: string, owner: LedgerOwnerContext) => {
@@ -710,6 +739,127 @@ describe('stable new-order submissions and authenticated ownership', () => {
     expect(await ledgerRepository.getTickets()).toEqual([])
     expect((await ledgerRepository.synchronise(user)).synced).toBe(false)
     expect(state.local.tickets.get('old-account-order').userId).toBe(user.id)
+  })
+})
+
+describe('atomic medicine entries', () => {
+  const prepare = () => {
+    const projects: Project[] = [
+      { ...localProject(), id: 'medicine-male', name: '药品', normalizedName: '药品', subItemName: '男', normalizedSubItemName: '男', quantityUnit: 'item', entryMode: 'standard', manualAgentPrice: true, defaultAmountBasis: 'per_person', settlementMode: 'daily', defaultAgentPriceThb: 0, defaultCostThb: 95 },
+      { ...localProject(), id: 'medicine-female', name: '药品', normalizedName: '药品', subItemName: '女', normalizedSubItemName: '女', quantityUnit: 'item', entryMode: 'standard', manualAgentPrice: true, defaultAmountBasis: 'per_person', settlementMode: 'monthly', defaultAgentPriceThb: 0, defaultCostThb: 120 }
+    ]
+    for (const project of projects) state.local.projects.set(project.id, copy(project))
+    state.local.suppliers.set('supplier-1', { id: 'supplier-1', userId: user.id, name: '示例供货商', normalizedName: '示例供货商', createdAt: '2026-10-13T00:00:00Z', updatedAt: '2026-10-13T01:00:00Z', syncStatus: 'synced' })
+    return projects.map((project, index) => ({ operationId: `medicine-operation-${index}`, input: {
+      guestName: ' Jimmy ', issueDate: '2026-10-16', issueTime: '12:30', personCount: index ? 3 : 2,
+      projectId: project.id, projectName: project.name, subItemName: project.subItemName,
+      supplierName: project.supplierName, agentPriceThb: index ? 200 : 150,
+      costThb: project.defaultCostThb, note: ' 同一客人 '
+    } satisfies TicketInput }))
+  }
+
+  it('saves independent medicine quantities and prices using catalogue rules without changing defaults', async () => {
+    const entries = prepare()
+    const catalogue = structuredClone([...state.local.projects.values()])
+    const rows = await ledgerRepository.createMedicineTickets(entries)
+    expect(rows.map(row => row.id)).toEqual(entries.map(row => row.operationId))
+    expect(rows.map(row => getTicketAmounts(row))).toEqual([
+      { agentPriceThb: 300, costThb: 190, profitThb: 110 },
+      { agentPriceThb: 600, costThb: 360, profitThb: 240 }
+    ])
+    expect(rows.reduce((total, row) => total + row.personCount!, 0)).toBe(5)
+    expect(rows.map(row => row.settlementMode)).toEqual(['daily', 'monthly'])
+    expect(rows.every(row => row.quantityUnit === 'item' && row.entryMode === 'standard' && row.guestName === 'Jimmy' && row.note === '同一客人')).toBe(true)
+    expect([...state.local.projects.values()]).toEqual(catalogue)
+    expect(state.local.tickets.size).toBe(2)
+    expect(state.operations.size).toBe(2)
+  })
+
+  it('allows explicit zero prices, blank common guest names and legal per-row billing overrides', async () => {
+    const entries = prepare().map(entry => ({ ...entry, input: { ...entry.input, guestName: '', amountBasis: 'total' as const, agentPriceThb: 0, quantityUnit: 'person' as const, entryMode: 'profit_only' as const, settlementMode: 'daily' as const } }))
+    const rows = await ledgerRepository.createMedicineTickets(entries)
+    expect(rows.map(row => getTicketAmounts(row).costThb)).toEqual([95, 120])
+    expect(rows.map(row => row.settlementMode)).toEqual(['daily', 'monthly'])
+    expect(rows.every(row => row.guestName === '' && row.quantityUnit === 'item' && row.entryMode === 'standard' && row.amountBasis === 'total' && row.manualProfitThb === null)).toBe(true)
+  })
+
+  it.each([
+    ['missing manual sales price', { agentPriceThb: NaN }, /实际售价/],
+    ['sub-cent amount', { costThb: 120.001 }, /两位小数/],
+    ['invalid quantity', { personCount: 0 }, /数量/],
+    ['invalid billing basis', { amountBasis: 'other' }, /计价方式/]
+  ])('writes none of the batch when the second row has %s', async (_label, invalid, error) => {
+    const entries = prepare()
+    Object.assign(entries[1].input, invalid)
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow(error as RegExp)
+    expect(state.local.tickets.size).toBe(0)
+    expect(state.operations.size).toBe(0)
+  })
+
+  it('rechecks the catalogue before committing and leaves the complete batch unsaved if it changed', async () => {
+    const entries = prepare()
+    state.beforeTicketWrite = async () => { state.local.projects.get(entries[1].input.projectId).updatedAt = '2026-10-16T00:00:00Z' }
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow('已变化')
+    expect(state.local.tickets.size).toBe(0)
+    expect(state.operations.size).toBe(0)
+  })
+
+  it('rejects a non-medicine or foreign-account catalogue item before writing any line', async () => {
+    const entries = prepare()
+    state.local.projects.get(entries[1].input.projectId).name = '其他项目'
+    entries[1].input.projectName = '其他项目'
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow('药品商品套餐')
+    expect(state.local.tickets.size).toBe(0)
+    state.local.projects.get(entries[1].input.projectId).userId = 'user-2'
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow('当前账号')
+    expect(state.operations.size).toBe(0)
+  })
+
+  it('acknowledges a lost response after catalogue removal, with current refunds and no duplicates', async () => {
+    const entries = prepare()
+    const originals = await ledgerRepository.createMedicineTickets(entries)
+    const refund: RefundRecord = { id: 'medicine-refund', userId: user.id, ticketId: originals[0].id, personCount: 1, isFull: false,
+      refundRevenueThb: 150, returnedCostThb: 95, refundDate: '2026-10-16', refundTime: '13:00', note: '', cancelledAt: null,
+      createdAt: '2026-10-16T06:00:00Z', updatedAt: '2026-10-16T06:00:00Z', syncStatus: 'synced' }
+    state.local.ticket_refunds.set(refund.id, refund)
+    state.local.ticket_refunds.set('foreign-refund', { ...refund, id: 'foreign-refund', userId: 'user-2' })
+    state.local.projects.clear()
+    state.local.suppliers.clear()
+    const retry = await ledgerRepository.createMedicineTickets(entries)
+    expect(retry.map(row => row.id)).toEqual(originals.map(row => row.id))
+    expect(retry[0].refunds).toEqual([refund])
+    expect(getRefundState(retry[0]).remainingPeople).toBe(1)
+    expect(getTicketAmounts(retry[0]).profitThb).toBe(55)
+    expect(state.local.tickets.get(originals[0].id).personCount).toBe(2)
+    expect(state.local.tickets.size).toBe(2)
+    expect(state.operations.size).toBe(2)
+  })
+
+  it('rejects changed accepted content without creating any new lines in a mixed retry', async () => {
+    const entries = prepare()
+    await ledgerRepository.createMedicineTickets(entries)
+    const previous = structuredClone([...state.local.tickets.values()])
+    entries[0].operationId = 'new-first-line'
+    entries[1].input.agentPriceThb += 1
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow('不同内容')
+    expect([...state.local.tickets.values()]).toEqual(previous)
+    expect(state.operations.size).toBe(2)
+  })
+
+  it('makes simultaneous retries idempotent for the entire batch', async () => {
+    const entries = prepare()
+    const [first, second] = await Promise.all([ledgerRepository.createMedicineTickets(entries), ledgerRepository.createMedicineTickets(entries)])
+    expect(second).toEqual(first)
+    expect(state.local.tickets.size).toBe(2)
+    expect(state.operations.size).toBe(2)
+  })
+
+  it('rejects the whole delayed old-account batch when authentication changes before its transaction', async () => {
+    const entries = prepare()
+    state.beforeTicketWrite = () => ledgerRepository.activateAccount('user-2')
+    await expect(ledgerRepository.createMedicineTickets(entries)).rejects.toThrow('账号已切换')
+    expect(state.local.tickets.size).toBe(0)
+    expect(state.operations.size).toBe(0)
   })
 })
 

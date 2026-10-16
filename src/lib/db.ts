@@ -8,6 +8,7 @@ import { buildShow79SettlementState, type Show79SettlementInput, type Show79Sett
 import { AccountChangedError, assertLedgerOwner, ticketOperationKey, type LedgerOwnerContext, type LedgerSettings, type TicketCreateOperation } from './ledger-account'
 import { makeSyncConflict, meaningfulRecordChanged, shouldArchiveRemoteConflict, type SyncConflictRecord, type SyncConflictSource, type SyncConflictTable } from './sync-conflicts'
 import { createId } from './format'
+import { isMedicineProject } from './medicine-batch'
 
 interface SyncBaseRecord {
   id: string
@@ -233,6 +234,52 @@ export const db = {
       const accepted = current ?? ticket
       await tx.objectStore('tickets').put(accepted)
       await tx.objectStore('ticket_create_operations').add({ id: key, userId: owner.userId, ticketId: ticket.id, fingerprint, acceptedRecord: accepted })
+      checkEpoch(owner, tx); await tx.done; checkEpoch(owner)
+      return accepted
+    } catch (error) { try { tx.abort() } catch { /* Already aborted. */ } await tx.done.catch(() => undefined); throw error }
+  },
+  async putMedicineTicketsOnce(rows: { ticket: TicketRecord; fingerprint: string; projectUpdatedAt?: string; supplierUpdatedAt?: string }[], owner: LedgerOwnerContext): Promise<TicketRecord[]> {
+    const database = await getDb()
+    const tx = database.transaction(['settings', 'tickets', 'ticket_create_operations', 'ticket_refunds', 'projects', 'suppliers'], 'readwrite')
+    try {
+      const settings = await tx.objectStore('settings').get('app')
+      assertLedgerOwner(settings, owner)
+      const seen = new Set<string>()
+      const accepted: TicketRecord[] = []
+      const additions: { ticket: TicketRecord; fingerprint: string; key: string }[] = []
+      // Validate every row/receipt against the same transaction before writing
+      // anything. Any later storage error aborts both tickets and their receipts.
+      for (const row of rows) {
+        const ticket = row.ticket
+        assertLedgerOwner(settings, owner, ticket.userId)
+        if (seen.has(ticket.id)) throw new Error('药品记录的提交编号不能重复。')
+        seen.add(ticket.id)
+        const key = ticketOperationKey(owner.userId, ticket.id)
+        const receipt = await tx.objectStore('ticket_create_operations').get(key)
+        const current = await tx.objectStore('tickets').get(ticket.id)
+        if (receipt) {
+          if (receipt.userId !== owner.userId || current && current.userId !== owner.userId) throw new AccountChangedError()
+          if (receipt.fingerprint !== row.fingerprint) throw new Error('这批药品中有提交编号已保存过不同内容，请重新打开新增记录。')
+          accepted.push(current ?? receipt.acceptedRecord)
+          continue
+        }
+        if (current && (current.userId !== owner.userId || meaningfulRecordChanged(current, ticket))) throw new Error('此药品提交编号已有其他记录，请重新打开新增记录。')
+        const project = ticket.projectId ? await tx.objectStore('projects').get(ticket.projectId) : undefined
+        const supplier = await tx.objectStore('suppliers').get(ticket.supplierId)
+        if (!project || !supplier || project.userId !== owner.userId || supplier.userId !== owner.userId || project.mergedIntoId || supplier.mergedIntoId || !isMedicineProject(project) || project.supplierId !== supplier.id || project.updatedAt !== row.projectUpdatedAt || supplier.updatedAt !== row.supplierUpdatedAt) throw new Error('药品套餐或供货商已变化，请刷新后重新核对。')
+        // A retry may acknowledge an unchanged existing original, including its
+        // refund history, but must never replace that original with a new draft.
+        const history = await tx.objectStore('ticket_refunds').index('by-ticket-id').getAll(ticket.id)
+        if (history.some(refund => refund.userId === owner.userId) && !current) throw new Error('此药品已有退票明细，请先同步核对原记录。')
+        const record = current ?? ticket
+        accepted.push(record)
+        additions.push({ ticket: record, fingerprint: row.fingerprint, key })
+      }
+      checkEpoch(owner, tx)
+      for (const row of additions) {
+        await tx.objectStore('tickets').put(row.ticket)
+        await tx.objectStore('ticket_create_operations').add({ id: row.key, userId: owner.userId, ticketId: row.ticket.id, fingerprint: row.fingerprint, acceptedRecord: row.ticket })
+      }
       checkEpoch(owner, tx); await tx.done; checkEpoch(owner)
       return accepted
     } catch (error) { try { tx.abort() } catch { /* Already aborted. */ } await tx.done.catch(() => undefined); throw error }

@@ -14,6 +14,7 @@ import { isShow79Project } from './show79'
 import { buildShow79SettlementState, validateShow79SettlementInput, type Show79SettlementInput, type Show79SettlementRecord } from './show79-settlement'
 import { AccountChangedError, assertLedgerOwner, type LedgerOwnerContext } from './ledger-account'
 import { ticketCreateFingerprint } from './sync-conflicts'
+import { isMedicineProject, validateMedicineBatchShape, type MedicineTicketEntry } from './medicine-batch'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 let accountUserId: string | null | undefined
@@ -68,11 +69,45 @@ async function ownerContext(write = false): Promise<LedgerOwnerContext | null> {
 const assertCurrent = (owner: LedgerOwnerContext) => { if (!owner.isCurrent()) throw new AccountChangedError() }
 
 async function ticketWithCurrentRefunds(ticket: TicketRecord, owner: LedgerOwnerContext): Promise<TicketRecord> {
+  return (await ticketsWithCurrentRefunds([ticket], owner))[0]
+}
+
+async function ticketsWithCurrentRefunds(tickets: TicketRecord[], owner: LedgerOwnerContext): Promise<TicketRecord[]> {
   assertCurrent(owner)
-  if (ticket.userId !== owner.userId) throw new AccountChangedError()
-  const refunds = (await db.getRefunds()).filter(row => row.userId === owner.userId && row.ticketId === ticket.id)
+  if (tickets.some(ticket => ticket.userId !== owner.userId)) throw new AccountChangedError()
+  const refunds = (await db.getRefunds()).filter(row => row.userId === owner.userId)
   assertCurrent(owner)
-  return attachRefunds([ticket], refunds)[0]
+  return attachRefunds(tickets, refunds)
+}
+
+// Prepare all medicine rows before starting a write transaction. Catalogue and
+// account versions are checked again by the atomic IndexedDB batch operation.
+function stageMedicineTicket(entry: MedicineTicketEntry, project: Project, supplier: Supplier, owner: LedgerOwnerContext): TicketRecord {
+  const input = entry.input
+  if (!isMedicineProject(project) || project.userId !== owner.userId || supplier.userId !== owner.userId || supplier.id !== project.supplierId) throw new Error('请选择当前账号已录入的药品商品套餐。')
+  if (typeof input.supplierName !== 'string' || normalizeSupplier(input.supplierName) !== normalizeSupplier(supplier.name) || typeof input.projectName !== 'string' || cleanProjectLabel(input.projectName) !== cleanProjectLabel(project.name) || typeof input.subItemName !== 'string' || cleanProjectLabel(input.subItemName) !== cleanProjectLabel(project.subItemName)) throw new Error('药品套餐或供货商已变化，请重新选择后保存。')
+  if (!isValidCalendarDate(input.issueDate)) throw new Error('请填写有效的出票日期。')
+  if ((input.guestName ?? '').trim().length > 100) throw new Error('客户姓名最多100个字符。')
+  if (!input.issueTime || !isValidIssueTime(input.issueTime)) throw new Error('请填写有效的曼谷时间（HH:mm）。')
+  if (input.personCount == null || !isValidPersonCount(input.personCount)) throw new Error('药品数量必须是大于或等于1的整数。')
+  const rules = resolveProjectRules(project)
+  validateProjectRules({ defaultAmountBasis: input.amountBasis ?? rules.defaultAmountBasis, settlementMode: rules.settlementMode })
+  if (project.manualAgentPrice && !Number.isFinite(input.agentPriceThb)) throw new Error('请填写每项药品的实际售价。')
+  validateAmountPrecision([input.agentPriceThb, input.costThb])
+  const timestamp = nextModifiedAt(project.updatedAt, supplier.updatedAt)
+  const ticket: TicketRecord = {
+    id: entry.operationId, userId: owner.userId, guestName: input.guestName?.trim() ?? '',
+    issueDate: input.issueDate, issueTime: input.issueTime, personCount: input.personCount,
+    supplierId: supplier.id, supplierName: supplier.name, projectId: project.id,
+    projectName: cleanProjectLabel(project.name), subItemName: cleanProjectLabel(project.subItemName),
+    quantityUnit: 'item', entryMode: 'standard', manualProfitThb: null,
+    amountBasis: input.amountBasis ?? rules.defaultAmountBasis, settlementMode: rules.settlementMode,
+    agentPriceThb: input.agentPriceThb, costThb: input.costThb, note: input.note.trim(),
+    createdAt: timestamp, updatedAt: timestamp, deletedAt: null, syncStatus: statusForWrite()
+  }
+  const totals = getTicketAmounts(ticket)
+  validateAmountPrecision([totals.agentPriceThb, totals.costThb, Math.abs(totals.profitThb)])
+  return ticket
 }
 
 type CloudSupplier = {
@@ -736,6 +771,28 @@ export const ledgerRepository = {
     if (fingerprint) return ticketWithCurrentRefunds(await db.putNewTicketOnce(ticket, fingerprint, owner), owner)
     await db.putTicket(ticket, owner)
     return ticketWithCurrentRefunds(ticket, owner)
+  },
+
+  async createMedicineTickets(entries: MedicineTicketEntry[]): Promise<TicketRecord[]> {
+    const owner = (await ownerContext(true))!
+    validateMedicineBatchShape(entries)
+    const fingerprints = entries.map(entry => ticketCreateFingerprint(entry.input))
+    const receipts = await Promise.all(entries.map(entry => db.getTicketCreateOperation(entry.operationId, owner)))
+    assertCurrent(owner)
+    for (let index = 0; index < entries.length; index++) if (receipts[index] && receipts[index]!.receipt.fingerprint !== fingerprints[index]) throw new Error('这批药品中有提交编号已保存过不同内容，请重新打开新增记录。')
+    if (receipts.every(Boolean)) return ticketsWithCurrentRefunds(receipts.map(receipt => receipt!.ticket), owner)
+
+    const [projects, suppliers] = await Promise.all([db.getProjects(), db.getSuppliers()])
+    assertCurrent(owner)
+    const prepared = entries.map((entry, index) => {
+      const accepted = receipts[index]
+      if (accepted) return { ticket: accepted.ticket, fingerprint: fingerprints[index] }
+      const project = projects.find(row => row.id === entry.input.projectId && row.userId === owner.userId)
+      const supplier = project && suppliers.find(row => row.id === project.supplierId && row.userId === owner.userId)
+      if (!project || !supplier) throw new Error('请选择当前账号已录入的药品商品套餐。')
+      return { ticket: stageMedicineTicket(entry, project, supplier, owner), fingerprint: fingerprints[index], projectUpdatedAt: project.updatedAt, supplierUpdatedAt: supplier.updatedAt }
+    })
+    return ticketsWithCurrentRefunds(await db.putMedicineTicketsOnce(prepared, owner), owner)
   },
 
   async deleteTicket(ticket: TicketRecord): Promise<TicketRecord> {

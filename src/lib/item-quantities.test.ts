@@ -3,9 +3,10 @@ import type { Project, TicketInput, TicketRecord } from '../types'
 import { chooseProject, chooseProjectOption } from './project-selection'
 import { getTicketAmounts } from './ticket-amounts'
 import { buildReport, type ReportQuery } from './reports'
-import { buildTicketExportRows, createLedgerBackup } from './export'
+import { buildReportExportRows, buildTicketExportRows, createLedgerBackup } from './export'
 import { validateRefundInput } from './refund-input'
 import { quantityLabels } from './quantity'
+import { buildShow79Report, mainLedgerTickets } from './show79'
 
 const projects: Project[] = ['果冻（男）', '果冻（女）', '双效', '小蓝片'].map((subItemName, i) => ({ id: `project-${i}`, userId: 'test-user', supplierId: 'test-supplier', supplierName: '测试供货商', name: '药品', normalizedName: '药品', subItemName, normalizedSubItemName: subItemName, defaultCostThb: [95,105,160,95][i], defaultAgentPriceThb: 0, manualAgentPrice: true, quantityUnit: 'item', createdAt: '2026-10-14T00:00:00Z', updatedAt: '2026-10-14T00:00:00Z', syncStatus: 'synced' }))
 const input: TicketInput = { issueDate: '2026-10-14', issueTime: '09:30', projectName: '', projectId: '', supplierName: '', subItemName: '', personCount: 2, quantityUnit: 'person', amountBasis: 'per_person', agentPriceThb: NaN, costThb: NaN, note: '' }
@@ -56,5 +57,44 @@ describe('item quantities and manual selling prices', () => {
     const backup = createLedgerBackup({ suppliers: [], projects, tickets: [ticket] })
     expect(backup.projects[0]).toMatchObject({ manualAgentPrice: true, quantityUnit: 'item' })
     expect(backup.tickets[0].quantityUnit).toBe('item')
+  })
+  it('keeps two medicine packages for one customer as independent priced rows and excludes 79 from their report and Excel', () => {
+    const common = { ...input, guestName: 'Jimmy', issueDate: '2026-10-14', projectName: '药品', note: '同客多项药品' }
+    const selectedMale = chooseProjectOption(common, projects, projects[0].id)
+    const selectedFemale = chooseProjectOption(common, projects, projects[1].id)
+    expect(selectedMale.agentPriceThb).toBeNaN()
+    expect(selectedFemale.agentPriceThb).toBeNaN()
+    const medicine: TicketRecord[] = [
+      { ...ticket, ...selectedMale, id: 'medicine-male', supplierId: projects[0].supplierId, personCount: 1, agentPriceThb: 150 },
+      { ...ticket, ...selectedFemale, id: 'medicine-female', supplierId: projects[1].supplierId, personCount: 2, agentPriceThb: 180 }
+    ]
+    const show79: TicketRecord = { ...ticket, id: 'independent-79', guestName: 'Aditya', projectName: '79秀', subItemName: '门票', quantityUnit: 'person', personCount: 4, agentPriceThb: 500, costThb: 450 }
+    const source = [...medicine, show79]
+    const original = structuredClone(source)
+    const report = buildReport(source, query)
+    expect(report.records.map(row => row.id).sort()).toEqual(['medicine-female', 'medicine-male'])
+    expect(report.counts).toEqual({ accountingRecordCount: 2, effectiveOrderCount: 2, refundedOrderCount: 0 })
+    expect(report.quantity).toMatchObject({ recordCount: 0, peopleCount: 0 })
+    expect(report.recordedPeople).toBe(0)
+    expect(report.itemQuantity).toMatchObject({ recordCount: 2, quantityCount: 3 })
+    expect(report.effectiveQuantity).toMatchObject({ ticketCount: 0, itemCount: 3 })
+    expect(report.summary).toEqual({ count: 2, agentPriceThb: 510, costThb: 305, profitThb: 205 })
+    const daily = buildReport(source, { ...query, mode: 'day', projectName: '药品', guestName: 'Jimmy' })
+    expect(daily.itemQuantity.quantityCount).toBe(3)
+    expect(daily.summary.profitThb).toBe(205)
+
+    const rows = buildTicketExportRows(mainLedgerTickets(source))
+    expect(rows).toHaveLength(2)
+    const byPackage = Object.fromEntries(rows.map(row => [row['子项 / 套餐'], row]))
+    expect(byPackage['果冻（男）']).toMatchObject({ '客户姓名': 'Jimmy', '人数': '', '有效人数': '', '数量': 1, '单件代理售价 (THB)': 150, '单件供货商成本 (THB)': 95, '代理售价 (THB)': 150, '供货商成本 (THB)': 95, '利润 (THB)': 55 })
+    expect(byPackage['果冻（女）']).toMatchObject({ '客户姓名': 'Jimmy', '人数': '', '有效人数': '', '数量': 2, '单件代理售价 (THB)': 180, '单件供货商成本 (THB)': 105, '代理售价 (THB)': 360, '供货商成本 (THB)': 210, '利润 (THB)': 150 })
+    expect(buildReportExportRows(daily, '全部供货商').summary[0]).toMatchObject({ '账务记录数': 2, '有效订单数': 2, '有效人数': 0, '有效商品数量': 3, '利润合计 (THB)': 205 })
+    const backup = createLedgerBackup({ suppliers: [], projects, tickets: medicine })
+    expect(backup.tickets).toHaveLength(2)
+    expect(backup.tickets.map(row => [row.projectId, row.guestName, row.personCount, row.agentPriceThb, row.costThb])).toEqual([
+      ['project-0', 'Jimmy', 1, 150, 95], ['project-1', 'Jimmy', 2, 180, 105]
+    ])
+    expect(buildShow79Report(source, query.date, query.month)).toMatchObject({ dayPeople: 4, monthPeople: 4, profitThb: 200, jimmyThb: 80, partnersThb: 120 })
+    expect(source).toEqual(original)
   })
 })
