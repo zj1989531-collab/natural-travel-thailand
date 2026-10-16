@@ -13,6 +13,7 @@ import { BottomNavigation } from './components/BottomNavigation'
 import { Show79View } from './components/Show79View'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
 import { ProjectPicker } from './components/ProjectPicker'
+import { TicketQuickFill } from './components/TicketQuickFill'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
 import { resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
@@ -87,17 +88,20 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const saveLock = useRef(false)
+  const [filling, setFilling] = useState(false)
+  const fillLock = useRef(false)
+  const onFillBusy = useCallback((busy: boolean) => { fillLock.current = busy; setFilling(busy) }, [])
   const [warning, setWarning] = useState<{ messages: string[]; key: string } | null>(null)
 
   const update = <K extends keyof TicketInput>(key: K, value: TicketInput[K]) => {
-    if (saveLock.current) return
+    if (saveLock.current || fillLock.current) return
     setWarning(null)
     setError('')
     setForm((current) => ({ ...current, [key]: value }))
   }
 
   const attemptSave = async (acknowledgedKey?: string) => {
-    if (saveLock.current) return
+    if (saveLock.current || fillLock.current) return
     setError('')
     const supplierName = form.supplierName.trim()
     if (!form.issueDate || !supplierName || !form.projectId) {
@@ -165,7 +169,8 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
         </div>
         {cloudLoginRequired && <p className="sheet-copy">保存前请登录云端账号，之后记录和价格修改会自动同步到电脑与手机。</p>}
         <form className="ticket-form" onSubmit={event => { event.preventDefault(); void attemptSave() }}>
-          <fieldset className="form-fields" disabled={saving}>
+          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving} onBusyChange={onFillBusy} onFill={next => { if (!saveLock.current) { setWarning(null); setError(''); setForm(next) } }} />}
+          <fieldset className="form-fields" disabled={saving || filling}>
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
@@ -215,10 +220,10 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
           </label>
           </fieldset>
           {error && <p className="form-error" role="alert">{error}</p>}
-          {warning && <SaveWarning messages={warning.messages} saving={saving} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
+          {warning && <SaveWarning messages={warning.messages} saving={saving || filling} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
           <div className="sheet-actions">
             <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
-            {!warning && <button className="primary-button" type="submit" disabled={saving}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>}
+            {!warning && <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>}
           </div>
         </form>
       </section>
