@@ -42,6 +42,34 @@ describe('item entry labels', () => {
     expect(html).not.toContain('-฿190.00')
     expect(html).not.toContain('profit-preview negative')
   })
+  it('shows a compact order summary with the saved pricing unit and total profit', () => {
+    const renderForm = (record: TicketRecord) => renderToStaticMarkup(<TicketForm ticket={record} projects={[project]} cloudLoginRequired={false} onCancel={() => {}} onManageSuppliers={() => {}} onSave={async () => {}} />)
+    const html = renderForm({ ...ticket, guestName: 'Jimmy' })
+    const summary = html.match(/<section class="ticket-order-summary[^]*?<\/section>/)?.[0] ?? ''
+    for (const text of ['订单核对摘要', 'Jimmy', '2026/10/14', '2件', '药品 · 测试规格', '单件售价', '单件成本', '฿150.00', '฿95.00', '本次总利润', '฿110.00']) expect(summary).toContain(text)
+    const total = renderForm({ ...ticket, amountBasis: 'total' })
+    expect(total).toContain('整单总额 · 不乘人数／数量')
+    expect(total).toContain('整单售价')
+    expect(total).toContain('฿55.00')
+    expect(total.indexOf('旧记录保留原总额')).toBeLessThan(total.indexOf('<details'))
+    const commission = renderForm({ ...ticket, entryMode: 'profit_only', manualProfitThb: 50 })
+    expect(commission).toContain('单件返佣')
+    expect(commission).toContain('本次月结总利润')
+    expect(commission).toContain('฿100.00')
+  })
+  it('keeps critical fields visible while grouping valid time, pricing mode and notes in more settings', () => {
+    const renderForm = (record?: TicketRecord) => renderToStaticMarkup(<TicketForm ticket={record} projects={[project]} cloudLoginRequired={false} onCancel={() => {}} onManageSuppliers={() => {}} onSave={async () => {}} />)
+    const html = renderForm()
+    const details = html.match(/<details[^]*?<\/details>/)?.[0] ?? ''
+    for (const text of ['更多设置', '时间（曼谷 UTC+7）', '计价方式', '备注']) expect(details).toContain(text)
+    for (const text of ['客户姓名', '出票日期', '搜索项目', '代理售价（THB）', '供货商成本（THB）']) expect(details).not.toContain(text)
+    expect(details).toMatch(/type="time"[^>]*required=""[^>]*value="\d{2}:\d{2}"/)
+    const old = renderForm({ ...ticket, issueTime: undefined })
+    const oldTime = old.match(/<input[^>]*type="time"[^>]*>/)?.[0] ?? ''
+    expect(oldTime).toContain('value=""')
+    expect(oldTime).not.toContain('required')
+    expect(old).toContain('旧记录未记录时间')
+  })
   it('displays a medicine quantity query as items, not ticket headcounts', () => {
     const report = buildReport([ticket], { mode: 'month', month: '2026-10', date: '2026-10-14', startDate: '2026-10-01', endDate: '2026-10-31', supplierId: '', projectName: '药品' })
     const html = renderToStaticMarkup(<ReportPreview report={report} supplierName="测试供货商" generatedAt="2026-10-14 09:30" />)

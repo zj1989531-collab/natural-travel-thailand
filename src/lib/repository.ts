@@ -10,6 +10,8 @@ import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
 import { quantityLabels } from './quantity'
 import { cleanProjectLabel, projectDisplay } from './project-labels'
+import { isShow79Project } from './show79'
+import { buildShow79SettlementState, validateShow79SettlementInput, type Show79SettlementInput, type Show79SettlementRecord } from './show79-settlement'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 
@@ -68,6 +70,18 @@ type CloudProject = {
 }
 
 type CloudRefund = { id: string; user_id: string; ticket_id: string; person_count: number | null; is_full: boolean; refund_revenue_thb: number | string; returned_cost_thb: number | string; refund_date: string; refund_time: string; note: string; cancelled_at: string | null; created_at: string; updated_at: string }
+type CloudShow79Settlement = {
+  id: string; user_id: string; month: string; snapshot_profit_thb: number | string;
+  snapshot_jimmy_thb: number | string; snapshot_partners_thb: number | string;
+  jimmy_paid_thb: number | string; partners_paid_thb: number | string;
+  payment_date: string; note: string; created_at: string; updated_at: string
+}
+const toLocalShow79Settlement = (row: CloudShow79Settlement): Show79SettlementRecord => ({
+  id: row.id, userId: row.user_id, month: row.month,
+  snapshotProfitThb: Number(row.snapshot_profit_thb), snapshotJimmyThb: Number(row.snapshot_jimmy_thb), snapshotPartnersThb: Number(row.snapshot_partners_thb),
+  jimmyPaidThb: Number(row.jimmy_paid_thb), partnersPaidThb: Number(row.partners_paid_thb), paymentDate: row.payment_date,
+  note: row.note, createdAt: row.created_at, updatedAt: row.updated_at, syncStatus: 'synced'
+})
 const toLocalRefund = (row: CloudRefund): RefundRecord => ({ id: row.id, userId: row.user_id, ticketId: row.ticket_id, personCount: row.person_count, isFull: row.is_full, refundRevenueThb: Number(row.refund_revenue_thb), returnedCostThb: Number(row.returned_cost_thb), refundDate: row.refund_date, refundTime: row.refund_time.slice(0, 5), note: row.note, cancelledAt: row.cancelled_at, createdAt: row.created_at, updatedAt: row.updated_at, syncStatus: 'synced' })
 const toCloudRefund = (row: RefundRecord) => ({ id: row.id, user_id: row.userId, ticket_id: row.ticketId, person_count: row.personCount, is_full: row.isFull, refund_revenue_thb: row.refundRevenueThb, returned_cost_thb: row.returnedCostThb, refund_date: row.refundDate, refund_time: row.refundTime, note: row.note, cancelled_at: row.cancelledAt, created_at: row.createdAt, updated_at: row.updatedAt })
 
@@ -199,7 +213,7 @@ const getSettings = async (): Promise<AppSettings> => {
   return settings
 }
 
-type CloudTable = 'suppliers' | 'projects' | 'tickets' | 'ticket_refunds'
+type CloudTable = 'suppliers' | 'projects' | 'tickets' | 'ticket_refunds' | 'show79_settlements'
 
 async function fetchCloudRows<T>(client: SupabaseClient, table: CloudTable, userId: string, signal: AbortSignal): Promise<T[]> {
   const rows: T[] = []
@@ -267,6 +281,69 @@ export const ledgerRepository = {
   async getRefunds() {
     const userId = await activeUserId()
     return (await db.getRefunds()).filter((row) => row.userId === userId)
+  },
+
+  async getShow79Settlements() {
+    const userId = await activeUserId()
+    return (await db.getShow79Settlements()).filter(row => row.userId === userId)
+  },
+
+  async createShow79Settlement(input: Show79SettlementInput): Promise<Show79SettlementRecord> {
+    validateShow79SettlementInput(input)
+    const userId = await activeUserId()
+    const client = getSupabase()
+    if (client && !navigator.onLine) throw new Error('分账登记需要联网确认，防止跨设备重复结算。')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const receipt = async () => {
+      if (!client) return db.getShow79Settlement(input.operationId)
+      const { data, error } = await client.from('show79_settlements').select('*').eq('user_id', userId).eq('id', input.operationId).abortSignal(controller.signal)
+      if (error) throw new Error(error.message)
+      return data?.[0] ? toLocalShow79Settlement(data[0] as CloudShow79Settlement) : undefined
+    }
+    const sameRequest = (row: Show79SettlementRecord) => row.userId === userId && row.month === input.month && row.paymentDate === input.paymentDate && row.jimmyPaidThb === input.jimmyPaidThb && row.partnersPaidThb === input.partnersPaidThb && row.note === input.note.trim()
+    const confirm = async (row: Show79SettlementRecord) => {
+      if (!sameRequest(row)) throw new Error('分账提交编号已使用，请核对内容后重新登记。')
+      if (await activeUserId() !== userId) throw new Error('账号已切换，请重新打开结算页面。')
+      await db.putConfirmedShow79Settlement(row)
+      return row
+    }
+    try {
+      const existing = await receipt()
+      if (existing) return confirm(existing)
+      const tickets = await this.getTickets()
+      const history = await this.getShow79Settlements()
+      const state = buildShow79SettlementState(tickets, history, input.month)
+      if (!client) {
+        const timestamp = now()
+        const record: Show79SettlementRecord = { id: input.operationId, userId, month: input.month, paymentDate: input.paymentDate,
+          jimmyPaidThb: input.jimmyPaidThb, partnersPaidThb: input.partnersPaidThb, note: input.note.trim(),
+          snapshotProfitThb: state.profitThb, snapshotJimmyThb: state.jimmyThb, snapshotPartnersThb: state.partnersThb,
+          createdAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' }
+        const accepted = await db.addLocalShow79Settlement(record, input)
+        if (!sameRequest(accepted)) throw new Error('分账提交编号已使用，请重新登记。')
+        return accepted
+      }
+      if (tickets.some(ticket => isShow79Project(ticket.projectName) && ticket.issueDate.startsWith(`${input.month}-`) && (ticket.syncStatus !== 'synced' || ticket.refunds?.some(refund => refund.syncStatus !== 'synced')))) throw new Error('本月79秀订单尚未同步，请先同步再登记分账。')
+      let data: unknown
+      let error: { message: string; code?: string } | null = null
+      try {
+        const result = await client.rpc('record_show79_settlement', {
+          p_operation_id: input.operationId, p_month: input.month, p_payment_date: input.paymentDate,
+          p_jimmy_paid_thb: input.jimmyPaidThb, p_partners_paid_thb: input.partnersPaidThb, p_note: input.note.trim(),
+          p_expected_profit_thb: input.expectedProfitThb, p_expected_jimmy_paid_thb: input.expectedJimmyPaidThb, p_expected_partners_paid_thb: input.expectedPartnersPaidThb
+        }).abortSignal(controller.signal)
+        data = result.data; error = result.error
+      } catch (failure) {
+        const accepted = await receipt().catch(() => undefined)
+        if (accepted) return confirm(accepted)
+        throw failure
+      }
+      const raw = Array.isArray(data) ? data[0] : data
+      const accepted = raw ? toLocalShow79Settlement(raw as CloudShow79Settlement) : await receipt()
+      if (!accepted) throw Object.assign(new Error(error?.message ?? '分账尚未确认，请联网后重试；相同提交不会重复登记。'), { code: error?.code })
+      return confirm(accepted)
+    } finally { clearTimeout(timeout) }
   },
 
   async createRefund(input: RefundInput): Promise<RefundRecord> {
@@ -569,6 +646,7 @@ export const ledgerRepository = {
       }
       await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket })
       await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund })
+      await db.mergeRemoteShow79Settlements((await fetchCloudRows<CloudShow79Settlement>(client, 'show79_settlements', user.id, controller.signal)).map(toLocalShow79Settlement))
       return { synced: true }
     } catch (error) {
       if (externalSignal?.aborted) throw error

@@ -6,6 +6,8 @@ import { isItemQuantity } from './quantity'
 import { cleanProjectLabel, ticketDisplay } from './project-labels'
 import { summariseQuantities } from './effective-quantities'
 import { mainLedgerTickets } from './show79'
+import { getBangkokDate, isValidCalendarDate } from './format'
+import { buildReportCounts } from './report-counts'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -17,6 +19,18 @@ export interface ReportQuery {
   supplierId: string
   projectName?: string
   guestName?: string
+}
+
+export type ReportShortcut = 'today' | 'this-month' | 'last-month'
+export const reportShortcutQuery = (query: ReportQuery, shortcut: ReportShortcut, today = getBangkokDate()): ReportQuery => {
+  if (!isValidCalendarDate(today)) throw new Error('当前日期无效，请重新选择报表日期。')
+  const currentMonth = today.slice(0, 7)
+  if (shortcut === 'today') return { ...query, mode: 'day', date: today, month: currentMonth, startDate: today, endDate: today }
+  const previous = new Date(`${currentMonth}-01T00:00:00Z`)
+  previous.setUTCMonth(previous.getUTCMonth() - 1)
+  const month = shortcut === 'last-month' ? previous.toISOString().slice(0, 7) : currentMonth
+  const range = monthDateRange(month)
+  return { ...query, mode: 'month', month, date: shortcut === 'last-month' ? range.start : today, startDate: range.start, endDate: range.end }
 }
 
 const isCalendarDate = (value: string) => {
@@ -94,9 +108,11 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     },
     records,
     monthlyRecords,
+    counts: buildReportCounts(records),
+    monthlyCounts: buildReportCounts(monthlyRecords),
     summary: roundSummary(records),
     monthlySummary: roundSummary(monthlyRecords),
-    supplierStats: bySupplier(records),
+    supplierStats: bySupplier(records).map((supplier) => ({ ...supplier, ...buildReportCounts(records.filter((ticket) => ticket.supplierId === supplier.supplierId)) })),
     recordedPeople: knownHeadcounts.reduce((total, ticket) => total + getEffectivePersonCount(ticket)!, 0),
     unknownHeadcounts: headcountRecords.length - knownHeadcounts.length
   }

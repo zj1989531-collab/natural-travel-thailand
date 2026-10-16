@@ -51,7 +51,7 @@ describe('online formatted report preview', () => {
 
   it('provides period and supplier controls and a user-triggered print button', () => {
     const html = renderToStaticMarkup(<ReportView tickets={[]} suppliers={[]} />)
-    for (const text of ['格式化报表', '日报', '月报', '自定义日期范围', '全部日期（累计）', '客户姓名', '查询项目', '报表供货商', '导出当前报表 Excel', '打印 / 保存 PDF', '手机上可左右滑动表格']) expect(html).toContain(text)
+    for (const text of ['格式化报表', '日报', '月报', '自定义日期范围', '全部日期（累计）', '客户姓名', '查询项目', '报表供货商', '导出当前报表 Excel', '打印 / 保存 PDF', '手机上以卡片展示记录明细', '今天', '本月', '上月']) expect(html).toContain(text)
     expect(html).toContain('type="month"')
   })
 
@@ -81,5 +81,12 @@ describe('online formatted report preview', () => {
     expect(html).toContain('&lt;img')
     expect(html).not.toContain('<img')
     expect(render([{ ...record, guestName: undefined, note: '客户可能叫张三' }])).toContain('class="muted">未填写</span>')
+  })
+
+  it('provides mobile record and supplier cards alongside print tables with the same accounting counts', () => {
+    const html = render([record, { ...record, id: 'commission', entryMode: 'profit_only', manualProfitThb: 20, amountBasis: 'total' }])
+    for (const text of ['report-record-desktop', 'report-record-cards', 'report-supplier-desktop', 'report-supplier-cards', '报表订单口径', '账务记录数 2 · 有效订单数 1 · 退票单数 0', '仅录利润，不计人数／数量', '退票状态', '未退票', '备注：测试备注']) expect(html).toContain(text)
+    expect(html).not.toContain('总成本')
+    expect(html).not.toContain('总代理售价')
   })
 })

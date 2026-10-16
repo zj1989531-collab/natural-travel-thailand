@@ -8,13 +8,16 @@ import { cleanProjectLabel } from './project-labels'
 import { buildShow79Report, mainLedgerTickets } from './show79'
 import { ticketSettlementMode } from './project-rules'
 import type { LedgerReport } from './reports'
+import { buildReportCounts } from './report-counts'
+import { buildShow79SettlementState, show79SettlementStatusLabels, type Show79SettlementRecord } from './show79-settlement'
 
 const pickFields = <T, K extends keyof T>(record: T, keys: readonly K[]): Pick<T, K> =>
   Object.fromEntries(keys.map((key) => [key, record[key]])) as Pick<T, K>
 
-export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Project[]; tickets: TicketRecord[]; refunds?: RefundRecord[] }, exportedAt = new Date().toISOString()) => {
+export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Project[]; tickets: TicketRecord[]; refunds?: RefundRecord[]; show79Settlements?: Show79SettlementRecord[] }, exportedAt = new Date().toISOString()) => {
   const refunds = [...new Map((data.refunds ?? data.tickets.flatMap((ticket) => ticket.refunds ?? [])).map((refund) => [refund.id, refund])).values()]
-  const owners = new Set([...data.suppliers, ...data.projects, ...data.tickets, ...refunds].map((record) => record.userId))
+  const show79Settlements = data.show79Settlements ?? []
+  const owners = new Set([...data.suppliers, ...data.projects, ...data.tickets, ...refunds, ...show79Settlements].map((record) => record.userId))
   if (owners.size > 1) throw new Error('账号正在切换，请稍后重新备份，避免混合不同账号的资料。')
   return {
     format: 'ticket-profit-ledger',
@@ -23,6 +26,7 @@ export const createLedgerBackup = (data: { suppliers: Supplier[]; projects: Proj
     timeZone: 'Asia/Bangkok',
     exportedAt,
     refunds: refunds.map((record) => pickFields(record, ['id', 'userId', 'ticketId', 'personCount', 'isFull', 'refundRevenueThb', 'returnedCostThb', 'refundDate', 'refundTime', 'note', 'cancelledAt', 'createdAt', 'updatedAt', 'syncStatus'])),
+    show79Settlements: show79Settlements.map((record) => pickFields(record, ['id', 'userId', 'month', 'snapshotProfitThb', 'snapshotJimmyThb', 'snapshotPartnersThb', 'jimmyPaidThb', 'partnersPaidThb', 'paymentDate', 'note', 'createdAt', 'updatedAt', 'syncStatus'])),
     // Explicit fields exclude authentication sessions and any future secret fields.
     suppliers: data.suppliers.map((record) => pickFields(record, ['id', 'userId', 'name', 'normalizedName', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
     projects: data.projects.map((record) => pickFields(record, ['id', 'userId', 'supplierId', 'supplierName', 'name', 'normalizedName', 'subItemName', 'normalizedSubItemName', 'entryMode', 'manualAgentPrice', 'quantityUnit', 'defaultAmountBasis', 'settlementMode', 'defaultCostThb', 'defaultAgentPriceThb', 'createdAt', 'updatedAt', 'syncStatus', 'mergedIntoId'])),
@@ -113,6 +117,7 @@ export const buildReportExportRows = (report: LedgerReport, supplierName: string
   const quantities = reportQuantities(report.records)
   const monthlyRecords = report.mode === 'day' ? report.monthlyRecords : []
   const monthlyQuantities = reportQuantities(monthlyRecords)
+  const monthlyCounts = buildReportCounts(monthlyRecords)
   const summary = [{
     '报表标题': report.title,
     '开始日期': report.start,
@@ -120,18 +125,23 @@ export const buildReportExportRows = (report: LedgerReport, supplierName: string
     '客户筛选': report.guestName?.trim() || '全部客户',
     '供货商': supplierName.trim() || '全部供货商',
     '项目': report.projectName || '全部项目',
-    '记录数': report.records.length,
+    '账务记录数': report.counts.accountingRecordCount,
+    '有效订单数': report.counts.effectiveOrderCount,
+    '退票单数': report.counts.refundedOrderCount,
     '有效人数': quantities.peopleCount,
     '有效商品数量': quantities.itemCount,
     '数量未填写记录数': quantities.unknownCount,
     '利润合计 (THB)': report.summary.profitThb,
+    '单数口径': '账务记录数包含出票及仅录利润记录；有效订单数为未全部退票的出票记录（含商品）；退票单数为至少有一条有效退票的订单数，部分退票和全部退票均计入，已撤销的退票不计入。',
     ...(report.mode === 'day' ? {
-      '当日月结另列记录数': monthlyRecords.length,
+      '当日月结另列账务记录数': monthlyCounts.accountingRecordCount,
+      '当日月结另列有效订单数': monthlyCounts.effectiveOrderCount,
+      '当日月结另列退票单数': monthlyCounts.refundedOrderCount,
       '当日月结另列有效人数': monthlyQuantities.peopleCount,
       '当日月结另列有效商品数量': monthlyQuantities.itemCount,
       '当日月结另列数量未填写记录数': monthlyQuantities.unknownCount,
       '当日月结另列利润 (THB)': report.monthlySummary.profitThb,
-      '日报说明': '月结记录和利润另列，不计入日报记录数、有效人数、有效数量及利润合计。'
+      '日报说明': '月结记录另列，按相同单数口径统计，不计入日报账务记录数、有效订单数、退票单数、有效人数、有效数量及利润合计。'
     } : {})
   }]
   return { summary, records: reportTicketRows(report.records), monthlyRecords: reportTicketRows(monthlyRecords) }
@@ -144,7 +154,7 @@ export const exportReportToXlsx = async (report: LedgerReport, supplierName: str
   const append = (data: Record<string, string | number>[], name: string, headers?: string[]) => {
     const worksheet = XLSX.utils.json_to_sheet(data, headers ? { header: headers } : undefined)
     worksheet['!cols'] = Object.keys(data[0] ?? Object.fromEntries((headers ?? []).map((header) => [header, '']))).map((key) => ({
-      wch: key === '备注' || key === '日报说明' ? 52 : key === '项目' || key === '子项 / 套餐' || key === '客户姓名' ? 28 : Math.max(18, key.length * 2)
+      wch: key === '备注' || key === '日报说明' || key === '单数口径' ? 52 : key === '项目' || key === '子项 / 套餐' || key === '客户姓名' ? 28 : Math.max(18, key.length * 2)
     }))
     XLSX.utils.book_append_sheet(workbook, worksheet, name)
   }
@@ -172,12 +182,65 @@ export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
   XLSX.writeFile(workbook, `票务盈利簿_${new Date().toISOString().slice(0, 10)}.xlsx`)
 }
 
-export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, month: string) => {
+const show79SettlementHeaders = ['结算月份', '实际付款日期', 'jimmy 本次支付 / 收回 (THB)', '大狗二狗本次支付 / 收回 (THB)', '登记时月利润 (THB)', '登记时 jimmy 40% (THB)', '登记时大狗二狗 60% (THB)', '备注', '登记时间（曼谷）']
+
+export const buildShow79ExportRows = (tickets: TicketRecord[], date: string, month: string, settlements: Show79SettlementRecord[] = [], exportedAt = new Date().toISOString()) => {
   const report = buildShow79Report(tickets, date, month)
+  const settlement = buildShow79SettlementState(tickets, settlements, month)
+  const summary = [{
+    '月份': month,
+    '月订单数': report.records.length,
+    '月人数': report.monthPeople,
+    '人数未填记录': report.monthUnknown,
+    '月实际利润 (THB)': report.profitThb,
+    'jimmy 40% (THB)': report.jimmyThb,
+    '大狗二狗合计 60% (THB)': report.partnersThb,
+    '结算状态': show79SettlementStatusLabels[settlement.status],
+    'jimmy 累计已付 (THB)': settlement.paidJimmyThb,
+    'jimmy 尚应付 (THB)': Math.max(0, settlement.remainingJimmyThb),
+    'jimmy 应收回 (THB)': Math.max(0, -settlement.remainingJimmyThb),
+    '大狗二狗累计已付 (THB)': settlement.paidPartnersThb,
+    '大狗二狗尚应付 (THB)': Math.max(0, settlement.remainingPartnersThb),
+    '大狗二狗应收回 (THB)': Math.max(0, -settlement.remainingPartnersThb),
+    '导出时间（曼谷）': new Date(exportedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' }),
+    '结算说明': '本次支付 / 收回：正数为支付，负数为收回或冲正；累计已付为支付减收回的净额。利润及应分金额按当前订单计算，登记时快照保留原值。'
+  }]
+  const settlementRecords = settlement.records.map(record => ({
+    '结算月份': record.month,
+    '实际付款日期': record.paymentDate,
+    'jimmy 本次支付 / 收回 (THB)': record.jimmyPaidThb,
+    '大狗二狗本次支付 / 收回 (THB)': record.partnersPaidThb,
+    '登记时月利润 (THB)': record.snapshotProfitThb,
+    '登记时 jimmy 40% (THB)': record.snapshotJimmyThb,
+    '登记时大狗二狗 60% (THB)': record.snapshotPartnersThb,
+    '备注': record.note,
+    '登记时间（曼谷）': new Date(record.createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Bangkok' })
+  }))
+  return { summary, records: buildTicketExportRows(report.records), settlementRecords }
+}
+
+export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, month: string, settlements: Show79SettlementRecord[] = []) => {
+  const rows = buildShow79ExportRows(tickets, date, month, settlements)
   const XLSX = await import('xlsx')
   const workbook = XLSX.utils.book_new()
-  const summary = [{ '月份': month, '月订单数': report.records.length, '月人数': report.monthPeople, '人数未填记录': report.monthUnknown, '月实际利润 (THB)': report.profitThb, 'jimmy 40% (THB)': report.jimmyThb, '大狗二狗合计 60% (THB)': report.partnersThb }]
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary), '月度分账')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(buildTicketExportRows(report.records)), '79秀订单')
+  const append = (data: Record<string, string | number>[], name: string, headers?: string[]) => {
+    const worksheet = XLSX.utils.json_to_sheet(data, headers ? { header: headers } : undefined)
+    const keys = Object.keys(data[0] ?? Object.fromEntries((headers ?? []).map(header => [header, ''])))
+    worksheet['!cols'] = keys.map(key => ({ wch: key === '备注' || key === '结算说明' ? 52 : key.includes('时间') || key === '客户姓名' ? 28 : Math.max(18, key.length * 2) }))
+    if (worksheet['!ref']) {
+      const range = XLSX.utils.decode_range(worksheet['!ref'])
+      for (let column = 0; column < keys.length; column++) {
+        if (!keys[column].includes('(THB)')) continue
+        for (let row = 1; row <= range.e.r; row++) {
+          const cell = worksheet[XLSX.utils.encode_cell({ r: row, c: column })]
+          if (cell?.t === 'n') cell.z = '#,##0.00;[Red]-#,##0.00'
+        }
+      }
+    }
+    XLSX.utils.book_append_sheet(workbook, worksheet, name)
+  }
+  append(rows.summary, '月度分账')
+  append(rows.records, '79秀订单')
+  append(rows.settlementRecords, '分账登记明细', show79SettlementHeaders)
   XLSX.writeFile(workbook, `79秀独立报表_${month}.xlsx`)
 }

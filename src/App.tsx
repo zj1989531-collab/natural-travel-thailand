@@ -12,12 +12,15 @@ import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { Show79View } from './components/Show79View'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
+import type { Show79SettlementInput, Show79SettlementRecord } from './lib/show79-settlement'
 import { ProjectPicker } from './components/ProjectPicker'
 import { TicketQuickFill } from './components/TicketQuickFill'
+import './components/ticket-entry.css'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
 import { resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
 import { filterProjects } from './lib/project-search'
+import { matchesTicketSearch, type TicketDateRange } from './lib/ticket-search'
 import { quantityParts, summariseQuantities } from './lib/effective-quantities'
 import { quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
@@ -91,6 +94,8 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
   const fillLock = useRef(false)
   const onFillBusy = useCallback((busy: boolean) => { fillLock.current = busy; setFilling(busy) }, [])
   const [warning, setWarning] = useState<{ messages: string[]; key: string } | null>(null)
+  const moreSettingsRef = useRef<HTMLDetailsElement>(null)
+  const timeInputRef = useRef<HTMLInputElement>(null)
 
   const update = <K extends keyof TicketInput>(key: K, value: TicketInput[K]) => {
     if (saveLock.current || fillLock.current) return
@@ -109,6 +114,8 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
     }
     if ((!ticket && !form.issueTime) || (form.issueTime && !isValidIssueTime(form.issueTime))) {
       setError('请填写有效的曼谷时间（HH:mm）。')
+      if (moreSettingsRef.current) moreSettingsRef.current.open = true
+      timeInputRef.current?.focus()
       return
     }
     if (form.personCount == null ? !ticket || ticket.personCount != null : !isValidPersonCount(form.personCount)) {
@@ -157,7 +164,7 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
 
   return (
     <div className="sheet-backdrop" role="presentation" onMouseDown={onCancel}>
-      <section className="sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="sheet ticket-entry-sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div>
@@ -167,27 +174,26 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
           <button className="icon-button" type="button" onClick={onCancel} aria-label="关闭">×</button>
         </div>
         {cloudLoginRequired && <p className="sheet-copy">保存前请登录云端账号，之后记录和价格修改会自动同步到电脑与手机。</p>}
-        <form className="ticket-form" onSubmit={event => { event.preventDefault(); void attemptSave() }}>
+        <form className="ticket-form" onInvalidCapture={event => {
+          const details = (event.target as HTMLElement).closest('details')
+          if (details) details.open = true
+        }} onSubmit={event => { event.preventDefault(); void attemptSave() }}>
           {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving} onBusyChange={onFillBusy} onFill={next => { if (!saveLock.current) { setWarning(null); setError(''); setForm(next) } }} />}
+          {form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
+            <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
+            <p className="ticket-order-project">{form.projectName}{form.subItemName ? ` · ${form.subItemName}` : ''}</p>
+            <p className="ticket-order-basis">{perPerson ? `按${countLabel}计算 · ${single}金额 × ${countLabel}` : '整单总额 · 不乘人数／数量'}{form.entryMode === 'profit_only'
+              ? ` · ${perPerson ? single : '整单'}返佣 ${typeof form.manualProfitThb === 'number' && Number.isFinite(form.manualProfitThb) ? formatThb(form.manualProfitThb) : '待填写'}`
+              : ` · ${perPerson ? single : '整单'}售价 ${Number.isFinite(form.agentPriceThb) ? formatThb(form.agentPriceThb) : '待填写'} · ${perPerson ? single : '整单'}成本 ${Number.isFinite(form.costThb) ? formatThb(form.costThb) : '待填写'}`}</p>
+            <p className="ticket-order-profit"><span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span><strong>{amountsComplete ? formatThb(profit) : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong></p>
+          </section>}
           <fieldset className="form-fields" disabled={saving || filling}>
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
           </label>
-          <label>
-            时间（曼谷 UTC+7）
-            <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
-            {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
-          </label>
           <label>客户姓名 <span className="muted">（可选）</span><input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>
           <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />
-          <label>
-            计价方式
-            <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
-              <option value="per_person">按{countLabel}计算（{single}金额 × {countLabel}）</option>
-              <option value="total">整单总额（不乘{countLabel}）</option>
-            </select>
-          </label>
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
           <ProjectPicker projects={projects} form={form}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
@@ -209,20 +215,33 @@ export function TicketForm({ ticket, projects, knownTickets = [], cloudLoginRequ
             </label>
           </div>}
           {form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
-          <div className={`profit-preview ${profit >= 0 || !amountsComplete ? 'positive' : 'negative'}`}>
-            <span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span>
-            <strong>{amountsComplete ? formatThb(profit) : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong>
-          </div>
+          {ticket && !ticket.issueTime && <p className="muted">旧记录未记录时间，可在“更多设置”中手动补填。</p>}
+          <details className="ticket-more-settings" ref={moreSettingsRef}>
+            <summary>更多设置 · 时间 / 计价方式 / 备注</summary>
+            <label>
+              时间（曼谷 UTC+7）
+              <input ref={timeInputRef} type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
+            </label>
+            <label>
+              计价方式
+              <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
+                <option value="per_person">按{countLabel}计算（{single}金额 × {countLabel}）</option>
+                <option value="total">整单总额（不乘{countLabel}）</option>
+              </select>
+            </label>
           <label>
             备注 <span className="muted">（可选）</span>
             <textarea maxLength={300} placeholder="例如航线、特殊说明" value={form.note} onChange={(event) => update('note', event.target.value)} />
           </label>
+          </details>
           </fieldset>
+          <div className="ticket-save-area">
           {error && <p className="form-error" role="alert">{error}</p>}
           {warning && <SaveWarning messages={warning.messages} saving={saving || filling} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
-          <div className="sheet-actions">
+          {!warning && <div className="sheet-actions">
             <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
-            {!warning && <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>}
+            <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>
+          </div>}
           </div>
         </form>
       </section>
@@ -462,6 +481,7 @@ export default function App() {
     return () => { window.removeEventListener('online', check); window.removeEventListener('offline', check) }
   }, [])
   const [tickets, setTickets] = useState<TicketRecord[]>([])
+  const [show79Settlements, setShow79Settlements] = useState<Show79SettlementRecord[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('dashboard')
@@ -478,6 +498,7 @@ export default function App() {
   const [toast, setToast] = useState('')
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [dateFilter, setDateFilter] = useState('')
+  const [recordDateRange, setRecordDateRange] = useState<TicketDateRange>('all')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [query, setQuery] = useState('')
   const userRef = useRef<User | null>(null)
@@ -488,11 +509,12 @@ export default function App() {
   syncQueueRef.current ??= createSyncQueue(() => syncRunnerRef.current())
 
   const refresh = useCallback(async () => {
-    const [nextTickets, nextSuppliers, nextProjects] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects()])
+    const [nextTickets, nextSuppliers, nextProjects, nextSettlements] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getShow79Settlements()])
     if (!mountedRef.current) return
     setTickets(nextTickets.map(ticketDisplay))
     setSuppliers(nextSuppliers)
     setProjects(nextProjects)
+    setShow79Settlements(nextSettlements)
   }, [])
 
   syncRunnerRef.current = async () => {
@@ -580,7 +602,7 @@ export default function App() {
       debounceTimer = window.setTimeout(() => { if (alive) void synchronise() }, 180)
     }
     let channel = client.channel(`ledger:${user.id}`)
-    for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds']) {
+    for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds', 'show79_settlements']) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, scheduleSync)
     }
     channel.subscribe((status) => {
@@ -627,13 +649,9 @@ export default function App() {
   const monthRange = monthDateRange(month)
   const year = today.slice(0, 4)
   const yearRange = yearDateRange(year)
-  const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter((ticket) => {
-    const dateMatches = !dateFilter || ticket.issueDate === dateFilter
-    const supplierMatches = !supplierFilter || ticket.supplierId === supplierFilter
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    const queryMatches = !normalizedQuery || (ticket.guestName ?? '').toLocaleLowerCase().includes(normalizedQuery) || ticket.supplierName.toLocaleLowerCase().includes(normalizedQuery) || ticket.projectName.toLocaleLowerCase().includes(normalizedQuery) || ticket.note.toLocaleLowerCase().includes(normalizedQuery)
-    return dateMatches && supplierMatches && queryMatches
-  }).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, supplierFilter, query])
+  const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter(ticket => matchesTicketSearch(ticket, {
+    query, supplierId: supplierFilter, date: dateFilter, range: recordDateRange, today
+  })).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, recordDateRange, supplierFilter, query, today])
 
   const mainTickets = useMemo(() => mainLedgerTickets(tickets), [tickets])
 
@@ -697,6 +715,16 @@ export default function App() {
     void synchronise()
   }
 
+  const saveShow79Settlement = async (input: Show79SettlementInput) => {
+    requireCloudLogin()
+    await synchronise()
+    await ledgerRepository.createShow79Settlement(input)
+    try { await refresh() }
+    catch { throw new Error('本次分账已登记，但页面刷新失败，请同步后核对；请勿重新付款。重试相同登记不会重复记账。') }
+    setToast('分账登记已保存；此操作只记录已发生的付款，不会转账。')
+    void synchronise()
+  }
+
   const addSupplier = async (name: string) => {
     requireCloudLogin()
     await ledgerRepository.createSupplier(name)
@@ -723,11 +751,11 @@ export default function App() {
 
   const backupAllData = async () => {
     try {
-      const [backupSuppliers, backupProjects, backupTickets, backupRefunds] = await Promise.all([
-        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds()
+      const [backupSuppliers, backupProjects, backupTickets, backupRefunds, backupSettlements] = await Promise.all([
+        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds(), ledgerRepository.getShow79Settlements()
       ])
       const aliases = await ledgerRepository.getCatalogueAliases()
-      downloadLedgerBackup(createLedgerBackup({ suppliers: [...backupSuppliers, ...aliases.suppliers], projects: [...backupProjects, ...aliases.projects], tickets: backupTickets, refunds: backupRefunds }))
+      downloadLedgerBackup(createLedgerBackup({ suppliers: [...backupSuppliers, ...aliases.suppliers], projects: [...backupProjects, ...aliases.projects], tickets: backupTickets, refunds: backupRefunds, show79Settlements: backupSettlements }))
       setToast('全部资料备份已导出，包含供货商、项目价格、出票记录及退票明细。')
     } catch (error) {
       setToast(error instanceof Error ? error.message : '备份未完成，请稍后重试。')
@@ -825,21 +853,23 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} tickets={tickets} projects={projects} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
+        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
           </section>
           <section className="filters">
-            <input aria-label="搜索客户、供应商或备注" placeholder="搜索客户、供应商或备注" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input type="search" aria-label="搜索客户、项目、套餐或供货商" placeholder="搜索客户、项目、套餐或供货商" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="record-date-shortcuts" role="group" aria-label="快捷日期范围">{([['today', '今天'], ['month', '本月'], ['all', '全部']] as const).map(([range, label]) => <button key={range} type="button" aria-pressed={!dateFilter && recordDateRange === range} onClick={() => { setDateFilter(''); setRecordDateRange(range) }}>{label}</button>)}</div>
             <div className="filter-row">
-              <input aria-label="按日期筛选" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
+              <input aria-label="按日期筛选" type="date" value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); setRecordDateRange('all') }} />
               <select aria-label="按供应商筛选" value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)}>
                 <option value="">全部供应商</option>
                 {suppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}
               </select>
             </div>
-            {(query || dateFilter || supplierFilter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setDateFilter(''); setSupplierFilter('') }}>清除筛选</button>}
+            <p className="record-date-range">{dateFilter ? `日期：${dateFilter.replaceAll('-', '/')}（曼谷）` : recordDateRange === 'today' ? `今天：${today.replaceAll('-', '/')}（曼谷）` : recordDateRange === 'month' ? `本月：${monthRange.start.replaceAll('-', '/')} — ${monthRange.end.replaceAll('-', '/')}（曼谷自然月）` : '日期范围：全部已录日期'} · 可同时搜索姓名、备注及筛选供货商。</p>
+            {(query || dateFilter || supplierFilter || recordDateRange !== 'all') && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setDateFilter(''); setSupplierFilter(''); setRecordDateRange('all') }}>清除筛选</button>}
           </section>
           <div className="record-summary"><span>{visibleTickets.length} 条记录</span><strong>利润 {formatThb(summarise(visibleTickets).profitThb)}</strong></div>
           <section className="records-list">

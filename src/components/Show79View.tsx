@@ -10,10 +10,14 @@ import { RefundHistory } from './RefundSheet'
 import { SaveWarning } from './SaveWarning'
 import { ticketWarnings, validateDraftAmounts } from '../lib/entry-warnings'
 import { resolveProjectRules } from '../lib/project-rules'
+import { Show79SettlementPanel } from './Show79SettlementPanel'
+import type { Show79SettlementInput, Show79SettlementRecord } from '../lib/show79-settlement'
 
 interface Props {
   tickets: TicketRecord[]
   projects: Project[]
+  settlements?: Show79SettlementRecord[]
+  onSaveSettlement?: (input: Show79SettlementInput) => Promise<void>
   onSave: (input: TicketInput, existing?: TicketRecord) => Promise<void>
   onDelete: (ticket: TicketRecord) => Promise<void>
   onRefund: (id: string) => void
@@ -21,7 +25,7 @@ interface Props {
   onManageProjects: () => void
 }
 
-export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+export function Show79View({ tickets, projects, settlements = [], onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
   const [date, setDate] = useState(getBangkokDate)
   const [month, setMonth] = useState(getBangkokMonth)
   const [dayOnly, setDayOnly] = useState(false)
@@ -190,7 +194,8 @@ export function Show79View({ tickets, projects, onSave, onDelete, onRefund, onCa
     {result.error && <p role="alert" className="form-error">{result.error}</p>}
     {report && <>
       <div className="show79-metrics"><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replace('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数（含退票记录）</span><strong>{report.records.length} 单</strong></div></div>
-      <section className="show79-split"><h2>月度分账</h2><p>{month} · 按实际利润分成</p><div><span>jimmy · 40%</span><strong>{formatThb(report.jimmyThb)}</strong></div><div><span>大狗二狗合计 · 60%</span><strong>{formatThb(report.partnersThb)}</strong></div><small>按当月净利润统一计算，保留两位小数；退票回算原记录月份。此处为分账计算，不会自动转账。</small><button type="button" className="secondary-button" onClick={() => void exportShow79ToXlsx(tickets, date, month).catch(() => setError('导出失败，请重试。'))}>导出当月订单及分账 Excel</button></section>
+      <section className="show79-split"><h2>月度分账</h2><p>{month} · 按实际利润分成</p><div><span>jimmy · 40%</span><strong>{formatThb(report.jimmyThb)}</strong></div><div><span>大狗二狗合计 · 60%</span><strong>{formatThb(report.partnersThb)}</strong></div><small>按当月净利润统一计算，保留两位小数；退票回算原记录月份。此处为分账计算，不会自动转账。</small><button type="button" className="secondary-button" onClick={() => void exportShow79ToXlsx(tickets, date, month, settlements).catch(() => setError('导出失败，请重试。'))}>导出当月订单及分账 Excel</button></section>
+      {onSaveSettlement && <Show79SettlementPanel key={month} tickets={tickets} records={settlements} month={month} onSave={onSaveSettlement} />}
     </>}
     <section className="show79-entry"><h2>{editing ? '编辑79秀订单' : '生成确认单 / 新增订单'}</h2>
       {!editing && <div className="show79-command">

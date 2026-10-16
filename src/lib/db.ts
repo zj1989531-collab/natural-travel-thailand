@@ -3,8 +3,11 @@ import type { AppSettings, Project, RefundRecord, Supplier, TicketRecord } from 
 import { validateRefundInput } from './refund-input'
 import { mergeRemoteRecord } from './sync'
 import { reconcileCatalogue } from './catalogue-merge'
+import { attachRefunds } from './refunds'
+import { buildShow79SettlementState, type Show79SettlementInput, type Show79SettlementRecord } from './show79-settlement'
 
 interface LedgerDb extends DBSchema {
+  show79_settlements: { key: string; value: Show79SettlementRecord }
   ticket_refunds: { key: string; value: RefundRecord; indexes: { 'by-ticket-id': string } }
   tickets: {
     key: string
@@ -30,7 +33,7 @@ interface LedgerDb extends DBSchema {
 let database: Promise<IDBPDatabase<LedgerDb>> | undefined
 
 const getDb = () => {
-  database ??= openDB<LedgerDb>('ticket-profit-ledger', 3, {
+  database ??= openDB<LedgerDb>('ticket-profit-ledger', 4, {
     upgrade(db, oldVersion) {
       if (oldVersion < 1) {
       const tickets = db.createObjectStore('tickets', { keyPath: 'id' })
@@ -44,13 +47,14 @@ const getDb = () => {
         projects.createIndex('by-supplier-id', 'supplierId')
       }
       if (oldVersion < 3) db.createObjectStore('ticket_refunds', { keyPath: 'id' }).createIndex('by-ticket-id', 'ticketId')
+      if (oldVersion < 4) db.createObjectStore('show79_settlements', { keyPath: 'id' })
     },
     blocking() { void database?.then((connection) => connection.close()); database = undefined }
   })
   return database
 }
 
-type SyncedStore = 'tickets' | 'suppliers' | 'projects' | 'ticket_refunds'
+type SyncedStore = 'tickets' | 'suppliers' | 'projects' | 'ticket_refunds' | 'show79_settlements'
 
 async function mergeRemoteRows<K extends SyncedStore>(storeName: K, rows: LedgerDb[K]['value'][]) {
   const database = await getDb()
@@ -128,6 +132,39 @@ export const db = {
   mergeRemoteSuppliers: (suppliers: Supplier[]) => mergeRemoteRows('suppliers', suppliers),
   mergeRemoteProjects: (projects: Project[]) => mergeRemoteRows('projects', projects),
   mergeRemoteRefunds: (refunds: RefundRecord[]) => mergeRemoteRows('ticket_refunds', refunds),
+  mergeRemoteShow79Settlements: (records: Show79SettlementRecord[]) => mergeRemoteRows('show79_settlements', records),
+  async getShow79Settlements() { return (await getDb()).getAll('show79_settlements') },
+  async getShow79Settlement(id: string) { return (await getDb()).get('show79_settlements', id) },
+  async putConfirmedShow79Settlement(record: Show79SettlementRecord) {
+    const database = await getDb()
+    const tx = database.transaction('show79_settlements', 'readwrite')
+    const existing = await tx.store.get(record.id)
+    if (existing && existing.userId !== record.userId) { await tx.done; throw new Error('这条分账记录属于其他账号。') }
+    await tx.store.put(record)
+    await tx.done
+  },
+  async addLocalShow79Settlement(record: Show79SettlementRecord, input: Show79SettlementInput) {
+    const database = await getDb()
+    const tx = database.transaction(['show79_settlements', 'settings', 'tickets', 'ticket_refunds'], 'readwrite')
+    try {
+      const settings = await tx.objectStore('settings').get('app')
+      const userId = settings?.lastCloudUserId ?? settings?.localUserId
+      if (!userId || record.userId !== userId) throw new Error('当前账号无法登记这笔分账。')
+      const existing = await tx.objectStore('show79_settlements').get(record.id)
+      if (existing) { await tx.done; return existing }
+      const tickets = (await tx.objectStore('tickets').getAll()).filter(row => row.userId === userId)
+      const refunds = (await tx.objectStore('ticket_refunds').getAll()).filter(row => row.userId === userId)
+      const history = (await tx.objectStore('show79_settlements').getAll()).filter(row => row.userId === userId)
+      const state = buildShow79SettlementState(attachRefunds(tickets, refunds), history, input.month)
+      const cents = (value: number) => Math.round(value * 100)
+      if (cents(state.profitThb) !== cents(input.expectedProfitThb) || cents(state.paidJimmyThb) !== cents(input.expectedJimmyPaidThb) || cents(state.paidPartnersThb) !== cents(input.expectedPartnersPaidThb)) throw Object.assign(new Error('本月利润或已付金额已更新，请刷新后核对再登记。'), { code: '40001' })
+      if (Math.abs(cents(state.paidJimmyThb) + cents(input.jimmyPaidThb)) > 99999999999999 || Math.abs(cents(state.paidPartnersThb) + cents(input.partnersPaidThb)) > 99999999999999) throw new Error('累计分账金额过大，请检查输入。')
+      const accepted = { ...record, snapshotProfitThb: state.profitThb, snapshotJimmyThb: state.jimmyThb, snapshotPartnersThb: state.partnersThb }
+      await tx.objectStore('show79_settlements').add(accepted)
+      await tx.done
+      return accepted
+    } catch (error) { try { tx.abort() } catch { /* Already completed. */ } await tx.done.catch(() => undefined); throw error }
+  },
   async getRefunds() { return (await getDb()).getAll('ticket_refunds') },
   async getRefund(id: string) { return (await getDb()).get('ticket_refunds', id) },
   async putRefund(refund: RefundRecord) { return putLocalRecord('ticket_refunds', refund) },

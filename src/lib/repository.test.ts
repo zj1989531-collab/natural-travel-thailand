@@ -6,8 +6,8 @@ import { getTicketAmounts } from './ticket-amounts'
 import { reconcileCatalogue } from './catalogue-merge'
 
 const state = vi.hoisted(() => ({
-  local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>() },
-  cloud: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>() },
+  local: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>(), show79_settlements: new Map<string, any>() },
+  cloud: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>(), show79_settlements: new Map<string, any>() },
   rejectRefundWrite: false,
   loseRefundResponse: false,
   uploads: [] as { table: string; records: any[] }[],
@@ -22,6 +22,8 @@ vi.mock('./db', () => ({ db: {
   getTickets: async () => [...state.local.tickets.values()].map(copy),
   getTicket: async (id: string) => state.local.tickets.get(id),
   getRefunds: async () => [...state.local.ticket_refunds.values()].map(copy),
+  getShow79Settlements: async () => [...state.local.show79_settlements.values()].map(copy),
+  mergeRemoteShow79Settlements: async (records: any[]) => records.forEach((remote) => state.local.show79_settlements.set(remote.id, mergeRemoteRecord(state.local.show79_settlements.get(remote.id), remote))),
   getRefund: async (id: string) => state.local.ticket_refunds.get(id),
   putRefund: async (record: RefundRecord) => { state.local.ticket_refunds.set(record.id, copy(record)) },
   mergeRemoteRefunds: async (records: any[]) => records.forEach((remote) => state.local.ticket_refunds.set(remote.id, mergeRemoteRecord(state.local.ticket_refunds.get(remote.id), remote))),
