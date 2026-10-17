@@ -1,5 +1,5 @@
 -- 在 Supabase Dashboard 的 SQL Editor 中执行一次。
--- Fresh installations must also execute refunds.sql, project-rules.sql, then show79.sql.
+-- Also execute refunds.sql, project-rules.sql, show79.sql, manual-project-cost.sql.
 create table if not exists public.suppliers (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -45,6 +45,8 @@ create index if not exists tickets_user_supplier_idx on public.tickets (user_id,
 create table if not exists public.projects (
   quantity_unit text not null default 'person' check(quantity_unit in ('person','item')),
   manual_agent_price boolean not null default false,
+  manual_cost_price boolean,
+  manual_supplier boolean,
   id uuid primary key,
   entry_mode text not null default 'standard',
   user_id uuid not null references auth.users(id) on delete cascade,

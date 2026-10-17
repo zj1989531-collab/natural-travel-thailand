@@ -5,7 +5,7 @@ const normalizeQuery = (value: string) => cleanProjectLabel(value).normalize('NF
 
 export const filterProjects = (projects: Project[], query = '', supplierId = '') => {
   const terms = query.normalize('NFKC').trim().split(/[\s,，、]+/).map(normalizeQuery).filter(Boolean)
-  return projects.filter(project => !project.mergedIntoId && (!supplierId || project.supplierId === supplierId) &&
+  return projects.filter(project => !project.mergedIntoId && (!supplierId || project.manualSupplier || project.supplierId === supplierId) &&
     terms.every(term => [project.name, project.subItemName, project.supplierName].some(value => normalizeQuery(value).includes(term))))
 }
 

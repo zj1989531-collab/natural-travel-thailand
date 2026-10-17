@@ -14,6 +14,14 @@ const project = (id: string, name: string, subItemName = '', supplierId = 'suppl
 })
 
 describe('project-first ticket selection', () => {
+  it.each(['小车', 'SUV', '面包车', '大巴车'])('starts %s without any supplier or prices, and uses whole-order calculation', subItemName => {
+    const row = { ...project('car', '叫车', subItemName), supplierId: '', supplierName: '', manualSupplier: true, manualCostPrice: true, manualAgentPrice: true, defaultAmountBasis: 'total' as const }
+    const selected = chooseProjectOption({ ...form, projectName: '叫车', personCount: 4 }, [row], row.id)
+    expect(selected).toMatchObject({ supplierName: '', amountBasis: 'total', personCount: 4, projectName: '叫车', subItemName })
+    expect(Number.isNaN(selected.costThb)).toBe(true); expect(Number.isNaN(selected.agentPriceThb)).toBe(true)
+    const again = chooseProjectOption({ ...selected, costThb: 500, agentPriceThb: 700, supplierName: '上次供货商' }, [row], row.id)
+    expect(again.supplierName).toBe(''); expect(Number.isNaN(again.costThb)).toBe(true)
+  })
   it('sorts project names by character count, with a consistent order for ties', () => {
     const projects = [project('1', '格兰岛一日游'), project('2', '潜水'), project('3', '泰拳'), project('4', '嘉年华')]
     const tiedNames = ['潜水', '泰拳'].sort((a, b) => a.localeCompare(b, 'zh-CN'))

@@ -8,6 +8,11 @@ const ticket: TicketRecord = { ...input, id: 't', userId: 'u', supplierId: 's', 
 const refund: RefundRecord = { id: 'r', userId: 'u', ticketId: 't', personCount: 1, isFull: false, refundRevenueThb: 105.05, returnedCostThb: 95.01, refundDate: '2026-10-15', refundTime: '10:00', note: '', createdAt: ticket.createdAt, updatedAt: ticket.updatedAt, cancelledAt: null, syncStatus: 'synced' }
 
 describe('advisory duplicate and loss checks', () => {
+  it('checks the explicitly chosen supplier for an unbound package', () => {
+    const template = { ...project, supplierId: '', manualSupplier: true }
+    expect(ticketWarnings(input, template, [ticket], undefined, ticket.supplierId).messages).toHaveLength(1)
+    expect(ticketWarnings(input, template, [ticket], undefined, 'another-supplier').messages).toHaveLength(0)
+  })
   it('ignores time and notes; compares original totals in cents even with a different pricing basis', () => {
     const check = ticketWarnings({ ...input, issueTime: '20:00', note: '另一位旅客' }, project, [{ ...ticket, amountBasis: 'total', agentPriceThb: 210.10, costThb: 190.02 }])
     expect(check.messages).toHaveLength(1)

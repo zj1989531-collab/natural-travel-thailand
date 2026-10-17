@@ -21,11 +21,11 @@ const clearSelection = (form: TicketInput, projectName: string, quantityUnit: Pr
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({
-  ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.supplierName,
+  ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.manualSupplier ? '' : project.supplierName,
   amountBasis: resolveProjectRules(project).defaultAmountBasis, settlementMode: resolveProjectRules(project).settlementMode,
   subItemName: project.subItemName, entryMode: project.entryMode ?? 'standard', manualProfitThb: null,
   agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.manualAgentPrice ? Number.NaN : project.defaultAgentPriceThb,
-  costThb: project.entryMode === 'profit_only' ? 0 : project.defaultCostThb
+  costThb: project.entryMode === 'profit_only' ? 0 : project.manualCostPrice ? Number.NaN : project.defaultCostThb
 })
 
 export const chooseProject = (form: TicketInput, projects: Project[], name: string): TicketInput => {
@@ -44,5 +44,5 @@ export const chooseProjectOption = (form: TicketInput, projects: Project[], id: 
 
 export const projectOptionLabel = (project: Project, choices: Project[]) => {
   const name = cleanProjectLabel(project.subItemName) || '不分套餐'
-  return new Set(choices.map((choice) => choice.supplierId)).size > 1 ? `${name} · ${project.supplierName}` : name
+  return new Set(choices.map((choice) => choice.supplierId)).size > 1 ? `${name} · ${project.manualSupplier ? '出票时选择供货商' : project.supplierName}` : name
 }

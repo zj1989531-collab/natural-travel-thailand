@@ -399,6 +399,26 @@ describe('project default and settlement persistence', () => {
 })
 
 describe('manual selling prices and item quantity sync', () => {
+  it('creates unbound car packages, requires actual supplier and both amounts, and syncs actual tickets unchanged', async () => {
+    const { project } = prepare()
+    const row = await ledgerRepository.createProject({ supplierId: '', manualSupplier: true, manualCostPrice: true, manualAgentPrice: true, name: '叫车', subItemName: 'SUV', defaultCostThb: NaN, defaultAgentPriceThb: NaN, defaultAmountBasis: 'total', settlementMode: 'daily' })
+    expect(row).toMatchObject({ supplierId: '', supplierName: '', manualSupplier: true, manualCostPrice: true, manualAgentPrice: true, defaultAmountBasis: 'total' })
+    const input: TicketInput = { projectId: row.id, projectName: row.name, subItemName: row.subItemName, supplierName: project.supplierName, issueDate: '2026-10-17', issueTime: '10:30', personCount: 4, agentPriceThb: 800, costThb: 600, note: '' }
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, supplierName: '' })).rejects.toThrow('供货商')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, costThb: NaN })).rejects.toThrow('成本')
+    await expect(ledgerRepository.createOrUpdateTicket({ ...input, agentPriceThb: NaN })).rejects.toThrow('代理售价')
+    const saved = await ledgerRepository.createOrUpdateTicket(input)
+    expect(getTicketAmounts(saved).profitThb).toBe(200)
+    expect(saved.supplierId).toBe(project.supplierId)
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+    expect(state.cloud.projects.get(row.id)).toMatchObject({ supplier_id: null, supplier_name: '', manual_supplier: true, manual_cost_price: true })
+    state.local.projects.clear(); state.local.tickets.clear()
+    await ledgerRepository.synchronise(user)
+    expect(state.local.projects.get(row.id)).toMatchObject({ supplierId: '', manualSupplier: true, manualCostPrice: true })
+    expect(state.local.tickets.get(saved.id)).toMatchObject({ supplierId: project.supplierId, costThb: 600, agentPriceThb: 800, amountBasis: 'total', personCount: 4 })
+    await ledgerRepository.updateProjectPrices(row.id, { manualCostPrice: false, manualAgentPrice: false, defaultCostThb: 400, defaultAgentPriceThb: 700 })
+    expect(state.local.tickets.get(saved.id).costThb).toBe(600)
+  })
   const prepare = () => {
     const project: Project = { ...localProject(), name: '药品', normalizedName: '药品', subItemName: '测试规格', normalizedSubItemName: '测试规格', quantityUnit: 'item', manualAgentPrice: true, defaultAgentPriceThb: 0, defaultCostThb: 95 }
     state.local.projects.set(project.id, project)

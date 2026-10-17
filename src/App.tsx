@@ -37,6 +37,7 @@ interface InstallPromptEvent extends Event {
 }
 
 interface TicketFormProps {
+  suppliers?: Supplier[]
   ticket?: TicketRecord
   projects: Project[]
   recentProjects?: Project[]
@@ -64,7 +65,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, recentProjects = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, suppliers = [], recentProjects = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -119,7 +120,9 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
       validateDraftAmounts(form)
       const project = projects.find(row => row.id === form.projectId)
       if (!project) throw new Error('所选套餐已不存在，请重新选择。')
-      const check = ticketWarnings(form, project, knownTickets, ticket?.id)
+      const chosenSupplier = project.manualSupplier ? suppliers.find(row => row.name === supplierName && row.userId === project.userId) : undefined
+      if (project.manualSupplier && !chosenSupplier) throw new Error('请自行选择已录入的供货商。')
+      const check = ticketWarnings(form, project, knownTickets, ticket?.id, chosenSupplier?.id ?? project.supplierId)
       if (check.messages.length && acknowledgedKey !== check.key) {
         setWarning(check)
         return
@@ -147,6 +150,8 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
   const perPerson = form.amountBasis === 'per_person'
   const { label: countLabel, single } = quantityLabels(form)
   const manualAgentPrice = projects.find((project) => project.id === form.projectId)?.manualAgentPrice
+  const manualCostPrice = projects.find((project) => project.id === form.projectId)?.manualCostPrice
+  const manualSupplier = projects.find((project) => project.id === form.projectId)?.manualSupplier
   const amountsComplete = form.entryMode === 'profit_only' ? Number.isFinite(form.manualProfitThb) : Number.isFinite(form.agentPriceThb) && Number.isFinite(form.costThb)
   const totals = getTicketAmounts(form)
   const profit = totals.profitThb
@@ -187,8 +192,8 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
           <ProjectPicker projects={projects} recent={ticket ? [] : recentProjects} form={form}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
-          {form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
-          {manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
+          {manualSupplier ? <label>供货商<select value={form.supplierName} onChange={event => update('supplierName', event.target.value)} required><option value="">请自行选择供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}</select></label> : form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
+          {manualCostPrice ? <p className="sheet-copy">成本不预设，请填写本次{perPerson ? single : '整单'}成本{manualAgentPrice ? '及代理售价' : '；售价已自动带入'}。</p> : manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
           {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
           {!isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
@@ -206,7 +211,7 @@ export function TicketForm({ ticket, projects, recentProjects = [], knownTickets
           {form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
           <div className={`profit-preview ${profit >= 0 || !amountsComplete ? 'positive' : 'negative'}`}>
             <span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span>
-            <strong>{amountsComplete ? formatThb(profit) : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong>
+            <strong>{amountsComplete ? formatThb(profit) : manualCostPrice ? '待填写金额' : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong>
           </div>
           <label>
             备注 <span className="muted">（可选）</span>
@@ -242,6 +247,8 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   const [agentPrice, setAgentPrice] = useState('')
   const [entryMode, setEntryMode] = useState<EntryMode>('standard')
   const [manualAgentPrice, setManualAgentPrice] = useState(false)
+  const [manualCostPrice, setManualCostPrice] = useState(false)
+  const [manualSupplier, setManualSupplier] = useState(false)
   const [quantityUnit, setQuantityUnit] = useState<QuantityUnit>('person')
   const [defaultAmountBasis, setDefaultAmountBasis] = useState<AmountBasis | null>(null)
   const [settlementMode, setSettlementMode] = useState<SettlementMode | null>(null)
@@ -256,7 +263,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   const filteredProjects = filterProjects(projects, priceQuery, priceSupplierId)
   const projectRules = resolveProjectRules({ name: projectName, subItemName, entryMode, quantityUnit, defaultAmountBasis, settlementMode })
 
-  useEffect(() => { setPriceWarning(null) }, [projectSupplierId, projectName, subItemName, entryMode, quantityUnit, defaultAmountBasis, settlementMode, cost, agentPrice, manualAgentPrice])
+  useEffect(() => { setPriceWarning(null) }, [projectSupplierId, projectName, subItemName, entryMode, quantityUnit, defaultAmountBasis, settlementMode, cost, agentPrice, manualAgentPrice, manualCostPrice, manualSupplier])
 
   useEffect(() => {
     if (editingProject) projectFormRef.current?.scrollIntoView({ block: 'nearest' })
@@ -280,20 +287,20 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
     if (projectSaveLock.current || saving !== null) return
     setError('')
     try {
-      if (!projectSupplierId || !projectName.trim()) throw new Error('请选择供货商并填写项目名称。')
-      const defaultCostThb = entryMode === 'profit_only' ? 0 : cost.trim() ? Number(cost) : NaN
+      if ((!manualSupplier && !projectSupplierId) || !projectName.trim()) throw new Error('请选择供货商并填写项目名称。')
+      const defaultCostThb = entryMode === 'profit_only' || manualCostPrice ? 0 : cost.trim() ? Number(cost) : NaN
       const defaultAgentPriceThb = entryMode === 'profit_only' || manualAgentPrice ? 0 : agentPrice.trim() ? Number(agentPrice) : NaN
       if (![defaultCostThb, defaultAgentPriceThb].every(value => Number.isFinite(value) && value >= 0)) throw new Error('请填写大于或等于0的有效金额。')
       validateAmountPrecision([defaultCostThb, defaultAgentPriceThb])
-      const messages = projectPriceWarnings(defaultCostThb, defaultAgentPriceThb, manualAgentPrice, entryMode === 'profit_only')
-      const key = JSON.stringify([editingProject?.id, projectSupplierId, projectName, subItemName, entryMode, quantityUnit, projectRules, cost, agentPrice, manualAgentPrice])
+      const messages = projectPriceWarnings(defaultCostThb, defaultAgentPriceThb, manualAgentPrice || manualCostPrice, entryMode === 'profit_only')
+      const key = JSON.stringify([editingProject?.id, projectSupplierId, manualSupplier, projectName, subItemName, entryMode, quantityUnit, projectRules, cost, agentPrice, manualAgentPrice, manualCostPrice])
       if (messages.length && acknowledgedKey !== key) { setPriceWarning({ messages, key }); return }
       projectSaveLock.current = true
       setSaving('project')
       if (editingProject) {
-        await onUpdateProject(editingProject.id, { defaultCostThb, defaultAgentPriceThb, manualAgentPrice, quantityUnit, ...projectRules })
+        await onUpdateProject(editingProject.id, { defaultCostThb, defaultAgentPriceThb, manualAgentPrice, manualCostPrice, quantityUnit, ...projectRules })
       } else {
-        await onAddProject({ supplierId: projectSupplierId, name: projectName, subItemName, entryMode, quantityUnit, manualAgentPrice, defaultCostThb, defaultAgentPriceThb, ...projectRules })
+        await onAddProject({ supplierId: projectSupplierId, manualSupplier, name: projectName, subItemName, entryMode, quantityUnit, manualAgentPrice, manualCostPrice, defaultCostThb, defaultAgentPriceThb, ...projectRules })
       }
       setProjectName('')
       setSubItemName('')
@@ -301,7 +308,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
       setAgentPrice('')
       setEditingProject(null)
       setEntryMode('standard')
-      setManualAgentPrice(false); setQuantityUnit('person')
+      setManualAgentPrice(false); setManualCostPrice(false); setManualSupplier(false); setQuantityUnit('person')
       setDefaultAmountBasis(null); setSettlementMode(null); setPriceWarning(null)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后重试。')
@@ -314,13 +321,14 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
 
   const editProject = (project: Project) => {
     setEditingProject(project)
+    setManualSupplier(project.manualSupplier ?? false)
     setEntryMode(project.entryMode ?? 'standard')
     setProjectSupplierId(project.supplierId)
     setProjectName(project.name)
     setSubItemName(project.subItemName)
     setCost(String(project.defaultCostThb))
     setAgentPrice(String(project.defaultAgentPriceThb))
-    setManualAgentPrice(project.manualAgentPrice ?? false); setQuantityUnit(project.quantityUnit ?? 'person')
+    setManualAgentPrice(project.manualAgentPrice ?? false); setManualCostPrice(project.manualCostPrice ?? false); setQuantityUnit(project.quantityUnit ?? 'person')
     const rules = resolveProjectRules(project)
     setDefaultAmountBasis(rules.defaultAmountBasis); setSettlementMode(rules.settlementMode); setPriceWarning(null)
     setError('')
@@ -329,7 +337,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   const cancelProjectEdit = () => {
     setEditingProject(null)
     setEntryMode('standard')
-    setManualAgentPrice(false); setQuantityUnit('person')
+    setManualAgentPrice(false); setManualCostPrice(false); setManualSupplier(false); setQuantityUnit('person')
     setDefaultAmountBasis(null); setSettlementMode(null); setPriceWarning(null)
     setProjectName('')
     setSubItemName('')
@@ -362,19 +370,20 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
           {editingProject && <p className="sheet-copy">只更新此套餐的默认价格和规则，不影响历史出票金额、数量、结算及退票归属。</p>}
           <form className="project-form" ref={projectFormRef} onSubmit={event => { event.preventDefault(); void saveProject() }}>
             <fieldset className="form-fields" disabled={saving !== null}>
-            <select value={projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required disabled={editingProject !== null}>
+            <label className="checkbox-label"><input type="checkbox" checked={manualSupplier} onChange={event => setManualSupplier(event.target.checked)} disabled={editingProject !== null} />出票时再选择供货商（不预设）</label>
+            <select value={manualSupplier ? '' : projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required={!manualSupplier} disabled={editingProject !== null || manualSupplier}>
               <option value="">选择供货商</option>
               {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
             </select>
             <input autoComplete="off" placeholder="项目名称，例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required readOnly={editingProject !== null} />
             <input autoComplete="off" placeholder="子项/套餐名称（可选，例如：经济舱）" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} readOnly={editingProject !== null} />
             {!editingProject && <label>记账方式<select value={entryMode} onChange={(event) => setEntryMode(event.target.value as EntryMode)}><option value="standard">售价减成本</option><option value="profit_only">仅录利润（月结返佣）</option></select></label>}
-            {entryMode !== 'profit_only' && <><label>数量单位<select value={quantityUnit} onChange={(event) => setQuantityUnit(event.target.value as QuantityUnit)}><option value="person">人数（人）</option><option value="item">商品数量（件）</option></select></label><label className="checkbox-label"><input type="checkbox" checked={manualAgentPrice} onChange={(event) => setManualAgentPrice(event.target.checked)} />每次录入时手动填写售价</label></>}
+            {entryMode !== 'profit_only' && <><label>数量单位<select value={quantityUnit} onChange={(event) => setQuantityUnit(event.target.value as QuantityUnit)}><option value="person">人数（人）</option><option value="item">商品数量（件）</option></select></label><label className="checkbox-label"><input type="checkbox" checked={manualAgentPrice} onChange={(event) => setManualAgentPrice(event.target.checked)} />每次录入时手动填写售价</label><label className="checkbox-label"><input type="checkbox" checked={manualCostPrice} onChange={event => setManualCostPrice(event.target.checked)} />每次录入时手动填写成本</label></>}
             <label>默认计价<select value={projectRules.defaultAmountBasis} onChange={event => setDefaultAmountBasis(event.target.value as AmountBasis)}><option value="per_person">{entryMode === 'profit_only' ? '按人数计算返佣' : quantityUnit === 'item' ? '按件计算' : '按人数计算'}</option><option value="total">{entryMode === 'profit_only' ? '返佣总额' : '整单总额'}</option></select></label>
             <label>结算方式<select value={projectRules.settlementMode} onChange={event => setSettlementMode(event.target.value as SettlementMode)} disabled={entryMode === 'profit_only'}><option value="daily">日结</option><option value="monthly">月结</option></select></label>
             <p className="sheet-copy">选择套餐时自动带入，可在出票时临时调整计价；月结不计每日概览，计入所属月报与年报。</p>
             {entryMode === 'profit_only' ? <p className="sheet-copy">此项目无默认成本和售价。每次记账只填写利润，计入月报。</p> : <div className="form-grid">
-              <input inputMode="decimal" min="0" step="0.01" type="number" placeholder="供货商成本（THB）" value={cost} onChange={(event) => setCost(event.target.value)} required />
+              <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualCostPrice ? '每次手动填写成本' : '供货商成本（THB）'} value={manualCostPrice ? '' : cost} onChange={(event) => setCost(event.target.value)} required={!manualCostPrice} disabled={manualCostPrice} />
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualAgentPrice ? '每次手动填写售价' : '代理售价（THB）'} value={manualAgentPrice ? '' : agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required={!manualAgentPrice} disabled={manualAgentPrice} />
             </div>}
             </fieldset>
@@ -388,7 +397,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
         <section className="supplier-list" aria-label="已录入的价格表">
           <div className="supplier-list-heading"><span>已录入子项</span><strong>{priceQuery || priceSupplierId ? `${filteredProjects.length} / ${projects.length}` : projects.length}</strong></div>
           <div className="price-filters" role="region" aria-label="价格表筛选"><label>搜索价格表<input type="search" placeholder="项目、套餐或供货商" value={priceQuery} onChange={event => setPriceQuery(event.target.value)} /></label><label>筛选供货商<select value={priceSupplierId} onChange={event => setPriceSupplierId(event.target.value)}><option value="">全部供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>{(priceQuery || priceSupplierId) && <button className="text-action" type="button" onClick={() => { setPriceQuery(''); setPriceSupplierId('') }}>清除筛选</button>}</div>
-          {filteredProjects.length === 0 ? <p className="supplier-empty">{projects.length ? '没有匹配的项目子项，请调整或清除筛选。' : '还没有项目子项，请先添加一个。'}</p> : filteredProjects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.supplierName}</span><span>{resolveProjectRules(project).defaultAmountBasis === 'total' ? '整单总额' : project.quantityUnit === 'item' ? '按件' : '按人'} · {resolveProjectRules(project).settlementMode === 'monthly' ? '月结' : '日结'}</span></div><div>{project.entryMode === 'profit_only' ? <strong>仅录利润 · 月结</strong> : <><span>成本 {formatThb(project.defaultCostThb)}</span><strong>售价 {project.manualAgentPrice ? '手动填写' : formatThb(project.defaultAgentPriceThb)}</strong></>}<button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑设置</button></div></div>)}
+          {filteredProjects.length === 0 ? <p className="supplier-empty">{projects.length ? '没有匹配的项目子项，请调整或清除筛选。' : '还没有项目子项，请先添加一个。'}</p> : filteredProjects.map((project) => <div className="project-row" key={project.id}><div><strong>{project.name}{project.subItemName ? ` · ${project.subItemName}` : ' · 不分套餐'}</strong><span>{project.manualSupplier ? '供货商：出票时选择' : project.supplierName}</span><span>{resolveProjectRules(project).defaultAmountBasis === 'total' ? '整单总额' : project.quantityUnit === 'item' ? '按件' : '按人'} · {resolveProjectRules(project).settlementMode === 'monthly' ? '月结' : '日结'}</span></div><div>{project.entryMode === 'profit_only' ? <strong>仅录利润 · 月结</strong> : <><span>成本 {project.manualCostPrice ? '手动填写' : formatThb(project.defaultCostThb)}</span><strong>售价 {project.manualAgentPrice ? '手动填写' : formatThb(project.defaultAgentPriceThb)}</strong></>}<button className="edit-price-button" type="button" disabled={saving !== null} aria-label={`编辑价格：${project.name} / ${project.subItemName || '不分套餐'} / ${project.supplierName}`} onClick={() => editProject(project)}>编辑设置</button></div></div>)}
         </section>
       </section>
     </div>
@@ -856,7 +865,7 @@ export default function App() {
 
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} knownTickets={tickets} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
       {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}

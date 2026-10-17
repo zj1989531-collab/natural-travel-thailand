@@ -34,7 +34,7 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)。已有数据库另执行 [supabase/show79.sql](./supabase/show79.sql) 添加确认单客户姓名和兼容保护。
+1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)、[supabase/manual-project-cost.sql](./supabase/manual-project-cost.sql)。已有数据库发布本版前执行最后一份脚本，支持成本手填及出票时选择供货商，保留原行级权限与历史记录。
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
@@ -48,6 +48,8 @@ pnpm dev:sync
 已有数据库先执行当前版本需要的 `supabase/migrations/` 升级脚本及 `supabase/refunds.sql`，最后执行 `supabase/project-rules.sql`，再发布前端。规则升级只新增可空字段，不回填或重写历史金额；兼容触发器防止旧客户端缺少字段时清空已有规则。电脑与手机都应刷新到新版。
 
 套餐可设置默认按人／件或整单计价，以及日结／月结。旧套餐按名称推荐默认值，保存设置后固定；每次出票可临时改计价，历史记录保留自身金额与结算归属。保存前会合并提示本机缓存中疑似重复或亏损的记录，确认后仍可保存；离线提示不能保证发现另一设备尚未同步的重复业务。
+
+项目可勾选成本、售价每次手填，并可选择不预设供货商。此类套餐在每次选择（包括最近使用）后清空价格和供货商，保存实际记录时必须填写金额并选择本账号已有供货商；历史记录保留实际金额和供货商。叫车按整单计价、整单统计，不重复乘人数。旧客户端缺少新字段时不会清空云端手填规则，升级后电脑和手机均需刷新。
 
 首页“利润走势与对比”支持当前及历史月份，分别显示每日的日结、月结利润（非累计），与主账本一样不含79秀独立账本。本月仅统计到曼谷今天，与上月同期比较；上月天数不足时取月底。历史月份按整月比较。月结金额按出票日期归属，不表示已到账；退票仍回算原出票日期。上期利润为零、亏损或无记录时只展示差额，不展示增长率。支持点击图表日期、下拉选日及展开每日明细；离线从本机数据计算，无需新增数据库配置。
 

@@ -48,6 +48,8 @@ type CloudTicket = {
 }
 
 type CloudProject = {
+  manual_supplier?: boolean | null
+  manual_cost_price?: boolean | null
   default_amount_basis?: AmountBasis | null
   settlement_mode?: SettlementMode | null
   manual_agent_price?: boolean
@@ -55,7 +57,7 @@ type CloudProject = {
   entry_mode?: EntryMode
   id: string
   user_id: string
-  supplier_id: string
+  supplier_id: string | null
   supplier_name: string
   name: string
   normalized_name: string
@@ -100,6 +102,8 @@ const toCloudSupplier = (supplier: Supplier) => ({
 })
 
 const toLocalProject = (project: CloudProject): Project => ({
+  manualSupplier: project.manual_supplier ?? undefined,
+  manualCostPrice: project.manual_cost_price ?? undefined,
   defaultAmountBasis: project.default_amount_basis ?? undefined,
   settlementMode: project.settlement_mode ?? undefined,
   manualAgentPrice: project.manual_agent_price ?? false,
@@ -107,7 +111,7 @@ const toLocalProject = (project: CloudProject): Project => ({
   entryMode: project.entry_mode ?? 'standard',
   id: project.id,
   userId: project.user_id,
-  supplierId: project.supplier_id,
+  supplierId: project.supplier_id ?? '',
   supplierName: project.supplier_name,
   name: project.name,
   normalizedName: project.normalized_name,
@@ -121,6 +125,8 @@ const toLocalProject = (project: CloudProject): Project => ({
 })
 
 const toCloudProject = (project: Project) => ({
+  manual_supplier: project.manualSupplier ?? null,
+  manual_cost_price: project.manualCostPrice ?? null,
   default_amount_basis: project.defaultAmountBasis ?? null,
   settlement_mode: project.settlementMode ?? null,
   manual_agent_price: project.manualAgentPrice ?? false,
@@ -128,7 +134,7 @@ const toCloudProject = (project: Project) => ({
   entry_mode: project.entryMode ?? 'standard',
   id: project.id,
   user_id: project.userId,
-  supplier_id: project.supplierId,
+  supplier_id: project.supplierId || null,
   supplier_name: project.supplierName,
   name: cleanProjectLabel(project.name),
   normalized_name: normalizeSupplier(cleanProjectLabel(project.name)),
@@ -376,19 +382,20 @@ export const ledgerRepository = {
     const subItemName = cleanProjectLabel(input.subItemName.trim())
     if (!name) throw new Error('请输入项目名称。')
     if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
-    if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
+    if (input.entryMode !== 'profit_only' && (!input.manualCostPrice && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0) || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
-    if (input.entryMode !== 'profit_only') validateAmountPrecision(input.manualAgentPrice ? [input.defaultCostThb] : [input.defaultCostThb, input.defaultAgentPriceThb])
+    if (input.entryMode !== 'profit_only') validateAmountPrecision([...(input.manualCostPrice ? [] : [input.defaultCostThb]), ...(input.manualAgentPrice ? [] : [input.defaultAgentPriceThb])])
     const settings = await getSettings()
     const userId = settings.lastCloudUserId ?? settings.localUserId
     const suppliers = await db.getSuppliers()
     const supplier = suppliers.find((item) => item.id === input.supplierId && item.userId === userId)
-    if (!supplier) throw new Error('请先选择已录入的供货商。')
+    if (!supplier && !input.manualSupplier) throw new Error('请先选择已录入的供货商。')
     const normalizedName = normalizeSupplier(name)
     const normalizedSubItemName = normalizeSupplier(subItemName)
     const projects = await db.getProjects()
-    if (projects.some((project) => project.supplierId === supplier.id && normalizeSupplier(cleanProjectLabel(project.name)) === normalizedName && normalizeSupplier(cleanProjectLabel(project.subItemName)) === normalizedSubItemName && project.userId === userId)) {
+    const supplierId = input.manualSupplier ? '' : supplier!.id
+    if (projects.some((project) => project.supplierId === supplierId && normalizeSupplier(cleanProjectLabel(project.name)) === normalizedName && normalizeSupplier(cleanProjectLabel(project.subItemName)) === normalizedSubItemName && project.userId === userId)) {
       throw new Error('该供货商的这个项目子项已存在。')
     }
     const timestamp = now()
@@ -396,16 +403,18 @@ export const ledgerRepository = {
       ...resolveProjectRules({ ...input, name, subItemName }),
       quantityUnit: input.quantityUnit ?? 'person',
       manualAgentPrice: input.entryMode !== 'profit_only' && Boolean(input.manualAgentPrice),
+      manualCostPrice: input.entryMode !== 'profit_only' && Boolean(input.manualCostPrice),
+      manualSupplier: Boolean(input.manualSupplier),
       entryMode: input.entryMode ?? 'standard',
       id: createId(),
       userId,
-      supplierId: supplier.id,
-      supplierName: supplier.name,
+      supplierId,
+      supplierName: input.manualSupplier ? '' : supplier!.name,
       name,
       normalizedName,
       subItemName,
       normalizedSubItemName,
-      defaultCostThb: input.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
+      defaultCostThb: input.entryMode === 'profit_only' || input.manualCostPrice ? 0 : input.defaultCostThb,
       defaultAgentPriceThb: input.entryMode === 'profit_only' || input.manualAgentPrice ? 0 : input.defaultAgentPriceThb,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -422,17 +431,19 @@ export const ledgerRepository = {
     if (!current) throw new Error('当前账号无法修改这个项目价格。')
     if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
     const manualAgentPrice = input.manualAgentPrice ?? current.manualAgentPrice ?? false
-    if (current.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
+    const manualCostPrice = input.manualCostPrice ?? current.manualCostPrice ?? false
+    if (current.entryMode !== 'profit_only' && (!manualCostPrice && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0) || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
-    if (current.entryMode !== 'profit_only') validateAmountPrecision(manualAgentPrice ? [input.defaultCostThb] : [input.defaultCostThb, input.defaultAgentPriceThb])
+    if (current.entryMode !== 'profit_only') validateAmountPrecision([...(manualCostPrice ? [] : [input.defaultCostThb]), ...(manualAgentPrice ? [] : [input.defaultAgentPriceThb])])
     const updated: Project = {
       ...projectDisplay(current),
       ...resolveProjectRules({ ...current, quantityUnit: input.quantityUnit ?? current.quantityUnit, defaultAmountBasis: input.defaultAmountBasis ?? current.defaultAmountBasis, settlementMode: input.settlementMode ?? current.settlementMode }),
       quantityUnit: current.entryMode === 'profit_only' ? current.quantityUnit ?? 'person' : input.quantityUnit ?? current.quantityUnit ?? 'person',
-      defaultCostThb: current.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
+      defaultCostThb: current.entryMode === 'profit_only' || manualCostPrice ? 0 : input.defaultCostThb,
       defaultAgentPriceThb: current.entryMode === 'profit_only' || manualAgentPrice ? 0 : input.defaultAgentPriceThb,
       manualAgentPrice: current.entryMode !== 'profit_only' && manualAgentPrice,
+      manualCostPrice: current.entryMode !== 'profit_only' && manualCostPrice,
       updatedAt: nextModifiedAt(current.updatedAt),
       syncStatus: statusForWrite()
     }
@@ -453,6 +464,9 @@ export const ledgerRepository = {
     const normalizedName = normalizeSupplier(input.supplierName)
     const suppliers = await db.getSuppliers()
     const supplier = suppliers.find((item) => item.userId === userId && item.normalizedName === normalizedName)
+    const projects = await db.getProjects()
+    const selectedProject = projects.find(item => item.id === input.projectId && item.userId === userId)
+    if (selectedProject?.manualSupplier && !supplier) throw new Error('请选择当前账号已录入的供货商。')
     const currentTicket = existing ? await db.getTicket(existing.id) : undefined
     if (existing && (currentTicket ?? existing).userId !== userId) throw new Error('当前账号无法编辑这条记录，请重新打开记录。')
     if (existing && (await db.getRefunds()).some((row) => row.ticketId === existing.id && row.userId === userId)) throw new Error('已有退票明细的原票不可编辑，请保留完整记录。')
@@ -472,8 +486,7 @@ export const ledgerRepository = {
     } else if (!supplier) {
       await db.putSupplier(nextSupplier)
     }
-    const projects = await db.getProjects()
-    const project = projects.find((item) => item.id === input.projectId && item.supplierId === nextSupplier.id && item.userId === userId)
+    const project = selectedProject && (selectedProject.manualSupplier || selectedProject.supplierId === nextSupplier.id) ? selectedProject : undefined
     if (!project || cleanProjectLabel(project.name) !== cleanProjectLabel(input.projectName) || cleanProjectLabel(project.subItemName) !== cleanProjectLabel(input.subItemName)) throw new Error('请选择该供货商已录入的项目子项。')
     const amountBasis = input.amountBasis ?? (existing?.projectId === project.id ? existing.amountBasis ?? 'total' : resolveProjectRules(project).defaultAmountBasis)
     if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')

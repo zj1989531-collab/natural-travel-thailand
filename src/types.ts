@@ -17,10 +17,13 @@ export interface Supplier {
 }
 
 export interface Project {
+  /** Unbound templates use empty supplierId/name locally and NULL supplier_id in PostgreSQL. */
   defaultAmountBasis?: AmountBasis | null
   settlementMode?: SettlementMode | null
   mergedIntoId?: string
   manualAgentPrice?: boolean
+  manualCostPrice?: boolean | null
+  manualSupplier?: boolean | null
   quantityUnit?: QuantityUnit
   entryMode?: EntryMode
   id: string
@@ -131,6 +134,8 @@ export interface AppSettings {
 }
 
 export interface ProjectInput {
+  manualSupplier?: boolean | null
+  manualCostPrice?: boolean | null
   defaultAmountBasis?: AmountBasis | null
   settlementMode?: SettlementMode | null
   supplierId: string
@@ -144,6 +149,7 @@ export interface ProjectInput {
 }
 
 export interface ProjectPricesInput {
+  manualCostPrice?: boolean | null
   defaultAmountBasis?: AmountBasis | null
   settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit

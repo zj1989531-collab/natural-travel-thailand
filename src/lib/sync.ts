@@ -27,7 +27,7 @@ export const needsUpload = <T extends VersionedRecord>(local: T, remote?: T) =>
 export const preserveRuleFields = <T>(preferred: T, fallback: T): T => {
   let result = preferred as T & Record<string, unknown>
   const other = fallback as T & Record<string, unknown>
-  for (const key of ['defaultAmountBasis', 'settlementMode']) {
+  for (const key of ['defaultAmountBasis', 'settlementMode', 'manualCostPrice', 'manualSupplier']) {
     if (result[key] == null && other[key] != null) result = { ...result, [key]: other[key] }
   }
   return result

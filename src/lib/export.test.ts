@@ -14,6 +14,9 @@ const project: Project = {
 }
 
 describe('complete ledger backup', () => {
+  it('keeps manual price and supplier settings in full backups', () => {
+    expect(createLedgerBackup({ suppliers: [], projects: [{ ...project, supplierId: '', supplierName: '', manualSupplier: true, manualCostPrice: true, manualAgentPrice: true }], tickets: [] }).projects[0]).toMatchObject({ manualSupplier: true, manualCostPrice: true, manualAgentPrice: true })
+  })
   it('preserves all catalogue rows, IDs, optional subitems, amounts and timestamps', () => {
     const projects = Array.from({ length: 95 }, (_, i) => ({ ...project, id: `project-${i}` }))
     const backup = createLedgerBackup({ suppliers: [supplier], projects, tickets: [] }, '2026-01-03T00:00:00.000Z')

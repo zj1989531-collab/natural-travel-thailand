@@ -12,11 +12,11 @@ export const validateDraftAmounts = (input: TicketInput) => {
   validateAmountPrecision([totals.agentPriceThb, totals.costThb, Math.abs(totals.profitThb)])
 }
 
-export function ticketWarnings(input: TicketInput, project: Project | undefined, records: TicketRecord[], excludeId?: string) {
+export function ticketWarnings(input: TicketInput, project: Project | undefined, records: TicketRecord[], excludeId?: string, supplierId = project?.supplierId) {
   const totals = getOriginalTicketAmounts(input)
   const cents = (value: number) => Math.round(value * 100)
   const duplicates = project ? records.filter(record => {
-    if (record.userId !== project.userId || record.id === excludeId || record.deletedAt || getRefundState(record).full || record.issueDate !== input.issueDate || record.supplierId !== project.supplierId) return false
+    if (record.userId !== project.userId || record.id === excludeId || record.deletedAt || getRefundState(record).full || record.issueDate !== input.issueDate || record.supplierId !== supplierId) return false
     const sameProject = record.projectId ? record.projectId === project.id : cleanProjectLabel(record.projectName) === cleanProjectLabel(input.projectName) && cleanProjectLabel(record.subItemName) === cleanProjectLabel(input.subItemName)
     if (!sameProject || (record.quantityUnit ?? 'person') !== (input.quantityUnit ?? 'person') || (record.personCount ?? null) !== (input.personCount ?? null) || (record.entryMode ?? 'standard') !== (input.entryMode ?? 'standard')) return false
     const original = getOriginalTicketAmounts(record)
