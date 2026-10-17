@@ -1,0 +1,45 @@
+.report-quick-periods { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.report-quick-periods button { min-height: 40px; min-width: 64px; }
+.report-quick-periods button[aria-pressed="true"] { color: #fff; background: #176a59; border-color: #176a59; }
+.report-count-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.report-count-metrics > div { min-width: 0; padding: 12px 10px; border-radius: 9px; background: #f4f7f3; }
+.report-count-metrics span { display: block; color: #6f8077; font-size: 11px; }
+.report-count-metrics strong { display: block; margin-top: 6px; color: #294139; font-size: 19px; }
+.report-record-cards, .report-supplier-cards { display: none; }
+.report-supplier-desktop .report-supplier-table { min-width: 560px; }
+
+@media screen and (max-width: 699px) {
+  .report-record-desktop, .report-supplier-desktop { display: none; }
+  .report-record-cards, .report-supplier-cards { display: grid; gap: 12px; min-width: 0; }
+  .report-record-card, .report-supplier-card { min-width: 0; padding: 14px 12px; border: 1px solid #dce5df; border-radius: 12px; background: #fff; overflow-wrap: anywhere; }
+  .report-card-date { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; color: #6f8077; font-size: 11px; }
+  .report-card-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; margin: 12px 0; }
+  .report-card-heading h4 { margin: 0; font-size: 16px; line-height: 1.5; color: #203e31; }
+  .report-card-heading > div { text-align: right; }
+  .report-card-heading > div > span { display: block; margin-bottom: 4px; color: #6f8077; font-size: 11px; }
+  .report-card-heading strong, .report-supplier-card strong.profit-value, .report-supplier-card strong.loss-value { font-size: 16px; font-variant-numeric: tabular-nums; }
+  .report-card-project { margin: 0 0 12px; font-size: 13px; font-weight: 700; line-height: 1.6; color: #294139; }
+  .report-record-card dl, .report-supplier-card dl { margin: 0; }
+  .report-record-card dl > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 5px 0; font-size: 12px; line-height: 1.5; }
+  .report-record-card dt, .report-supplier-card dt { color: #6f8077; }
+  .report-record-card dd, .report-supplier-card dd { margin: 0; color: #294139; }
+  .report-card-note { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid #edf1ed; color: #6f8077; font-size: 12px; line-height: 1.7; }
+  .report-card-total { display: grid; gap: 8px; padding: 12px; border-radius: 9px; background: #f4f7f3; color: #294139; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+  .report-card-total strong { font-size: 14px; text-align: right; }
+  .report-supplier-card > div { display: flex; align-items: start; justify-content: space-between; gap: 12px; font-size: 14px; line-height: 1.5; }
+  .report-supplier-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; font-size: 11px; }
+  .report-supplier-card dd { margin-top: 5px; font-size: 13px; font-weight: 700; }
+  .report-quantity-table { min-width: 0; table-layout: fixed; font-size: 11px; }
+  .report-quantity-table th, .report-quantity-table td { padding: 9px 4px; overflow-wrap: anywhere; }
+  .report-quantity-table th:first-child { width: 34%; }
+  .report-quantity-table .report-number { white-space: normal; }
+  .report-count-metrics > div { padding: 11px 7px; }
+  .report-count-metrics strong { font-size: 17px; }
+}
+
+@media print {
+  .report-quick-periods, .report-record-cards, .report-supplier-cards { display: none !important; }
+  .report-record-desktop, .report-supplier-desktop { display: block !important; }
+  .report-supplier-desktop .report-supplier-table { min-width: 0; }
+  .report-count-metrics { break-inside: avoid; }
+}

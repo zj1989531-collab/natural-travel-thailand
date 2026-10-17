@@ -63,6 +63,30 @@ describe('79 show independent ledger', () => {
 })
 
 describe('79 voucher input', () => {
+  it.each([
+    '李湘光 龙粉萍 今天 2个79',
+    '李湘光 龙粉萍 今天2个79',
+    '李湘光 龙粉萍\n今天\n2个79',
+    '79秀 李湘光 龙粉萍 今天 2位',
+    '李湘光 龙粉萍 2人 今天 79',
+    '79 李湘光 龙粉萍 2名 今日',
+    '李湘光 龙粉萍 2张79秀 今天',
+    '李湘光 龙粉萍 今天 ２个７９',
+    '李湘光 龙粉萍 今天 2个79成人秀',
+    'Imagine 79 Show 李湘光 龙粉萍 今天 2人'
+  ])('fills both names, date and quantity from the natural phrase %s', text => {
+    expect(parseShow79Command(text, '2026-10-15')).toEqual({ guestName: '李湘光 龙粉萍', people: 2, date: '2026-10-15' })
+  })
+  it('keeps digits within a guest name and treats only a standalone 79 as the product', () => {
+    expect(parseShow79Command('79 John79 Smith 今天 2位', '2026-10-15')).toEqual({ guestName: 'John79 Smith', people: 2, date: '2026-10-15' })
+  })
+  it('accepts Chinese dates and rolls relative dates across year boundaries', () => {
+    expect(parseShow79Command('李湘光 龙粉萍 2026年10月20日 2个79', '2026-10-15')).toEqual({ guestName: '李湘光 龙粉萍', people: 2, date: '2026-10-20' })
+    expect(parseShow79Command('79 张三 后天 1位', '2026-12-31').date).toBe('2027-01-02')
+  })
+  it.each(['79 张三 今天 明天 2人', '79 张三 今天 2人 3人', '79 张三 今天 2.5个', '79 张三 今天 -2个', '79 张三 今天 0个'])('rejects ambiguous or invalid fields rather than guessing: %s', text => {
+    expect(() => parseShow79Command(text, '2026-10-15')).toThrow()
+  })
   it.each(['79 jimmy 2人 今天', '79\n2人\njimmy\n今天', '79，jimmy，2人，今天'])('parses %s with the supplied Bangkok date', text => {
     expect(parseShow79Command(text, '2026-10-15')).toEqual({ guestName: 'jimmy', people: 2, date: '2026-10-15' })
   })

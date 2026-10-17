@@ -12,15 +12,19 @@ export function PersonCountField({ value, allowUnknown = false, multiplyAmounts 
   multiplyAmounts?: boolean
   onChange: (value: number | null) => void
 }) {
-  const [custom, setCustom] = useState(() => value != null && !COMMON_COUNTS.includes(value))
+  // Retain custom mode while typing a common number, but derive large external
+  // values immediately so quick-fill never displays a different headcount.
+  const [customEntry, setCustomEntry] = useState<{ value: number | null } | null>(null)
+  const custom = value != null && !COMMON_COUNTS.includes(value) || customEntry !== null && Object.is(customEntry.value, value)
   const { label, unit, single } = quantityLabels({ quantityUnit })
 
   return <div className="person-count-field">
     <label htmlFor="person-count">{label}</label>
     <select id="person-count" aria-describedby="person-count-help" value={custom ? 'custom' : value ?? ''} required={!allowUnknown} onChange={(event) => {
       const selected = event.target.value
-      setCustom(selected === 'custom')
-      onChange(selected === 'custom' || selected === '' ? null : Number(selected))
+      const next = selected === 'custom' || selected === '' ? null : Number(selected)
+      setCustomEntry(selected === 'custom' ? { value: next } : null)
+      onChange(next)
     }}>
       <option value="" disabled={!allowUnknown}>{allowUnknown ? '未记录（可补填）' : `请选择${label}`}</option>
       {COMMON_COUNTS.map((count) => <option key={count} value={count}>{count} {unit}</option>)}
@@ -28,7 +32,7 @@ export function PersonCountField({ value, allowUnknown = false, multiplyAmounts 
     </select>
     {custom && <label>
       自定义{label}
-      <input inputMode="numeric" type="number" min="1" max={MAX_PERSON_COUNT} step="1" value={value ?? ''} onChange={(event) => onChange(event.target.value === '' ? null : Number(event.target.value))} required />
+      <input inputMode="numeric" type="number" min="1" max={MAX_PERSON_COUNT} step="1" value={value ?? ''} onChange={(event) => { const next = event.target.value === '' ? null : Number(event.target.value); setCustomEntry({ value: next }); onChange(next) }} required />
     </label>}
     <span className="muted" id="person-count-help">{multiplyAmounts ? `${single}金额 × ${label}，自动计算总售价、总成本和总利润。` : `整单总额模式：${label}仅作记录，不再乘入金额。`}</span>
   </div>

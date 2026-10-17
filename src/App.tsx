@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
-import { formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
+import { createId, formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
 import { PersonCountField } from './components/PersonCountField'
+import { MedicineItemsField } from './components/MedicineItemsField'
+import { buildMedicineTicketInputs, createMedicineLine, type MedicineLine } from './lib/medicine-selection'
+import { isMedicineProject, type MedicineTicketEntry } from './lib/medicine-batch'
 import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
@@ -11,12 +14,20 @@ import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { Show79View } from './components/Show79View'
+import { SyncConflictPanel } from './components/SyncConflictPanel'
+import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
+import type { Show79SettlementInput, Show79SettlementRecord } from './lib/show79-settlement'
 import { ProjectPicker } from './components/ProjectPicker'
+import { TicketQuickFill } from './components/TicketQuickFill'
+import { useDialog } from './lib/use-dialog'
+import { readFinancialSubmission } from './lib/financial-submission'
+import './components/ticket-entry.css'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
 import { resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
-import { filterProjects, recentProjectOptions } from './lib/project-search'
+import { filterProjects } from './lib/project-search'
+import { matchesTicketSearch, type TicketDateRange } from './lib/ticket-search'
 import { quantityParts, summariseQuantities } from './lib/effective-quantities'
 import { quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
@@ -40,15 +51,16 @@ interface TicketFormProps {
   suppliers?: Supplier[]
   ticket?: TicketRecord
   projects: Project[]
-  recentProjects?: Project[]
   knownTickets?: TicketRecord[]
   cloudLoginRequired: boolean
   onCancel: () => void
   onManageSuppliers: () => void
-  onSave: (input: TicketInput) => Promise<void>
+  onSave: (input: TicketInput, operationId?: string) => Promise<void>
+  onSaveMedicine?: (entries: MedicineTicketEntry[]) => Promise<void>
 }
 
 const emptyForm = (): TicketInput => ({
+  guestName: '',
   quantityUnit: 'person',
   amountBasis: 'per_person',
   personCount: 1,
@@ -65,7 +77,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, suppliers = [], recentProjects = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave }: TicketFormProps) {
+export function TicketForm({ ticket, projects, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -87,17 +99,72 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const saveLock = useRef(false)
+  const operationRef = useRef<string | undefined>(undefined)
+  const [medicineLines, setMedicineLines] = useState<MedicineLine[]>([])
+  const medicineOperationRef = useRef<MedicineTicketEntry[] | null>(null)
+  const [pendingMedicineSave, setPendingMedicineSave] = useState(false)
+  const [filling, setFilling] = useState(false)
+  const fillLock = useRef(false)
+  const onFillBusy = useCallback((busy: boolean) => { fillLock.current = busy; setFilling(busy) }, [])
   const [warning, setWarning] = useState<{ messages: string[]; key: string } | null>(null)
+  const moreSettingsRef = useRef<HTMLDetailsElement>(null)
+  const timeInputRef = useRef<HTMLInputElement>(null)
+  const medicineMode = !ticket && (pendingMedicineSave || isMedicineProject({ name: form.projectName, quantityUnit: 'item', entryMode: 'standard' }) && projects.some(isMedicineProject))
+
+  const applyFilledForm = (next: TicketInput) => {
+    if (saveLock.current || pendingMedicineSave) return
+    setWarning(null); setError(''); setForm(next)
+    const selected = projects.find(row => row.id === next.projectId)
+    setMedicineLines(!ticket && selected && isMedicineProject(selected) ? [{ ...createMedicineLine(selected), personCount: next.personCount ?? 1, amountBasis: next.amountBasis ?? resolveProjectRules(selected).defaultAmountBasis, agentPriceThb: next.agentPriceThb, costThb: next.costThb }] : [])
+  }
+
+  const requestCancel = () => {
+    if (saveLock.current) return
+    if (pendingMedicineSave && !window.confirm('本次保存结果尚未确认，建议先重试确认，避免重复新增。仍要关闭吗？')) return
+    onCancel()
+  }
+  const dialogRef = useDialog(requestCancel)
 
   const update = <K extends keyof TicketInput>(key: K, value: TicketInput[K]) => {
-    if (saveLock.current) return
+    if (saveLock.current || fillLock.current || pendingMedicineSave) return
     setWarning(null)
     setError('')
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const attemptMedicineSave = async (acknowledgedKey?: string) => {
+    if (saveLock.current || fillLock.current) return
+    setError('')
+    try {
+      if (!onSaveMedicine) throw new Error('药品多选保存尚未打开，请刷新页面重试。')
+      let entries = medicineOperationRef.current
+      if (!entries) {
+        if (!form.issueDate || !form.issueTime || !isValidIssueTime(form.issueTime)) {
+          if (moreSettingsRef.current) moreSettingsRef.current.open = true
+          timeInputRef.current?.focus()
+          throw new Error('请填写有效的出票日期和曼谷时间。')
+        }
+        const inputs = buildMedicineTicketInputs(form, medicineLines, projects)
+        const checks = inputs.map(input => ticketWarnings(input, projects.find(row => row.id === input.projectId), knownTickets))
+        const messages = checks.flatMap((check, index) => check.messages.map(message => `${inputs[index].subItemName || '药品子项'}：${message}`))
+        const key = JSON.stringify(checks.map(check => check.key))
+        if (messages.length && acknowledgedKey !== key) { setWarning({ messages, key }); return }
+        entries = inputs.map(input => ({ input, operationId: createId() }))
+        medicineOperationRef.current = entries
+      }
+      setWarning(null); saveLock.current = true; setSaving(true)
+      await onSaveMedicine(entries)
+    } catch (saveError) {
+      const pending = Boolean(medicineOperationRef.current)
+      setPendingMedicineSave(pending)
+      setError(`${saveError instanceof Error ? saveError.message : '保存未完成。'}${pending ? ' 重试将使用本次原始内容，请勿重复新增。' : ''}`)
+      setWarning(null)
+    } finally { saveLock.current = false; setSaving(false) }
+  }
+
   const attemptSave = async (acknowledgedKey?: string) => {
-    if (saveLock.current) return
+    if (medicineMode) { await attemptMedicineSave(acknowledgedKey); return }
+    if (saveLock.current || fillLock.current) return
     setError('')
     const supplierName = form.supplierName.trim()
     if (!form.issueDate || !supplierName || !form.projectId) {
@@ -106,6 +173,8 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
     }
     if ((!ticket && !form.issueTime) || (form.issueTime && !isValidIssueTime(form.issueTime))) {
       setError('请填写有效的曼谷时间（HH:mm）。')
+      if (moreSettingsRef.current) moreSettingsRef.current.open = true
+      timeInputRef.current?.focus()
       return
     }
     if (form.personCount == null ? !ticket || ticket.personCount != null : !isValidPersonCount(form.personCount)) {
@@ -129,7 +198,8 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
       }
       saveLock.current = true
       setSaving(true)
-      await onSave({ ...form, supplierName })
+      operationRef.current ??= createId()
+      await onSave({ ...form, supplierName }, operationRef.current)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '保存失败，请稍后重试。')
       setWarning(null)
@@ -140,11 +210,10 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
   }
 
   const selectProject = (select: (current: TicketInput) => TicketInput) => {
-    if (saveLock.current) return
-    setWarning(null); setError(''); setForm(current => {
-      const next = select(current)
-      return ticket && next.projectId === ticket.projectId ? { ...next, settlementMode: ticket.settlementMode, quantityUnit: ticket.quantityUnit ?? 'person', entryMode: ticket.entryMode ?? 'standard' } : next
-    })
+    if (saveLock.current || fillLock.current || pendingMedicineSave) return
+    let next = select(form)
+    if (ticket && next.projectId === ticket.projectId) next = { ...next, settlementMode: ticket.settlementMode, quantityUnit: ticket.quantityUnit ?? 'person', entryMode: ticket.entryMode ?? 'standard' }
+    applyFilledForm(next)
   }
 
   const perPerson = form.amountBasis === 'per_person'
@@ -157,48 +226,51 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
   const profit = totals.profitThb
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onCancel}>
-      <section className="sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestCancel}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet ticket-entry-sheet" aria-modal="true" aria-labelledby="ticket-form-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div>
             <p className="eyebrow">THB · 自动计算利润</p>
             <h2 id="ticket-form-title">{ticket ? '编辑记录' : '新增出票记录'}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onCancel} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={saving} onClick={requestCancel} aria-label="关闭">×</button>
         </div>
         {cloudLoginRequired && <p className="sheet-copy">保存前请登录云端账号，之后记录和价格修改会自动同步到电脑与手机。</p>}
-        <form className="ticket-form" onSubmit={event => { event.preventDefault(); void attemptSave() }}>
-          <fieldset className="form-fields" disabled={saving}>
+        <form className="ticket-form" onInvalidCapture={event => {
+          const details = (event.target as HTMLElement).closest('details')
+          if (details) details.open = true
+        }} onSubmit={event => { event.preventDefault(); void attemptSave() }}>
+          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} />}
+          {medicineMode && <section className="ticket-order-summary" aria-label="订单核对摘要"><p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')}</p><p>药品 · 已选 {medicineLines.length} 项，各子项数量和利润分别统计。</p></section>}
+          {!medicineMode && form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
+            <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
+            <p className="ticket-order-project">{form.projectName}{form.subItemName ? ` · ${form.subItemName}` : ''}</p>
+            <p className="ticket-order-basis">{perPerson ? `按${countLabel}计算 · ${single}金额 × ${countLabel}` : '整单总额 · 不乘人数／数量'}{form.entryMode === 'profit_only'
+              ? ` · ${perPerson ? single : '整单'}返佣 ${typeof form.manualProfitThb === 'number' && Number.isFinite(form.manualProfitThb) ? formatThb(form.manualProfitThb) : '待填写'}`
+              : ` · ${perPerson ? single : '整单'}售价 ${Number.isFinite(form.agentPriceThb) ? formatThb(form.agentPriceThb) : '待填写'} · ${perPerson ? single : '整单'}成本 ${Number.isFinite(form.costThb) ? formatThb(form.costThb) : '待填写'}`}</p>
+            <p className="ticket-order-profit"><span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span><strong>{amountsComplete ? formatThb(profit) : manualCostPrice ? '待填写金额' : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong></p>
+          </section>}
+          <fieldset className="form-fields" disabled={saving || filling || pendingMedicineSave}>
           <label>
             出票日期
             <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} required />
           </label>
-          <label>
-            时间（曼谷 UTC+7）
-            <input type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
-            {ticket && !ticket.issueTime && <span className="muted">旧记录未记录时间，可手动补填。</span>}
-          </label>
-          {isShow79Project(form.projectName) && <label>客户姓名<input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>}
-          <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />
-          <label>
-            计价方式
-            <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
-              <option value="per_person">按{countLabel}计算（{single}金额 × {countLabel}）</option>
-              <option value="total">整单总额（不乘{countLabel}）</option>
-            </select>
-          </label>
+          <label>客户姓名 <span className="muted">（可选）</span><input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>
+          {!medicineMode && <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />}
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
-          <ProjectPicker projects={projects} recent={ticket ? [] : recentProjects} form={form}
+          <ProjectPicker projects={projects} form={form}
+            selectedOptionIds={medicineMode ? medicineLines.map(line => line.projectId) : []}
+            renderOptions={medicineMode ? choices => <MedicineItemsField projects={choices} lines={medicineLines} disabled={saving || filling || pendingMedicineSave} onChange={lines => { if (saveLock.current || fillLock.current || pendingMedicineSave) return; setMedicineLines(lines); setWarning(null); setError('') }} /> : undefined}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
-          {manualSupplier ? <label>供货商<select value={form.supplierName} onChange={event => update('supplierName', event.target.value)} required><option value="">请自行选择供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}</select></label> : form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>}
-          {manualCostPrice ? <p className="sheet-copy">成本不预设，请填写本次{perPerson ? single : '整单'}成本{manualAgentPrice ? '及代理售价' : '；售价已自动带入'}。</p> : manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>}
+          {!medicineMode && (manualSupplier ? <label>供货商<select value={form.supplierName} onChange={event => update('supplierName', event.target.value)} required><option value="">请自行选择供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}</select></label> : form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>)}
+          {!medicineMode && (manualCostPrice ? <p className="sheet-copy">成本不预设，请填写本次{perPerson ? single : '整单'}成本{manualAgentPrice ? '及代理售价' : '；售价已自动带入'}。</p> : manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>)}
           {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
-          {!isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
+          {!medicineMode && !isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
-          {form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
+          {!medicineMode && (form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
             <label>
               {perPerson ? `${single}代理售价（THB）` : '代理售价总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.agentPriceThb) ? form.agentPriceThb : ''} onChange={(event) => update('agentPriceThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
@@ -207,22 +279,35 @@ export function TicketForm({ ticket, projects, suppliers = [], recentProjects = 
               {perPerson ? `${single}供货商成本（THB）` : '供货商成本总额（THB）'}
               <input inputMode="decimal" min="0" step="0.01" type="number" value={Number.isFinite(form.costThb) ? form.costThb : ''} onChange={(event) => update('costThb', event.target.value === '' ? Number.NaN : Number(event.target.value))} required />
             </label>
-          </div>}
-          {form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
-          <div className={`profit-preview ${profit >= 0 || !amountsComplete ? 'positive' : 'negative'}`}>
-            <span>{form.entryMode === 'profit_only' ? '本次月结总利润' : '本次总利润'}</span>
-            <strong>{amountsComplete ? formatThb(profit) : manualCostPrice ? '待填写金额' : manualAgentPrice ? '待填写售价' : '待填写金额'}</strong>
-          </div>
+          </div>)}
+          {!medicineMode && form.entryMode !== 'profit_only' && amountsComplete && <p className="sheet-copy">总售价 {formatThb(totals.agentPriceThb)} · 总成本 {formatThb(totals.costThb)}</p>}
+          {ticket && !ticket.issueTime && <p className="muted">旧记录未记录时间，可在“更多设置”中手动补填。</p>}
+          <details className="ticket-more-settings" ref={moreSettingsRef}>
+            <summary>更多设置 · 时间 / 计价方式 / 备注</summary>
+            <label>
+              时间（曼谷 UTC+7）
+              <input ref={timeInputRef} type="time" step="60" value={form.issueTime ?? ''} onChange={(event) => update('issueTime', event.target.value)} required={!ticket || Boolean(ticket.issueTime)} />
+            </label>
+            {!medicineMode && <label>
+              计价方式
+              <select value={form.amountBasis} onChange={(event) => update('amountBasis', event.target.value as AmountBasis)}>
+                <option value="per_person">按{countLabel}计算（{single}金额 × {countLabel}）</option>
+                <option value="total">整单总额（不乘{countLabel}）</option>
+              </select>
+            </label>}
           <label>
             备注 <span className="muted">（可选）</span>
             <textarea maxLength={300} placeholder="例如航线、特殊说明" value={form.note} onChange={(event) => update('note', event.target.value)} />
           </label>
+          </details>
           </fieldset>
+          <div className="ticket-save-area">
           {error && <p className="form-error" role="alert">{error}</p>}
-          {warning && <SaveWarning messages={warning.messages} saving={saving} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
-          <div className="sheet-actions">
-            <button className="secondary-button" type="button" onClick={onCancel}>取消</button>
-            {!warning && <button className="primary-button" type="submit" disabled={saving}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : '保存记录'}</button>}
+          {warning && <SaveWarning messages={warning.messages} saving={saving || filling} onBack={() => setWarning(null)} onContinue={() => void attemptSave(warning.key)} />}
+          {!warning && <div className="sheet-actions">
+            <button className="secondary-button" type="button" disabled={saving} onClick={requestCancel}>取消</button>
+            <button className="primary-button" type="submit" disabled={saving || filling}>{saving ? '保存中…' : cloudLoginRequired ? '登录后保存' : pendingMedicineSave ? '重试本次保存' : '保存记录'}</button>
+          </div>}
           </div>
         </form>
       </section>
@@ -258,6 +343,10 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   const projectFormRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<'supplier' | 'project' | null>(null)
+  const supplierBusy = useRef(false)
+  supplierBusy.current = saving !== null
+  const requestClose = () => { if (!supplierBusy.current && !projectSaveLock.current) onClose() }
+  const dialogRef = useDialog(requestClose)
   const [priceQuery, setPriceQuery] = useState('')
   const [priceSupplierId, setPriceSupplierId] = useState('')
   const filteredProjects = filterProjects(projects, priceQuery, priceSupplierId)
@@ -347,12 +436,12 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
   }
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sheet compact-sheet" aria-modal="true" aria-labelledby="supplier-sheet-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestClose}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet compact-sheet" aria-modal="true" aria-labelledby="supplier-sheet-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div><p className="eyebrow">预先维护价格表</p><h2 id="supplier-sheet-title">供货商与项目</h2></div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={saving !== null} onClick={requestClose} aria-label="关闭">×</button>
         </div>
         <p className="sheet-copy">先添加供货商，再为每个项目建立子项/套餐、成本和代理售价。出票时选择子项会自动带入这两个价格。</p>
         <button className="secondary-button full-width" type="button" onClick={() => void onBackup()} disabled={saving !== null}>导出全部资料备份</button>
@@ -408,46 +497,57 @@ function LoginSheet({ onClose, onSent }: { onClose: () => void; onSent: (message
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  const requestClose = () => { if (!sendingRef.current) onClose() }
+  const dialogRef = useDialog(requestClose)
 
   const sendLoginLink = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const client = getSupabase()
     if (!client) return
+    if (sendingRef.current) return
+    sendingRef.current = true
     setSending(true)
     setError('')
-    const { error: authError } = await client.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href }
-    })
-    setSending(false)
-    if (authError) {
-      setError(/email address not authorized/i.test(authError.message)
+    try {
+      const { error: authError } = await client.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href }
+      })
+      if (authError) {
+        setError(/email address not authorized/i.test(authError.message)
         ? '请使用注册 Supabase 时的邮箱。其他邮箱需要先配置云端邮件服务。'
         : /email rate limit exceeded/i.test(authError.message)
           ? '登录邮件发送过于频繁，请稍后再试。'
           : authError.message)
-      return
+        return
+      }
+      onSent('登录链接已发送，请到邮箱打开链接完成同步。')
+      onClose()
+    } catch {
+      setError('登录邮件尚未确认发送，请检查网络后重试。')
+    } finally {
+      sendingRef.current = false
+      setSending(false)
     }
-    onSent('登录链接已发送，请到邮箱打开链接完成同步。')
-    onClose()
   }
 
   return (
-    <div className="sheet-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="sheet compact-sheet" aria-modal="true" aria-labelledby="login-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sheet-backdrop" role="presentation" onMouseDown={requestClose}>
+      <section ref={dialogRef} tabIndex={-1} className="sheet compact-sheet" aria-modal="true" aria-labelledby="login-title" role="dialog" onMouseDown={(event) => event.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-title-row">
           <div>
             <p className="eyebrow">私有云端备份</p>
             <h2 id="login-title">登录并同步</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="icon-button" type="button" disabled={sending} onClick={requestClose} aria-label="关闭">×</button>
         </div>
         <p className="sheet-copy">输入你的邮箱，我们会发送一次性登录链接。你的票务记录只会归属于这个账号。</p>
         <form className="ticket-form" onSubmit={sendLoginLink}>
           <label>
             邮箱
-            <input autoComplete="email" inputMode="email" placeholder="name@example.com" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <input autoComplete="email" inputMode="email" placeholder="name@example.com" type="email" disabled={sending} value={email} onChange={(event) => setEmail(event.target.value)} required />
           </label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="primary-button full-width" type="submit" disabled={sending}>{sending ? '发送中…' : '发送登录链接'}</button>
@@ -466,9 +566,11 @@ export default function App() {
     return () => { window.removeEventListener('online', check); window.removeEventListener('offline', check) }
   }, [])
   const [tickets, setTickets] = useState<TicketRecord[]>([])
+  const [show79Settlements, setShow79Settlements] = useState<Show79SettlementRecord[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('dashboard')
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | undefined>()
   const [formOpen, setFormOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
@@ -476,15 +578,21 @@ export default function App() {
   const [supplierSheetOpen, setSupplierSheetOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
+  const [localUserId, setLocalUserId] = useState('')
   const [ready, setReady] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [toast, setToast] = useState('')
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [dateFilter, setDateFilter] = useState('')
+  const [recordDateRange, setRecordDateRange] = useState<TicketDateRange>('all')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [query, setQuery] = useState('')
+  const [syncConflicts, setSyncConflicts] = useState<SyncConflictRecord[]>([])
+  const [conflictsOpen, setConflictsOpen] = useState(false)
   const userRef = useRef<User | null>(null)
+  const accountEpochRef = useRef(0)
+  const accountReadyRef = useRef(!cloudConfigured)
   const mountedRef = useRef(false)
   const syncAbortRef = useRef<AbortController | null>(null)
   const syncRunnerRef = useRef<() => Promise<void>>(async () => undefined)
@@ -492,24 +600,29 @@ export default function App() {
   syncQueueRef.current ??= createSyncQueue(() => syncRunnerRef.current())
 
   const refresh = useCallback(async () => {
-    const [nextTickets, nextSuppliers, nextProjects] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects()])
-    if (!mountedRef.current) return
+    const epoch = accountEpochRef.current
+    const [nextTickets, nextSuppliers, nextProjects, nextSettlements, nextConflicts] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getShow79Settlements(), ledgerRepository.getSyncConflicts(true)])
+    if (!mountedRef.current || epoch !== accountEpochRef.current) return
     setTickets(nextTickets.map(ticketDisplay))
     setSuppliers(nextSuppliers)
     setProjects(nextProjects)
+    setShow79Settlements(nextSettlements)
+    setSyncConflicts(nextConflicts)
+    return nextConflicts
   }, [])
 
   syncRunnerRef.current = async () => {
     const targetUser = userRef.current
-    if (!targetUser || !mountedRef.current) return
+    if (!targetUser || !mountedRef.current || !accountReadyRef.current) return
     const controller = new AbortController()
     syncAbortRef.current = controller
     setSyncing(true)
     try {
       const result = await ledgerRepository.synchronise(targetUser, controller.signal)
       if (!mountedRef.current || userRef.current?.id !== targetUser.id || controller.signal.aborted) return
-      setSyncMessage(result.synced ? '已同步到云端' : result.message ?? '同步暂未完成，会自动重试。')
-      await refresh()
+      const refreshedConflicts = await refresh()
+      if (!mountedRef.current || userRef.current?.id !== targetUser.id || controller.signal.aborted) return
+      setSyncMessage(result.synced ? refreshedConflicts?.some(row => !row.resolvedAt) ? '正常记录已同步，有异常记录待核对。' : '已同步到云端' : result.message ?? '同步暂未完成，会自动重试。')
     } catch (error) {
       if (mountedRef.current && !controller.signal.aborted && userRef.current?.id === targetUser.id) {
         setSyncMessage(error instanceof Error ? error.message : '同步暂未完成，本机记录已保留。')
@@ -526,36 +639,71 @@ export default function App() {
     let alive = true
     let authChanged = false
     let authSyncTimer: number | undefined
+    let activeAuthId: string | null | undefined
+    let activationTask: Promise<boolean> = Promise.resolve(false)
     mountedRef.current = true
     const client = getSupabase()
     const applyUser = (nextUser: User | null) => {
-      if (!alive) return
-      if (userRef.current?.id !== nextUser?.id) {
+      if (!alive) return Promise.resolve(false)
+      const nextId = nextUser?.id ?? null
+      if (activeAuthId === nextId) {
+        userRef.current = nextUser; setUser(nextUser)
+        return activationTask
+      }
+      activeAuthId = nextId
+      const epoch = ++accountEpochRef.current
+      accountReadyRef.current = false
+      {
         syncAbortRef.current?.abort()
         syncQueueRef.current?.clearPending()
         setSyncMessage('')
+        setSyncing(false)
         setFormOpen(false)
         setRefundOpen(false)
+        setSupplierSheetOpen(false)
+        setConflictsOpen(false)
         setSelectedTicket(undefined)
+        setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
+        setQuery(''); setSupplierFilter(''); setToast('')
       }
       userRef.current = nextUser
       setUser(nextUser)
+      activationTask = ledgerRepository.activateAccount(nextId).then(async () => {
+        if (!alive || epoch !== accountEpochRef.current) return false
+        accountReadyRef.current = true
+        await refresh()
+        return alive && epoch === accountEpochRef.current
+      }).catch(error => {
+        if (alive && epoch === accountEpochRef.current) {
+          accountReadyRef.current = false
+          setToast(error instanceof Error ? error.message : '账号账本尚未打开，请刷新后重试。')
+        }
+        return false
+      })
+      return activationTask
     }
     const authListener = client?.auth.onAuthStateChange((_event, session) => {
       authChanged = true
-      applyUser(session?.user ?? null)
-      // Supabase auth callbacks must finish before making further client calls.
-      window.clearTimeout(authSyncTimer)
-      authSyncTimer = window.setTimeout(() => { if (alive) void synchronise() }, 0)
+      // Only local activation runs here; defer Supabase calls beyond its auth lock.
+      void applyUser(session?.user ?? null).then(activated => {
+        if (!alive || !activated) return
+        window.clearTimeout(authSyncTimer)
+        authSyncTimer = window.setTimeout(() => { if (alive) void synchronise() }, 0)
+      })
     })
     const initialise = async () => {
       try {
-        await ledgerRepository.getSettings()
-        await refresh()
+        const settings = await ledgerRepository.getSettings()
+        if (alive) setLocalUserId(settings.localUserId)
         if (client) {
           const { data } = await client.auth.getSession()
-          if (!authChanged) applyUser(data.session?.user ?? null)
+          if (!authChanged) await applyUser(data.session?.user ?? null)
+          else await activationTask
           if (alive) void synchronise()
+        } else {
+          await ledgerRepository.activateAccount(null)
+          accountReadyRef.current = true
+          await refresh()
         }
       } catch (error) {
         if (alive) setToast(error instanceof Error ? error.message : '打开账本时遇到问题，请刷新后重试。')
@@ -567,6 +715,7 @@ export default function App() {
     return () => {
       alive = false
       mountedRef.current = false
+      accountEpochRef.current++
       window.clearTimeout(authSyncTimer)
       authListener?.data.subscription.unsubscribe()
       syncAbortRef.current?.abort()
@@ -584,7 +733,7 @@ export default function App() {
       debounceTimer = window.setTimeout(() => { if (alive) void synchronise() }, 180)
     }
     let channel = client.channel(`ledger:${user.id}`)
-    for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds']) {
+    for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds', 'show79_settlements']) {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, scheduleSync)
     }
     channel.subscribe((status) => {
@@ -631,13 +780,9 @@ export default function App() {
   const monthRange = monthDateRange(month)
   const year = today.slice(0, 4)
   const yearRange = yearDateRange(year)
-  const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter((ticket) => {
-    const dateMatches = !dateFilter || ticket.issueDate === dateFilter
-    const supplierMatches = !supplierFilter || ticket.supplierId === supplierFilter
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    const queryMatches = !normalizedQuery || ticket.supplierName.toLocaleLowerCase().includes(normalizedQuery) || ticket.projectName.toLocaleLowerCase().includes(normalizedQuery) || ticket.note.toLocaleLowerCase().includes(normalizedQuery)
-    return dateMatches && supplierMatches && queryMatches
-  }).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, supplierFilter, query])
+  const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter(ticket => matchesTicketSearch(ticket, {
+    query, supplierId: supplierFilter, date: dateFilter, range: recordDateRange, today
+  })).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, recordDateRange, supplierFilter, query, today])
 
   const mainTickets = useMemo(() => mainLedgerTickets(tickets), [tickets])
 
@@ -650,6 +795,10 @@ export default function App() {
   }
 
   const requestLoginForWrite = () => {
+    if (!accountReadyRef.current) {
+      setToast('正在切换账号账本，请稍后再操作。')
+      return true
+    }
     if (canWriteLedger(cloudConfigured, userRef.current?.id)) return false
     setLoginOpen(true)
     setToast('请先登录同一邮箱，所有修改才能自动同步到云端。')
@@ -660,44 +809,101 @@ export default function App() {
     if (requestLoginForWrite()) throw new Error('请先登录云端账号，再保存修改。')
   }
 
+  const financialAccountId = user?.id ?? (cloudConfigured ? '' : localUserId)
   const openRefund = (id = '') => {
     if (requestLoginForWrite()) return
-    setRefundTicketId(id); setRefundOpen(true)
+    try {
+      const pending = readFinancialSubmission(window.localStorage, financialAccountId, 'refund')
+      setRefundTicketId(pending?.ticketId ?? id); setRefundOpen(true)
+    } catch { setToast('无法读取待核对的退票，请先检查浏览器储存权限，避免重复登记。') }
   }
   const saveRefund = async (input: RefundInput) => {
     requireCloudLogin()
+    const epoch = accountEpochRef.current
     const originalDate = tickets.find((ticket) => ticket.id === input.ticketId)?.issueDate
     await synchronise()
-    await ledgerRepository.createRefund(input)
-    await refresh()
-    setRefundOpen(false)
-    setToast(`退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    requireCloudLogin()
+    const saved = await ledgerRepository.createRefund(input)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开原账号核对此笔退票。')
+    setTickets(current => current.map(ticket => ticket.id !== saved.ticketId ? ticket : { ...ticket, refunds: [...(ticket.refunds ?? []).filter(refund => refund.id !== saved.id), saved] }))
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开原账号核对此笔退票。')
+    setToast(saved.cancelledAt ? '已核对：原退票已撤销，未新增退票。' : refreshed ? `退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。` : '退票已确认；页面刷新未完成，请同步核对，无需再次登记。')
     void synchronise()
   }
   const cancelRefund = async (id: string) => {
     if (requestLoginForWrite()) return
+    const epoch = accountEpochRef.current
     if (!window.confirm('确认撤销这笔退票登记吗？原日期的利润和有效票量会恢复；退票明细仍保留。这只修改账本，不会转账。')) return
     try {
-      await synchronise(); await ledgerRepository.cancelRefund(id); await refresh()
+      await synchronise()
+      if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+      requireCloudLogin()
+      await ledgerRepository.cancelRefund(id); await refresh()
+      if (epoch !== accountEpochRef.current) return
       setToast('退票已撤销，原日期统计已重新计算。'); void synchronise()
     } catch (error) { setToast(error instanceof Error ? error.message : '撤销未完成，请刷新核对。') }
   }
 
-  const saveTicket = async (input: TicketInput) => {
+  const saveTicket = async (input: TicketInput, operationId?: string) => {
     requireCloudLogin()
-    const saved = await ledgerRepository.createOrUpdateTicket(input, selectedTicket)
-    await refresh()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createOrUpdateTicket(input, selectedTicket, operationId)
+    if (epoch !== accountEpochRef.current) return
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) return
     setFormOpen(false)
-    setToast(isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
+    setToast(!refreshed ? '订单已保存；页面刷新未完成，请同步核对，无需再次保存。' : isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
       ? '月结记录已保存，计入所属月报、年报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
     void synchronise()
   }
 
-  const saveShow79 = async (input: TicketInput, existing?: TicketRecord) => {
+  const saveMedicine = async (entries: MedicineTicketEntry[]) => {
     requireCloudLogin()
-    await ledgerRepository.createOrUpdateTicket(input, existing)
-    await refresh()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createMedicineTickets(entries)
+    if (epoch !== accountEpochRef.current) return
+    const ids = new Set(saved.map(row => row.id))
+    setTickets(current => [...current.filter(row => !ids.has(row.id)), ...saved.map(ticketDisplay)])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) return
+    setFormOpen(false)
+    setToast(refreshed ? `${saved.length} 项药品明细已保存，数量和利润已分别统计。` : '药品明细已全部保存；页面刷新未完成，请同步核对，无需再次保存。')
+    void synchronise()
+  }
+
+  const saveShow79 = async (input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
+    requireCloudLogin()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createOrUpdateTicket(input, existing, operationId)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    try { await refresh() }
+    catch { if (epoch === accountEpochRef.current) setToast('79秀订单已保存；页面刷新未完成，请同步核对，无需再次保存。') }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    void synchronise()
+    return saved
+  }
+
+  const saveShow79Settlement = async (input: Show79SettlementInput) => {
+    requireCloudLogin()
+    const epoch = accountEpochRef.current
+    await synchronise()
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    requireCloudLogin()
+    const saved = await ledgerRepository.createShow79Settlement(input)
+    if (epoch !== accountEpochRef.current) return
+    setShow79Settlements(current => [...current.filter(row => row.id !== saved.id), saved])
+    let refreshed = true
+    try { await refresh() } catch { refreshed = false }
+    if (epoch !== accountEpochRef.current) return
+    setToast(refreshed ? '分账登记已保存；此操作只记录已发生的付款，不会转账。' : '分账已确认登记；页面刷新未完成，请同步核对，无需再次登记或付款。')
     void synchronise()
   }
 
@@ -727,11 +933,11 @@ export default function App() {
 
   const backupAllData = async () => {
     try {
-      const [backupSuppliers, backupProjects, backupTickets, backupRefunds] = await Promise.all([
-        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds()
+      const [backupSuppliers, backupProjects, backupTickets, backupRefunds, backupSettlements] = await Promise.all([
+        ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getTickets(), ledgerRepository.getRefunds(), ledgerRepository.getShow79Settlements()
       ])
       const aliases = await ledgerRepository.getCatalogueAliases()
-      downloadLedgerBackup(createLedgerBackup({ suppliers: [...backupSuppliers, ...aliases.suppliers], projects: [...backupProjects, ...aliases.projects], tickets: backupTickets, refunds: backupRefunds }))
+      downloadLedgerBackup(createLedgerBackup({ suppliers: [...backupSuppliers, ...aliases.suppliers], projects: [...backupProjects, ...aliases.projects], tickets: backupTickets, refunds: backupRefunds, show79Settlements: backupSettlements }))
       setToast('全部资料备份已导出，包含供货商、项目价格、出票记录及退票明细。')
     } catch (error) {
       setToast(error instanceof Error ? error.message : '备份未完成，请稍后重试。')
@@ -747,6 +953,13 @@ export default function App() {
     } catch (error) { setToast(error instanceof Error ? error.message : '删除未完成，请刷新核对。') }
   }
 
+  const resolveSyncConflict = async (id: string) => {
+    requireCloudLogin()
+    await ledgerRepository.resolveSyncConflict(id)
+    await refresh()
+    void synchronise()
+  }
+
   const install = async () => {
     if (!installPrompt) return
     await installPrompt.prompt()
@@ -758,12 +971,24 @@ export default function App() {
   const signOut = async () => {
     const client = getSupabase()
     if (!client) return
+    const epoch = ++accountEpochRef.current
+    accountReadyRef.current = false
     userRef.current = null
+    setUser(null)
+    setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
+    setFormOpen(false); setRefundOpen(false); setSupplierSheetOpen(false); setConflictsOpen(false)
+    setSelectedTicket(undefined)
     syncAbortRef.current?.abort()
     syncQueueRef.current?.clearPending()
-    await client.auth.signOut()
-    setUser(null)
-    setSyncMessage('已退出云端账号；数据仍保留在本机。')
+    try {
+      await ledgerRepository.activateAccount(null)
+      const { error } = await client.auth.signOut()
+      if (error) throw error
+      if (epoch === accountEpochRef.current) accountReadyRef.current = true
+      setSyncMessage('已退出云端账号；本机缓存已锁定，重新登录后可查看。')
+    } catch (error) {
+      setToast(`退出尚未完成，本机账本仍保持锁定，请刷新后核对。${error instanceof Error ? error.message : ''}`)
+    }
   }
 
   if (!ready) {
@@ -781,9 +1006,11 @@ export default function App() {
           </div>
         </div>
         <button className="header-action" type="button" onClick={() => void synchronise()} disabled={!user || syncing}>
-          {syncing ? '同步中' : user ? unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
+          {syncing ? '同步中' : user ? syncConflicts.some(row => !row.resolvedAt) ? '待核对' : unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
         </button>
       </header>
+
+      {syncConflicts.length > 0 && <section className="sync-conflict-banner" aria-label="同步记录核对"><div><strong>{syncConflicts.some(row => !row.resolvedAt) ? `${syncConflicts.filter(row => !row.resolvedAt).length} 条同步记录待核对` : '同步核对历史'}</strong><p>本机修改副本已保留，可查看差异后处理。</p></div><button type="button" className="secondary-button" onClick={() => setConflictsOpen(true)}>查看记录</button></section>}
 
       <div className="page-content">
         {view === 'dashboard' ? <>
@@ -829,28 +1056,30 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} tickets={tickets} projects={projects} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
+        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
           </section>
           <section className="filters">
-            <input aria-label="搜索供应商或备注" placeholder="搜索供应商或备注" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input type="search" aria-label="搜索客户、项目、套餐或供货商" placeholder="搜索客户、项目、套餐或供货商" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <div className="record-date-shortcuts" role="group" aria-label="快捷日期范围">{([['today', '今天'], ['month', '本月'], ['all', '全部']] as const).map(([range, label]) => <button key={range} type="button" aria-pressed={!dateFilter && recordDateRange === range} onClick={() => { setDateFilter(''); setRecordDateRange(range) }}>{label}</button>)}</div>
             <div className="filter-row">
-              <input aria-label="按日期筛选" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} />
+              <input aria-label="按日期筛选" type="date" value={dateFilter} onChange={(event) => { setDateFilter(event.target.value); setRecordDateRange('all') }} />
               <select aria-label="按供应商筛选" value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)}>
                 <option value="">全部供应商</option>
                 {suppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}
               </select>
             </div>
-            {(query || dateFilter || supplierFilter) && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setDateFilter(''); setSupplierFilter('') }}>清除筛选</button>}
+            <p className="record-date-range">{dateFilter ? `日期：${dateFilter.replaceAll('-', '/')}（曼谷）` : recordDateRange === 'today' ? `今天：${today.replaceAll('-', '/')}（曼谷）` : recordDateRange === 'month' ? `本月：${monthRange.start.replaceAll('-', '/')} — ${monthRange.end.replaceAll('-', '/')}（曼谷自然月）` : '日期范围：全部已录日期'} · 可同时搜索姓名、备注及筛选供货商。</p>
+            {(query || dateFilter || supplierFilter || recordDateRange !== 'all') && <button className="clear-filters" type="button" onClick={() => { setQuery(''); setDateFilter(''); setSupplierFilter(''); setRecordDateRange('all') }}>清除筛选</button>}
           </section>
           <div className="record-summary"><span>{visibleTickets.length} 条记录</span><strong>利润 {formatThb(summarise(visibleTickets).profitThb)}</strong></div>
           <section className="records-list">
             {visibleTickets.length === 0 ? <div className="empty-card">没有符合条件的记录。</div> : visibleTickets.map((ticket) => (
               <article className="ticket-card" key={ticket.id}>
                 <div className="ticket-card-main">
-                  <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong></div>
+                  <div><p>{formatDate(ticket.issueDate)} · {ticket.issueTime ? `${ticket.issueTime}（曼谷）` : '时间未记录'} · {ticket.supplierName}</p><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><p>客户：{ticket.guestName?.trim() || '未填写'}</p></div>
                   <strong className={getProfit(ticket) >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(getProfit(ticket))}</strong>
                 </div>
                 <div className="ticket-meta"><span>{getEffectivePersonCount(ticket) == null ? `${quantityLabels(ticket).label}未记录` : `有效 ${formatNumber(getEffectivePersonCount(ticket)!)} ${quantityLabels(ticket).unit}`}</span><span>{ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计算` : '整单总额'}</span>{getRefundState(ticket).active.length > 0 && <span>{getRefundState(ticket).full ? '已全部退票' : `已退 ${getRefundState(ticket).refundedPeople} ${quantityLabels(ticket).unit}`} · 回算原日/月</span>}{ticket.entryMode === 'profit_only' ? <span>月底返佣 · 仅录利润</span> : <><span>净售价 {formatThb(getTicketAmounts(ticket).agentPriceThb)}</span><span>净成本 {formatThb(getTicketAmounts(ticket).costThb)}</span></>}</div>
@@ -865,12 +1094,13 @@ export default function App() {
 
       <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} recentProjects={recentProjectOptions(projects, tickets)} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} />}
-      {refundOpen && <RefundSheet tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} />}
+      {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
+      {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}
       {toast && <div className="toast" role="status">{toast}</div>}
-      {view !== 'show79' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">{view === 'reports' ? '导出全部 Excel' : '导出 Excel'} · {formatNumber(activeTickets(mainTickets).length)}</button>}
+      {view !== 'show79' && view !== 'reports' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(mainTickets).length)}</button>}
     </main>
   )
 }

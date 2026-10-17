@@ -1,0 +1,25 @@
+.medicine-items-field { display: grid; min-width: 0; gap: 14px; }
+.medicine-items-field .medicine-options { min-width: 0; margin: 0; padding: 0; border: 0; }
+.medicine-options legend { padding: 0; color: #294b3b; font-size: 14px; font-weight: 800; }
+.medicine-options > p, .medicine-selection-empty, .medicine-price-basis, .medicine-line-help { font-size: 12px; line-height: 1.6; color: #61766a; }
+.medicine-items-field .medicine-options label { display: flex; align-items: center; gap: 12px; min-height: 52px; margin-top: 8px; padding: 10px 12px; border: 1px solid #d7e4dc; border-radius: 11px; background: #f8fcf8; cursor: pointer; }
+.medicine-items-field .medicine-options input[type="checkbox"] { flex: 0 0 auto; width: 22px; height: 22px; min-height: 22px; padding: 0; accent-color: #176a59; }
+.medicine-options label > span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.medicine-options small { color: #6d8074; font-size: 12px; font-weight: 400; }
+.medicine-selection-empty { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fff9e8; color: #7b6131; }
+.medicine-line { min-width: 0; padding: 14px; border: 1px solid #d8e5dc; border-radius: 13px; background: #fff; }
+.medicine-line > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.medicine-line h3 { min-width: 0; margin: 0; color: #294b3b; font-size: 14px; overflow-wrap: anywhere; }
+.medicine-line header button { flex: 0 0 auto; min-width: 48px; min-height: 44px; padding: 8px; }
+.medicine-price-basis { margin: 0 0 12px; }
+.medicine-line-amounts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.medicine-items-field .medicine-line label { min-width: 0; }
+.medicine-line-profit { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 0 0; padding: 10px; border-radius: 10px; color: #176a59; background: #f0f8f2; font-size: 13px; }
+.medicine-line-help { margin: 8px 0 0; color: #7b6131; }
+.medicine-selection-summary { padding: 14px; border-radius: 13px; background: #eaf6ee; }
+.medicine-selection-summary > p { margin: 0 0 8px; color: #496653; font-size: 12px; line-height: 1.5; }
+.medicine-selection-summary dl { display: grid; gap: 10px; margin: 0; }
+.medicine-selection-summary dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.medicine-selection-summary dt { font-size: 13px; color: #526d5c; }
+.medicine-selection-summary dd { min-width: 0; margin: 0; color: #176a59; font-size: 17px; font-weight: 800; overflow-wrap: anywhere; }
+.medicine-items-field .is-loss, .medicine-items-field .is-loss dd { color: #b94e40; }

@@ -16,9 +16,12 @@ describe('bottom add and refund actions', () => {
     const html = renderToStaticMarkup(<BottomNavigation view={view} onViewChange={() => {}} onAdd={() => {}} onRefund={() => {}} />)
     expect(html.match(/class="active"/g)).toHaveLength(1)
   })
-  it('places the refund action beside add before the records tab', () => {
+  it('places add and refund together between the two left and two right tabs', () => {
     const html = renderToStaticMarkup(<BottomNavigation view="dashboard" onViewChange={() => {}} onAdd={() => {}} onRefund={() => {}} />)
+    expect(html.indexOf('>概览</button>')).toBeLessThan(html.indexOf('>记录</button>'))
+    expect(html.indexOf('>记录</button>')).toBeLessThan(html.indexOf('aria-label="新增出票记录"'))
     expect(html.indexOf('aria-label="新增出票记录"')).toBeLessThan(html.indexOf('aria-label="退票"'))
-    expect(html.indexOf('aria-label="退票"')).toBeLessThan(html.indexOf('>记录</button>'))
+    expect(html.indexOf('aria-label="退票"')).toBeLessThan(html.indexOf('>79秀</button>'))
+    expect(html.indexOf('>79秀</button>')).toBeLessThan(html.indexOf('>报表</button>'))
   })
 })
