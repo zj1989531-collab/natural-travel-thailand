@@ -22,6 +22,12 @@ export async function createShow79Voucher(input: Show79VoucherInput): Promise<Bl
     if (maxWidth) ctx.fillText(value, x, y, maxWidth)
     else ctx.fillText(value, x, y)
   }
+  const centeredText = (value: string, y: number, size = 42, maxWidth = 490, x = canvas.width / 2) => {
+    ctx.save()
+    ctx.textAlign = 'center'
+    text(value, x, y, size, true, maxWidth)
+    ctx.restore()
+  }
   const line = (y: number, x = 36, end = 1035) => { ctx.beginPath(); ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.moveTo(x, y); ctx.lineTo(end, y); ctx.stroke() }
   // Use the company's original logo asset rather than redrawing the branding.
   // The source is a square JPG with white margins above and below the logo.
@@ -31,13 +37,13 @@ export async function createShow79Voucher(input: Show79VoucherInput): Promise<Bl
   ctx.globalCompositeOperation = 'source-over'
   text('VOUCHER NO.', 640, 95, 23, true); text('预订单号', 640, 125, 25, true)
   text('TRAVEL DATE', 635, 180, 23, true); text('观看日期', 635, 211, 25, true)
-  text(voucherDate(input.date), 810, 211, 33, true, 225); line(223, 635)
+  centeredText(voucherDate(input.date), 211, 33, 225, (810 + 1035) / 2); line(223, 635)
   const heading = 'CONFIRM ORDER 确认订单'
   ctx.font = `bold 38px ${font}`; const headingX = (1080 - ctx.measureText(heading).width) / 2
   text(heading, headingX, 335, 38, true); line(342, headingX, 1080 - headingX)
   const row = (en: string, zh: string, value: string, top: number, bottom: number, size = 42) => {
     text(en, 38, top, 25, true); text(zh, 38, top + 33, 27, true)
-    text(value, 535, bottom - 23, size, true, 490); line(bottom)
+    centeredText(value, bottom - 23, size); line(bottom)
   }
   row('PRODUCT NAME', '产品名称', '79 秀', 430, 505)
   row('PACKAGE', '产品套餐', '门票', 548, 624)
@@ -45,10 +51,10 @@ export async function createShow79Voucher(input: Show79VoucherInput): Promise<Bl
   row('PASSPORT NO.', '护照号', '-', 786, 862, 30)
   row('QUANTITY', '出行人数', `${input.people}人`, 904, 978)
   text('TIME', 35, 1023, 25, true); text('时间场次', 35, 1058, 27, true)
-  text(SHOW79_TIME, 345, 1058, 37, true, 685); line(1077)
+  centeredText(SHOW79_TIME, 1058, 37, 685); line(1077)
   row('CONTACT', '联系方式', '-', 1115, 1170, 30)
   text('REMARKS', 35, 1210, 25, true); text('备注说明', 35, 1245, 27, true)
-  text('打车英文名称【IMAGINE 79SHOW】', 237, 1245, 35, true, 795); line(1265)
+  centeredText('打车英文名称【IMAGINE 79SHOW】', 1245, 35, 720); line(1265)
   text('重要说明 (Important information)', 43, 1310, 21); line(1315, 43, 370)
   const footer = [
     '1. 收到订单后,请仔细核对您的出行信息,如有误请及时联系客服更改',
