@@ -10,6 +10,16 @@ const local = () => ({ suppliers: [supplier('local-s')], projects: [project('loc
 const remote = () => ({ suppliers: [supplier('cloud-s', { syncStatus: 'synced' })], projects: [project('cloud-p', 'cloud-s', { updatedAt: '2026-01-02T00:00:00Z', defaultCostThb: 500, syncStatus: 'synced' })] })
 
 describe('recoverable catalogue identity reconciliation', () => {
+  it('keeps explicit rules when a newer alias from an old client wins prices', () => {
+    const data = local(); data.projects[0].updatedAt = '2026-01-03T00:00:00Z'
+    const cloud = remote(); cloud.projects[0] = { ...cloud.projects[0], defaultAmountBasis: 'total', settlementMode: 'monthly' }
+    expect(reconcileCatalogue(data, cloud, 'u').projects.find(row => row.id === 'cloud-p')).toMatchObject({ defaultAmountBasis: 'total', settlementMode: 'monthly', defaultCostThb: 600 })
+  })
+  it('retains the newest nonempty rule from a third local alias too', () => {
+    const data = local(); data.projects[0].updatedAt = '2026-01-04T00:00:00Z'
+    data.projects.push(project('middle-p', 'local-s', { updatedAt: '2026-01-03T00:00:00Z', defaultAmountBasis: 'total', settlementMode: 'monthly' }))
+    expect(reconcileCatalogue(data, remote(), 'u').projects.find(row => row.id === 'cloud-p')).toMatchObject({ defaultAmountBasis: 'total', settlementMode: 'monthly', defaultCostThb: 600 })
+  })
   it('uses cloud IDs and preserves newer cloud prices, not identity-repair time', () => {
     const result = reconcileCatalogue(local(), remote(), 'u')
     expect(result.suppliers.filter(row => !row.mergedIntoId).map(row => row.id)).toEqual(['cloud-s'])

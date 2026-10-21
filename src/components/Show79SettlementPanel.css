@@ -1,0 +1,32 @@
+.show79-settlement { padding: 16px !important; margin: 16px 0 24px; border: 1px solid #dce5df; border-radius: 16px; background: #fff; color: #203e31; min-width: 0; }
+.show79-settlement > summary { margin: 0 !important; line-height: 1.6; overflow-wrap: anywhere; }
+.show79-settlement > summary small { margin-left: 10px; font-size: 12px; font-weight: 400; color: #687b70; }
+.show79-settlement[open] { display: block !important; }
+.show79-settlement-body { padding-top: 14px; min-width: 0; }
+.show79-settlement p { line-height: 1.65; font-size: 13px; overflow-wrap: anywhere; }
+.show79-settlement .show79-settlement-description { color: #687b70; }
+.show79-settlement-payees { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.show79-settlement-payee { padding: 13px; border: 1px solid #dce5df; border-radius: 12px; min-width: 0; }
+.show79-settlement-payee h3 { margin: 0 0 12px; font-size: 15px; overflow-wrap: anywhere; }
+.show79-settlement-payee dl { display: grid; gap: 10px; margin: 0; }
+.show79-settlement-payee dt { color: #687b70; font-size: 12px; }
+.show79-settlement-payee dd { margin: 3px 0 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.show79-settlement-payee .show79-settlement-difference { border-top: 1px solid #dce5df; padding-top: 10px; color: #176a59; }
+.show79-settlement-payee .show79-settlement-recover { color: #a4493e; }
+.show79-settlement-form { display: grid; gap: 12px; margin-top: 20px; }
+.show79-settlement-form fieldset { display: grid; gap: 12px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.show79-settlement-form legend { padding: 0; font-size: 15px; font-weight: 700; }
+.show79-settlement-form label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; min-width: 0; }
+.show79-settlement-form input, .show79-settlement-form textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 11px; border: 1px solid #d4ded7; border-radius: 10px; background: #fff; color: #203e31; font: inherit; font-size: 16px; }
+.show79-settlement-form textarea { resize: vertical; min-height: 70px; }
+.show79-settlement-amounts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.show79-settlement-form button { min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.show79-settlement-history { margin-top: 22px; border-top: 1px solid #dce5df; padding-top: 16px; }
+.show79-settlement-history h3 { margin: 0 0 12px; font-size: 16px; }
+.show79-settlement-history ol { list-style: none; display: grid; gap: 12px; padding: 0; margin: 0; }
+.show79-settlement-history li { padding: 12px; border: 1px solid #e1e8e3; border-radius: 10px; min-width: 0; }
+.show79-settlement-history p { margin: 6px 0; }
+.show79-settlement-history strong { font-size: 13px; }
+.show79-settlement-history small { color: #687b70; }
+.show79-settlement-success { color: #176a59; }
+@media (max-width: 360px) { .show79-settlement-payees, .show79-settlement-amounts { grid-template-columns: minmax(0, 1fr); } }

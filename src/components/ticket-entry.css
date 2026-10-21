@@ -1,0 +1,25 @@
+.sheet.ticket-entry-sheet { padding-bottom: 0; scroll-padding-bottom: calc(116px + env(safe-area-inset-bottom)); }
+.ticket-entry-sheet .ticket-form input, .ticket-entry-sheet .ticket-form select, .ticket-entry-sheet .ticket-form textarea { font-size: 16px; }
+.ticket-order-summary { padding: 14px; border: 1px solid #d7e7de; border-radius: 14px; background: #f0f8f3; overflow-wrap: anywhere; }
+.ticket-order-summary > p { margin: 0 0 7px; font-size: 13px; line-height: 1.5; }
+.ticket-order-summary > p:last-child { margin-bottom: 0; }
+.ticket-order-summary .ticket-order-project { font-weight: 800; color: #254d3e; }
+.ticket-order-summary .ticket-order-basis { color: #5d7166; font-size: 12px; }
+.ticket-order-summary .ticket-order-profit { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid #d7e7de; }
+.ticket-order-profit strong { font-size: 20px; color: #167d54; }
+.ticket-order-summary.is-loss { background: #fff3ef; border-color: #edcfc5; }
+.ticket-order-summary.is-loss .ticket-order-profit strong { color: #bd4d45; }
+.ticket-more-settings { border-top: 1px solid #e1e8e3; padding-top: 12px; }
+.ticket-more-settings > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: #176a59; font-size: 13px; font-weight: 800; }
+.ticket-more-settings > label { margin: 12px 0; }
+.ticket-save-area { position: sticky; bottom: 0; z-index: 3; margin: 0 -20px; padding: 12px 20px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid #dce5df; background: #fffffff7; box-shadow: 0 -5px 16px #2442360c; }
+.ticket-save-area .sheet-actions { margin-top: 0; }
+.ticket-save-area .form-error { margin: 0 0 10px; }
+.ticket-save-area .save-warning { max-height: min(45dvh, 340px); overflow-y: auto; }
+.record-date-shortcuts { display: flex; gap: 8px; margin: 11px 0 0; }
+.record-date-shortcuts button { flex: 1; min-height: 44px; padding: 8px 12px; border: 1px solid #d7e0da; border-radius: 10px; color: #536b60; background: #fff; font-size: 13px; font-weight: 700; }
+.record-date-shortcuts button[aria-pressed="true"] { border-color: #176a59; color: #fff; background: #176a59; }
+.record-date-range { margin: 10px 0 0; color: #6f8077; font-size: 12px; line-height: 1.5; }
+.records-list .ticket-actions { gap: 8px; flex-wrap: wrap; }
+.records-list .ticket-actions button { min-width: 52px; min-height: 44px; padding: 10px 12px; border-radius: 9px; }
+.records-list .ticket-actions .danger-action { margin-left: 12px; }

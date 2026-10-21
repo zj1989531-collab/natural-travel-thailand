@@ -2,6 +2,7 @@ export type SyncStatus = 'synced' | 'pending' | 'error'
 export type EntryMode = 'standard' | 'profit_only'
 export type AmountBasis = 'total' | 'per_person'
 export type QuantityUnit = 'person' | 'item'
+export type SettlementMode = 'daily' | 'monthly'
 
 export interface Supplier {
   /** Local-only recoverable duplicate; never uploaded or offered in selectors. */
@@ -16,8 +17,13 @@ export interface Supplier {
 }
 
 export interface Project {
+  /** Unbound templates use empty supplierId/name locally and NULL supplier_id in PostgreSQL. */
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
   mergedIntoId?: string
   manualAgentPrice?: boolean
+  manualCostPrice?: boolean | null
+  manualSupplier?: boolean | null
   quantityUnit?: QuantityUnit
   entryMode?: EntryMode
   id: string
@@ -36,6 +42,8 @@ export interface Project {
 }
 
 export interface TicketRecord {
+  guestName?: string
+  settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   refunds?: RefundRecord[]
   amountBasis?: AmountBasis
@@ -61,6 +69,8 @@ export interface TicketRecord {
 }
 
 export interface TicketInput {
+  guestName?: string
+  settlementMode?: SettlementMode | null
   quantityUnit?: QuantityUnit
   amountBasis?: AmountBasis
   personCount?: number | null
@@ -124,6 +134,10 @@ export interface AppSettings {
 }
 
 export interface ProjectInput {
+  manualSupplier?: boolean | null
+  manualCostPrice?: boolean | null
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
   supplierId: string
   name: string
   subItemName: string
@@ -135,6 +149,10 @@ export interface ProjectInput {
 }
 
 export interface ProjectPricesInput {
+  manualCostPrice?: boolean | null
+  defaultAmountBasis?: AmountBasis | null
+  settlementMode?: SettlementMode | null
+  quantityUnit?: QuantityUnit
   defaultCostThb: number
   defaultAgentPriceThb: number
   manualAgentPrice?: boolean

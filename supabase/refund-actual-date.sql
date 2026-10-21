@@ -1,0 +1,59 @@
+-- Existing installations: record the actual refund date independently of a
+-- ticket's viewing/travel date. Run after refunds.sql. No history is rewritten.
+-- The UPDATE branch intentionally keeps supporting cancellation/retry of old
+-- refund records, including any future dates accepted by the previous rule.
+-- Ownership, RLS, original-ticket row locks, quantity/money limits and original
+-- period accounting remain unchanged. The existing trigger uses this function.
+create or replace function public.ledger_validate_refund()
+returns trigger language plpgsql security invoker set search_path=public as $$
+declare
+  original public.tickets%rowtype;
+  prior_count bigint;
+  prior_revenue numeric;
+  prior_cost numeric;
+  prior_full boolean;
+  quantity integer;
+begin
+  select * into original from public.tickets where id=new.ticket_id and user_id=new.user_id for update;
+  if not found then raise exception '当前账号无法退这条出票记录。'; end if;
+  if tg_op='UPDATE' then
+    if (to_jsonb(new)-'cancelled_at'-'updated_at') is distinct from (to_jsonb(old)-'cancelled_at'-'updated_at') then
+      raise exception '退票明细不可修改；请先撤销，再重新登记。';
+    end if;
+    if new.cancelled_at is not distinct from old.cancelled_at then return null; end if;
+    if old.cancelled_at is not null then return null; end if;
+    if new.cancelled_at is null or new.updated_at<=old.updated_at then
+      raise exception '退票撤销状态无效，请刷新后重试。';
+    end if;
+    return new;
+  end if;
+  if new.cancelled_at is not null then raise exception '新增退票不能预先标记撤销。'; end if;
+  if original.deleted_at is not null or original.entry_mode='profit_only' then raise exception '此记录不能办理退票。'; end if;
+  -- A ticket's issue_date can be its future viewing/travel date. The refund
+  -- date records the actual refund day; accounting still uses the original ticket.
+  if new.refund_date is null or not isfinite(new.refund_date) or new.refund_date < date '1000-01-01' or
+    new.refund_date > (clock_timestamp() at time zone 'Asia/Bangkok')::date then
+    raise exception '退款日期无效，不能晚于曼谷今天。';
+  end if;
+  select coalesce(sum(person_count),0),coalesce(sum(refund_revenue_thb),0),coalesce(sum(returned_cost_thb),0),coalesce(bool_or(is_full),false)
+    into prior_count,prior_revenue,prior_cost,prior_full
+    from public.ticket_refunds where ticket_id=new.ticket_id and user_id=new.user_id and cancelled_at is null;
+  if prior_full then raise exception '此记录已经全部退票，请勿重复办理。'; end if;
+  if original.person_count is null then
+    if not new.is_full or new.person_count is not null then raise exception '人数未知的旧记录只能整单退票。'; end if;
+  else
+    if new.person_count is null or new.person_count<1 or prior_count+new.person_count>original.person_count then
+      raise exception '退票数量超过剩余人数，请刷新后核对。';
+    end if;
+    if new.is_full is distinct from (prior_count+new.person_count=original.person_count) then
+      raise exception '整单退票必须包含全部剩余人数。';
+    end if;
+  end if;
+  quantity:=case when original.amount_basis='per_person' then original.person_count else 1 end;
+  if prior_revenue+new.refund_revenue_thb>original.agent_price_thb*quantity or prior_cost+new.returned_cost_thb>original.cost_thb*quantity then
+    raise exception '累计退款或成本返还超过原金额，请核对。';
+  end if;
+  return new;
+end;
+$$;
+notify pgrst, 'reload schema';

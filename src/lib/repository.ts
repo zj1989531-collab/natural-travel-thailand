@@ -1,16 +1,114 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { db } from './db'
-import { createId, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
+import { createId, isValidCalendarDate, isValidIssueTime, isValidPersonCount, normalizeSupplier } from './format'
 import { getSupabase } from './supabase'
 import { needsUpload, nextModifiedAt, type VersionedRecord } from './sync'
-import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import type { AmountBasis, AppSettings, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, RefundRecord, SettlementMode, Supplier, SyncStatus, TicketInput, TicketRecord } from '../types'
+import { resolveProjectRules, validateProjectRules } from './project-rules'
 import { getTicketAmounts, validateAmountPrecision } from './ticket-amounts'
 import { attachRefunds } from './refunds'
 import { validateRefundInput } from './refund-input'
 import { quantityLabels } from './quantity'
 import { cleanProjectLabel, projectDisplay } from './project-labels'
+import { isShow79Project } from './show79'
+import { buildShow79SettlementState, validateShow79SettlementInput, type Show79SettlementInput, type Show79SettlementRecord } from './show79-settlement'
+import { AccountChangedError, assertLedgerOwner, type LedgerOwnerContext } from './ledger-account'
+import { ticketCreateFingerprint } from './sync-conflicts'
+import { isMedicineProject, validateMedicineBatchShape, type MedicineTicketEntry } from './medicine-batch'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
+let accountUserId: string | null | undefined
+let accountEpoch = 0
+let accountReady: Promise<Awaited<ReturnType<typeof db.activateAccount>>> | undefined
+
+async function activateAccount(userId: string | null) {
+  const cloud = Boolean(getSupabase())
+  const target = cloud ? userId : null
+  if (accountUserId === target && accountReady) {
+    const pending = accountReady
+    const epoch = accountEpoch
+    let succeeded = false
+    try { await pending; succeeded = true }
+    catch (error) {
+      if (accountReady !== pending || accountEpoch !== epoch) throw new AccountChangedError()
+      // A failed IndexedDB activation may be retried on the next auth event.
+      if (error instanceof AccountChangedError) throw error
+    }
+    if (succeeded) {
+      if (accountEpoch !== epoch || accountUserId !== target) throw new AccountChangedError()
+      return
+    }
+  }
+  const epoch = ++accountEpoch
+  accountUserId = target
+  accountReady = db.activateAccount(target, cloud, () => accountEpoch === epoch && accountUserId === target)
+  await accountReady
+  if (accountEpoch !== epoch) throw new AccountChangedError()
+}
+
+async function ownerContext(write = false): Promise<LedgerOwnerContext | null> {
+  const cloud = Boolean(getSupabase())
+  if (cloud && !accountUserId) {
+    if (write) throw new AccountChangedError()
+    return null
+  }
+  if (!accountReady) { await activateAccount(null); return ownerContext(write) }
+  const epoch = accountEpoch
+  const target = accountUserId
+  const pending = accountReady
+  await pending
+  if (accountEpoch !== epoch || accountUserId !== target) throw new AccountChangedError()
+  const settings = await getSettings()
+  const userId = cloud ? target : settings.localUserId
+  if (!userId) { if (write) throw new AccountChangedError(); return null }
+  const owner = { userId, cloud, isCurrent: () => accountEpoch === epoch && accountUserId === target }
+  assertLedgerOwner(settings, owner)
+  return owner
+}
+
+const assertCurrent = (owner: LedgerOwnerContext) => { if (!owner.isCurrent()) throw new AccountChangedError() }
+
+async function ticketWithCurrentRefunds(ticket: TicketRecord, owner: LedgerOwnerContext): Promise<TicketRecord> {
+  return (await ticketsWithCurrentRefunds([ticket], owner))[0]
+}
+
+async function ticketsWithCurrentRefunds(tickets: TicketRecord[], owner: LedgerOwnerContext): Promise<TicketRecord[]> {
+  assertCurrent(owner)
+  if (tickets.some(ticket => ticket.userId !== owner.userId)) throw new AccountChangedError()
+  const refunds = (await db.getRefunds()).filter(row => row.userId === owner.userId)
+  assertCurrent(owner)
+  return attachRefunds(tickets, refunds)
+}
+
+// Prepare all medicine rows before starting a write transaction. Catalogue and
+// account versions are checked again by the atomic IndexedDB batch operation.
+function stageMedicineTicket(entry: MedicineTicketEntry, project: Project, supplier: Supplier, owner: LedgerOwnerContext): TicketRecord {
+  const input = entry.input
+  if (!isMedicineProject(project) || project.userId !== owner.userId || supplier.userId !== owner.userId || supplier.id !== project.supplierId) throw new Error('请选择当前账号已录入的药品商品套餐。')
+  if (typeof input.supplierName !== 'string' || normalizeSupplier(input.supplierName) !== normalizeSupplier(supplier.name) || typeof input.projectName !== 'string' || cleanProjectLabel(input.projectName) !== cleanProjectLabel(project.name) || typeof input.subItemName !== 'string' || cleanProjectLabel(input.subItemName) !== cleanProjectLabel(project.subItemName)) throw new Error('药品套餐或供货商已变化，请重新选择后保存。')
+  if (!isValidCalendarDate(input.issueDate)) throw new Error('请填写有效的出票日期。')
+  if ((input.guestName ?? '').trim().length > 100) throw new Error('客户姓名最多100个字符。')
+  if (!input.issueTime || !isValidIssueTime(input.issueTime)) throw new Error('请填写有效的曼谷时间（HH:mm）。')
+  if (input.personCount == null || !isValidPersonCount(input.personCount)) throw new Error('药品数量必须是大于或等于1的整数。')
+  const rules = resolveProjectRules(project)
+  validateProjectRules({ defaultAmountBasis: input.amountBasis ?? rules.defaultAmountBasis, settlementMode: rules.settlementMode })
+  if (project.manualAgentPrice && !Number.isFinite(input.agentPriceThb)) throw new Error('请填写每项药品的实际售价。')
+  validateAmountPrecision([input.agentPriceThb, input.costThb])
+  const timestamp = nextModifiedAt(project.updatedAt, supplier.updatedAt)
+  const ticket: TicketRecord = {
+    id: entry.operationId, userId: owner.userId, guestName: input.guestName?.trim() ?? '',
+    issueDate: input.issueDate, issueTime: input.issueTime, personCount: input.personCount,
+    supplierId: supplier.id, supplierName: supplier.name, projectId: project.id,
+    projectName: cleanProjectLabel(project.name), subItemName: cleanProjectLabel(project.subItemName),
+    quantityUnit: 'item', entryMode: 'standard', manualProfitThb: null,
+    amountBasis: input.amountBasis ?? rules.defaultAmountBasis, settlementMode: rules.settlementMode,
+    agentPriceThb: input.agentPriceThb, costThb: input.costThb, note: input.note.trim(),
+    createdAt: timestamp, updatedAt: timestamp, deletedAt: null, syncStatus: statusForWrite()
+  }
+  const totals = getTicketAmounts(ticket)
+  validateAmountPrecision([totals.agentPriceThb, totals.costThb, Math.abs(totals.profitThb)])
+  return ticket
+}
 
 type CloudSupplier = {
   id: string
@@ -22,6 +120,8 @@ type CloudSupplier = {
 }
 
 type CloudTicket = {
+  guest_name?: string
+  settlement_mode?: SettlementMode | null
   quantity_unit?: QuantityUnit
   amount_basis?: AmountBasis
   person_count?: number | null
@@ -45,12 +145,16 @@ type CloudTicket = {
 }
 
 type CloudProject = {
+  manual_supplier?: boolean | null
+  manual_cost_price?: boolean | null
+  default_amount_basis?: AmountBasis | null
+  settlement_mode?: SettlementMode | null
   manual_agent_price?: boolean
   quantity_unit?: QuantityUnit
   entry_mode?: EntryMode
   id: string
   user_id: string
-  supplier_id: string
+  supplier_id: string | null
   supplier_name: string
   name: string
   normalized_name: string
@@ -63,6 +167,18 @@ type CloudProject = {
 }
 
 type CloudRefund = { id: string; user_id: string; ticket_id: string; person_count: number | null; is_full: boolean; refund_revenue_thb: number | string; returned_cost_thb: number | string; refund_date: string; refund_time: string; note: string; cancelled_at: string | null; created_at: string; updated_at: string }
+type CloudShow79Settlement = {
+  id: string; user_id: string; month: string; snapshot_profit_thb: number | string;
+  snapshot_jimmy_thb: number | string; snapshot_partners_thb: number | string;
+  jimmy_paid_thb: number | string; partners_paid_thb: number | string;
+  payment_date: string; note: string; created_at: string; updated_at: string
+}
+const toLocalShow79Settlement = (row: CloudShow79Settlement): Show79SettlementRecord => ({
+  id: row.id, userId: row.user_id, month: row.month,
+  snapshotProfitThb: Number(row.snapshot_profit_thb), snapshotJimmyThb: Number(row.snapshot_jimmy_thb), snapshotPartnersThb: Number(row.snapshot_partners_thb),
+  jimmyPaidThb: Number(row.jimmy_paid_thb), partnersPaidThb: Number(row.partners_paid_thb), paymentDate: row.payment_date,
+  note: row.note, createdAt: row.created_at, updatedAt: row.updated_at, syncStatus: 'synced'
+})
 const toLocalRefund = (row: CloudRefund): RefundRecord => ({ id: row.id, userId: row.user_id, ticketId: row.ticket_id, personCount: row.person_count, isFull: row.is_full, refundRevenueThb: Number(row.refund_revenue_thb), returnedCostThb: Number(row.returned_cost_thb), refundDate: row.refund_date, refundTime: row.refund_time.slice(0, 5), note: row.note, cancelledAt: row.cancelled_at, createdAt: row.created_at, updatedAt: row.updated_at, syncStatus: 'synced' })
 const toCloudRefund = (row: RefundRecord) => ({ id: row.id, user_id: row.userId, ticket_id: row.ticketId, person_count: row.personCount, is_full: row.isFull, refund_revenue_thb: row.refundRevenueThb, returned_cost_thb: row.returnedCostThb, refund_date: row.refundDate, refund_time: row.refundTime, note: row.note, cancelled_at: row.cancelledAt, created_at: row.createdAt, updated_at: row.updatedAt })
 
@@ -95,12 +211,16 @@ const toCloudSupplier = (supplier: Supplier) => ({
 })
 
 const toLocalProject = (project: CloudProject): Project => ({
+  manualSupplier: project.manual_supplier ?? undefined,
+  manualCostPrice: project.manual_cost_price ?? undefined,
+  defaultAmountBasis: project.default_amount_basis ?? undefined,
+  settlementMode: project.settlement_mode ?? undefined,
   manualAgentPrice: project.manual_agent_price ?? false,
   quantityUnit: project.quantity_unit ?? 'person',
   entryMode: project.entry_mode ?? 'standard',
   id: project.id,
   userId: project.user_id,
-  supplierId: project.supplier_id,
+  supplierId: project.supplier_id ?? '',
   supplierName: project.supplier_name,
   name: project.name,
   normalizedName: project.normalized_name,
@@ -114,12 +234,16 @@ const toLocalProject = (project: CloudProject): Project => ({
 })
 
 const toCloudProject = (project: Project) => ({
+  manual_supplier: project.manualSupplier ?? null,
+  manual_cost_price: project.manualCostPrice ?? null,
+  default_amount_basis: project.defaultAmountBasis ?? null,
+  settlement_mode: project.settlementMode ?? null,
   manual_agent_price: project.manualAgentPrice ?? false,
   quantity_unit: project.quantityUnit ?? 'person',
   entry_mode: project.entryMode ?? 'standard',
   id: project.id,
   user_id: project.userId,
-  supplier_id: project.supplierId,
+  supplier_id: project.supplierId || null,
   supplier_name: project.supplierName,
   name: cleanProjectLabel(project.name),
   normalized_name: normalizeSupplier(cleanProjectLabel(project.name)),
@@ -132,6 +256,8 @@ const toCloudProject = (project: Project) => ({
 })
 
 const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
+  guestName: ticket.guest_name ?? '',
+  settlementMode: ticket.settlement_mode ?? undefined,
   quantityUnit: ticket.quantity_unit ?? 'person',
   amountBasis: ticket.amount_basis ?? 'total',
   personCount: ticket.person_count ?? null,
@@ -156,6 +282,8 @@ const toLocalTicket = (ticket: CloudTicket): TicketRecord => ({
 })
 
 const toCloudTicket = (ticket: TicketRecord) => ({
+  guest_name: ticket.guestName ?? '',
+  settlement_mode: ticket.settlementMode ?? null,
   quantity_unit: ticket.quantityUnit ?? 'person',
   amount_basis: ticket.amountBasis ?? 'total',
   person_count: ticket.personCount ?? null,
@@ -179,22 +307,21 @@ const toCloudTicket = (ticket: TicketRecord) => ({
 })
 
 const getSettings = async (): Promise<AppSettings> => {
-  const existing = await db.getSettings()
-  if (existing) return existing
-  const settings = { localUserId: createId(), lastCloudUserId: null }
-  await db.putSettings(settings)
-  return settings
+  return db.getOrCreateSettings()
 }
 
-type CloudTable = 'suppliers' | 'projects' | 'tickets' | 'ticket_refunds'
+type CloudTable = 'suppliers' | 'projects' | 'tickets' | 'ticket_refunds' | 'show79_settlements'
 
-async function fetchCloudRows<T>(client: SupabaseClient, table: CloudTable, userId: string, signal: AbortSignal): Promise<T[]> {
+async function fetchCloudRows<T>(client: SupabaseClient, table: CloudTable, userId: string, signal: AbortSignal, owner?: LedgerOwnerContext): Promise<T[]> {
   const rows: T[] = []
   const pageSize = 500
   for (let offset = 0; ; offset += pageSize) {
+    signal.throwIfAborted()
+    if (owner) assertCurrent(owner)
     const { data, error } = await client.from(table).select('*').eq('user_id', userId)
       .order('id').range(offset, offset + pageSize - 1).abortSignal(signal)
     if (error) throw new Error(error.message)
+    if (owner) assertCurrent(owner)
     const page = (data ?? []) as T[]
     rows.push(...page)
     if (page.length < pageSize) return rows
@@ -206,63 +333,193 @@ async function synchroniseTable<Local extends VersionedRecord, Cloud>(options: {
   table: CloudTable
   userId: string
   signal: AbortSignal
+  owner: LedgerOwnerContext
+  initialRemote?: Local[]
+  lockedTicketIds?: Set<string>
   getLocal: () => Promise<Local[]>
-  mergeRemote: (records: Local[]) => Promise<void>
+  mergeRemote: (records: Local[], owner?: LedgerOwnerContext, lockedTicketIds?: Set<string>, acknowledged?: Local[]) => Promise<void>
   toLocal: (record: Cloud) => Local
   toCloud: (record: Local) => object
 }) {
-  const { client, table, userId, signal, getLocal, mergeRemote, toLocal, toCloud } = options
-  const remote = (await fetchCloudRows<Cloud>(client, table, userId, signal)).map(toLocal)
-  await mergeRemote(remote)
+  const { client, table, userId, signal, owner, getLocal, mergeRemote, toLocal, toCloud } = options
+  const check = () => { signal.throwIfAborted(); assertCurrent(owner) }
+  check()
+  const remote = options.initialRemote ?? (await fetchCloudRows<Cloud>(client, table, userId, signal, owner)).map(toLocal)
+  await mergeRemote(remote, owner, options.lockedTicketIds)
   const remoteMap = new Map(remote.map((record) => [record.id, record]))
-  const pending = (await getLocal()).filter((record) => record.userId === userId && needsUpload(record, remoteMap.get(record.id)))
+  const pending = (await getLocal()).filter((record) => record.userId === userId && record.syncStatus !== 'error' && needsUpload(record, remoteMap.get(record.id)))
   // Equal versions are acknowledged locally without another database UPDATE.
   // This prevents our own realtime notifications from starting an upload loop.
   if (!pending.length) return
 
-  for (let offset = 0; offset < pending.length; offset += 100) {
-    const { error } = await client.from(table).upsert(pending.slice(offset, offset + 100).map(toCloud), { onConflict: 'id' }).abortSignal(signal)
-    if (error) throw Object.assign(new Error(error.message), { code: error.code })
+  const batches: Local[][] = []
+  const grouped = table === 'tickets' ? pending.filter(row => !remoteMap.has(row.id)) : pending
+  for (let offset = 0; offset < grouped.length; offset += 100) batches.push(grouped.slice(offset, offset + 100))
+  if (table === 'tickets') batches.push(...pending.filter(row => remoteMap.has(row.id)).map(row => [row]))
+  const uploadBatch = async (batch: Local[]) => {
+    check()
+    if (table !== 'tickets') return client.from(table).upsert(batch.map(toCloud), { onConflict: 'id' }).abortSignal(signal)
+    const previous = remoteMap.get(batch[0].id)
+    if (previous) {
+      // Compare against the cloud version we actually read. A faster phone
+      // clock must not overwrite a competing save made after that read.
+      return client.from('tickets').update(toCloud(batch[0])).eq('user_id', userId).eq('id', batch[0].id)
+        .eq('updated_at', previous.updatedAt).abortSignal(signal)
+    }
+    // New operation IDs are inserts; an existing UUID can never become an
+    // accidental update after a lost response or cold-cache retry.
+    return client.from('tickets').insert(batch.map(toCloud)).abortSignal(signal)
+  }
+  for (const batch of batches) {
+    check()
+    const { error } = await uploadBatch(batch)
+    check()
+    if (error) {
+      // A deterministic row rejection must not hold unrelated new orders hostage.
+      // Network/auth errors remain pending for an ordinary retry.
+      if (table !== 'tickets' || !/^(?:22|23|P0001)/.test(error.code ?? '')) throw Object.assign(new Error(error.message), { code: error.code })
+      for (const row of batch) {
+        check()
+        const result = batch.length === 1 ? { error } : await uploadBatch([row])
+        check()
+        if (!result.error) continue
+        if (!/^(?:22|23|P0001)/.test(result.error.code ?? '')) throw Object.assign(new Error(result.error.message), { code: result.error.code })
+        const { data, error: readError } = await client.from('tickets').select('*').eq('user_id', userId).eq('id', row.id).abortSignal(signal)
+        check()
+        if (readError) throw new Error(readError.message)
+        await db.quarantineTicket(row.id, data?.[0] ? toLocalTicket(data[0] as CloudTicket) : undefined, `此票未能上传：${result.error.message} 本机内容已保留为副本，其他订单继续同步。`, owner)
+      }
+      // Include a refund created after the first pull, which may be the reason
+      // the server rejected a formerly editable original ticket.
+      await db.mergeRemoteRefunds((await fetchCloudRows<CloudRefund>(client, 'ticket_refunds', userId, signal, owner)).map(toLocalRefund), owner)
+    }
   }
   // A newer write may have reached PostgreSQL after our first pull. The server
   // rejects stale updates; read its actual result instead of acknowledging the
   // originally submitted snapshot. Atomic local merging preserves edits made
   // while this request was in flight.
-  await mergeRemote((await fetchCloudRows<Cloud>(client, table, userId, signal)).map(toLocal))
-}
-
-async function activeUserId() {
-  const settings = await getSettings()
-  return settings.lastCloudUserId ?? settings.localUserId
+  await mergeRemote((await fetchCloudRows<Cloud>(client, table, userId, signal, owner)).map(toLocal), owner, undefined, pending)
 }
 
 export const ledgerRepository = {
+  activateAccount,
+  async getSyncConflicts(includeResolved = false) {
+    const owner = await ownerContext()
+    if (!owner) return []
+    const records = await db.getSyncConflicts()
+    assertCurrent(owner)
+    return records.filter(row => row.userId === owner.userId && (includeResolved || !row.resolvedAt)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  },
+  async resolveSyncConflict(id: string) {
+    const owner = (await ownerContext(true))!
+    await db.resolveSyncConflict(id, owner)
+  },
   async getCatalogueAliases() {
-    const userId = await activeUserId()
+    const owner = await ownerContext()
+    if (!owner) return { suppliers: [], projects: [] }
     const aliases = await db.getCatalogueAliases()
-    return { suppliers: aliases.suppliers.filter(row => row.userId === userId), projects: aliases.projects.filter(row => row.userId === userId) }
+    assertCurrent(owner)
+    return { suppliers: aliases.suppliers.filter(row => row.userId === owner.userId), projects: aliases.projects.filter(row => row.userId === owner.userId) }
   },
   async getSettings() {
     return getSettings()
   },
 
   async getTickets() {
-    const userId = await activeUserId()
-    return attachRefunds((await db.getTickets()).filter((ticket) => ticket.userId === userId), (await db.getRefunds()).filter((row) => row.userId === userId))
+    const owner = await ownerContext()
+    if (!owner) return []
+    const [tickets, refunds] = await Promise.all([db.getTickets(), db.getRefunds()])
+    assertCurrent(owner)
+    return attachRefunds(tickets.filter(ticket => ticket.userId === owner.userId), refunds.filter(row => row.userId === owner.userId))
   },
 
   async getRefunds() {
-    const userId = await activeUserId()
-    return (await db.getRefunds()).filter((row) => row.userId === userId)
+    const owner = await ownerContext()
+    if (!owner) return []
+    const rows = await db.getRefunds()
+    assertCurrent(owner)
+    return rows.filter(row => row.userId === owner.userId)
+  },
+
+  async getShow79Settlements() {
+    const owner = await ownerContext()
+    if (!owner) return []
+    const rows = await db.getShow79Settlements()
+    assertCurrent(owner)
+    return rows.filter(row => row.userId === owner.userId)
+  },
+
+  async createShow79Settlement(input: Show79SettlementInput): Promise<Show79SettlementRecord> {
+    validateShow79SettlementInput(input)
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
+    const client = getSupabase()
+    if (client && !navigator.onLine) throw new Error('分账登记需要联网确认，防止跨设备重复结算。')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const receipt = async () => {
+      assertCurrent(owner)
+      if (!client) return db.getShow79Settlement(input.operationId)
+      const { data, error } = await client.from('show79_settlements').select('*').eq('user_id', userId).eq('id', input.operationId).abortSignal(controller.signal)
+      if (error) throw new Error(error.message)
+      return data?.[0] ? toLocalShow79Settlement(data[0] as CloudShow79Settlement) : undefined
+    }
+    const sameRequest = (row: Show79SettlementRecord) => row.userId === userId && row.month === input.month && row.paymentDate === input.paymentDate && row.jimmyPaidThb === input.jimmyPaidThb && row.partnersPaidThb === input.partnersPaidThb && row.note === input.note.trim()
+    const confirm = async (row: Show79SettlementRecord) => {
+      if (!sameRequest(row)) throw new Error('分账提交编号已使用，请核对内容后重新登记。')
+      assertCurrent(owner)
+      await db.putConfirmedShow79Settlement(row, owner)
+      return row
+    }
+    try {
+      const existing = await receipt()
+      if (existing) return confirm(existing)
+      const tickets = await this.getTickets()
+      const history = await this.getShow79Settlements()
+      const state = buildShow79SettlementState(tickets, history, input.month)
+      if (!client) {
+        const timestamp = now()
+        const record: Show79SettlementRecord = { id: input.operationId, userId, month: input.month, paymentDate: input.paymentDate,
+          jimmyPaidThb: input.jimmyPaidThb, partnersPaidThb: input.partnersPaidThb, note: input.note.trim(),
+          snapshotProfitThb: state.profitThb, snapshotJimmyThb: state.jimmyThb, snapshotPartnersThb: state.partnersThb,
+          createdAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' }
+        const accepted = await db.addLocalShow79Settlement(record, input, owner)
+        if (!sameRequest(accepted)) throw new Error('分账提交编号已使用，请重新登记。')
+        return accepted
+      }
+      if (tickets.some(ticket => isShow79Project(ticket.projectName) && ticket.issueDate.startsWith(`${input.month}-`) && (ticket.syncStatus !== 'synced' || ticket.refunds?.some(refund => refund.syncStatus !== 'synced')))) throw new Error('本月79秀订单尚未同步，请先同步再登记分账。')
+      let data: unknown
+      let error: { message: string; code?: string } | null = null
+      try {
+        assertCurrent(owner)
+        const result = await client.rpc('record_show79_settlement', {
+          p_expected_user_id: owner.userId,
+          p_operation_id: input.operationId, p_month: input.month, p_payment_date: input.paymentDate,
+          p_jimmy_paid_thb: input.jimmyPaidThb, p_partners_paid_thb: input.partnersPaidThb, p_note: input.note.trim(),
+          p_expected_profit_thb: input.expectedProfitThb, p_expected_jimmy_paid_thb: input.expectedJimmyPaidThb, p_expected_partners_paid_thb: input.expectedPartnersPaidThb
+        }).abortSignal(controller.signal)
+        data = result.data; error = result.error
+      } catch (failure) {
+        const accepted = await receipt().catch(() => undefined)
+        if (accepted) return confirm(accepted)
+        throw failure
+      }
+      const raw = Array.isArray(data) ? data[0] : data
+      const accepted = raw ? toLocalShow79Settlement(raw as CloudShow79Settlement) : await receipt()
+      if (!accepted) throw Object.assign(new Error(error?.message ?? '分账尚未确认，请联网后重试；相同提交不会重复登记。'), { code: error?.code })
+      return confirm(accepted)
+    } finally { clearTimeout(timeout) }
   },
 
   async createRefund(input: RefundInput): Promise<RefundRecord> {
-    const userId = await activeUserId()
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
     const client = getSupabase()
     if (client && !navigator.onLine) throw new Error('退票需要联网确认，防止跨设备重复退票。')
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
     const receipt = async () => {
+      assertCurrent(owner)
       if (!client) return db.getRefund(input.operationId)
       const { data, error } = await client.from('ticket_refunds').select('*').eq('user_id', userId).eq('id', input.operationId).abortSignal(controller.signal)
       if (error) throw new Error(error.message)
@@ -272,8 +529,8 @@ export const ledgerRepository = {
     try {
       const existing = await receipt()
       if (existing) {
-        if (!sameRequest(existing) || existing.cancelledAt) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
-        await db.putRefund(existing)
+        if (!sameRequest(existing)) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
+        await db.putRefund(existing, owner)
         return existing
       }
       const ticket = (await this.getTickets()).find((row) => row.id === input.ticketId)
@@ -283,20 +540,22 @@ export const ledgerRepository = {
       const timestamp = now()
       const row: RefundRecord = { ...quantity, id: input.operationId, userId, ticketId: input.ticketId, refundRevenueThb: input.refundRevenueThb, returnedCostThb: input.returnedCostThb, refundDate: input.refundDate, refundTime: input.refundTime, note: input.note.trim(), cancelledAt: null, createdAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' }
       if (!client) {
-        const accepted = await db.addLocalRefund(row)
+        const accepted = await db.addLocalRefund(row, owner)
         if (!sameRequest(accepted)) throw new Error('退票提交编号已使用，请重新打开退票窗口。')
         return accepted
       }
+      assertCurrent(owner)
       const { error } = await client.from('ticket_refunds').insert(toCloudRefund(row)).abortSignal(controller.signal)
       const accepted = await receipt()
       if (!accepted || !sameRequest(accepted)) throw new Error(error?.message ?? '退票尚未确认，请联网后重试；相同提交不会重复登记。')
-      await db.putRefund(accepted)
+      await db.putRefund(accepted, owner)
       return accepted
     } finally { clearTimeout(timeout) }
   },
 
   async cancelRefund(id: string): Promise<void> {
-    const userId = await activeUserId()
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
     const client = getSupabase()
     if (client && !navigator.onLine) throw new Error('撤销退票需要联网确认。')
     const controller = new AbortController()
@@ -309,37 +568,42 @@ export const ledgerRepository = {
         current = data?.[0] ? toLocalRefund(data[0] as CloudRefund) : undefined
       }
       if (!current || current.userId !== userId) throw new Error('当前账号无法撤销此退票。')
-      if (current.cancelledAt) { await db.putRefund(current); return }
+      if (current.cancelledAt) { await db.putRefund(current, owner); return }
       const timestamp = nextModifiedAt(current.updatedAt)
       const updated = { ...current, cancelledAt: timestamp, updatedAt: timestamp, syncStatus: 'synced' as const }
       if (client) {
+        assertCurrent(owner)
         const { error } = await client.from('ticket_refunds').update({ cancelled_at: timestamp, updated_at: timestamp }).eq('user_id', userId).eq('id', id).abortSignal(controller.signal)
         if (error) throw new Error(error.message)
         const { data, error: readError } = await client.from('ticket_refunds').select('*').eq('user_id', userId).eq('id', id).abortSignal(controller.signal)
         if (readError || !data?.[0]?.cancelled_at) throw new Error(readError?.message ?? '撤销尚未确认，请刷新后核对。')
-        await db.putRefund(toLocalRefund(data[0] as CloudRefund))
-      } else await db.putRefund(updated)
+        await db.putRefund(toLocalRefund(data[0] as CloudRefund), owner)
+      } else await db.putRefund(updated, owner)
     } finally { clearTimeout(timeout) }
   },
 
   async getSuppliers() {
+    const owner = await ownerContext()
+    if (!owner) return []
     const suppliers = await db.getSuppliers()
-    const userId = await activeUserId()
-    return suppliers.filter((supplier) => supplier.userId === userId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+    assertCurrent(owner)
+    return suppliers.filter((supplier) => supplier.userId === owner.userId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   },
 
   async getProjects() {
+    const owner = await ownerContext()
+    if (!owner) return []
     const projects = await db.getProjects()
-    const userId = await activeUserId()
-    return projects.filter((project) => project.userId === userId).map(projectDisplay).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
+    assertCurrent(owner)
+    return projects.filter((project) => project.userId === owner.userId).map(projectDisplay).sort((a, b) => a.supplierName.localeCompare(b.supplierName, 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'))
   },
 
   async createSupplier(name: string): Promise<Supplier> {
     const trimmedName = name.trim()
     const normalizedName = normalizeSupplier(trimmedName)
     if (!trimmedName) throw new Error('请输入供货商名称。')
-    const settings = await getSettings()
-    const userId = settings.lastCloudUserId ?? settings.localUserId
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
     const suppliers = await db.getSuppliers()
     const existing = suppliers.find((supplier) => supplier.userId === userId && supplier.normalizedName === normalizedName)
     if (existing) throw new Error('该供货商已经在名单中。')
@@ -353,86 +617,111 @@ export const ledgerRepository = {
       updatedAt: timestamp,
       syncStatus: statusForWrite()
     }
-    await db.putSupplier(supplier)
+    await db.putSupplier(supplier, owner)
     return supplier
   },
 
   async createProject(input: ProjectInput): Promise<Project> {
+    validateProjectRules(input)
     const name = cleanProjectLabel(input.name.trim())
     const subItemName = cleanProjectLabel(input.subItemName.trim())
     if (!name) throw new Error('请输入项目名称。')
     if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
-    if (input.entryMode !== 'profit_only' && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
+    if (input.entryMode !== 'profit_only' && (!input.manualCostPrice && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0) || !input.manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
-    const settings = await getSettings()
-    const userId = settings.lastCloudUserId ?? settings.localUserId
+    if (input.entryMode !== 'profit_only') validateAmountPrecision([...(input.manualCostPrice ? [] : [input.defaultCostThb]), ...(input.manualAgentPrice ? [] : [input.defaultAgentPriceThb])])
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
     const suppliers = await db.getSuppliers()
     const supplier = suppliers.find((item) => item.id === input.supplierId && item.userId === userId)
-    if (!supplier) throw new Error('请先选择已录入的供货商。')
+    if (!supplier && !input.manualSupplier) throw new Error('请先选择已录入的供货商。')
     const normalizedName = normalizeSupplier(name)
     const normalizedSubItemName = normalizeSupplier(subItemName)
     const projects = await db.getProjects()
-    if (projects.some((project) => project.supplierId === supplier.id && normalizeSupplier(cleanProjectLabel(project.name)) === normalizedName && normalizeSupplier(cleanProjectLabel(project.subItemName)) === normalizedSubItemName && project.userId === userId)) {
+    const supplierId = input.manualSupplier ? '' : supplier!.id
+    if (projects.some((project) => project.supplierId === supplierId && normalizeSupplier(cleanProjectLabel(project.name)) === normalizedName && normalizeSupplier(cleanProjectLabel(project.subItemName)) === normalizedSubItemName && project.userId === userId)) {
       throw new Error('该供货商的这个项目子项已存在。')
     }
     const timestamp = now()
     const project: Project = {
+      ...resolveProjectRules({ ...input, name, subItemName }),
       quantityUnit: input.quantityUnit ?? 'person',
       manualAgentPrice: input.entryMode !== 'profit_only' && Boolean(input.manualAgentPrice),
+      manualCostPrice: input.entryMode !== 'profit_only' && Boolean(input.manualCostPrice),
+      manualSupplier: Boolean(input.manualSupplier),
       entryMode: input.entryMode ?? 'standard',
       id: createId(),
       userId,
-      supplierId: supplier.id,
-      supplierName: supplier.name,
+      supplierId,
+      supplierName: input.manualSupplier ? '' : supplier!.name,
       name,
       normalizedName,
       subItemName,
       normalizedSubItemName,
-      defaultCostThb: input.entryMode === 'profit_only' ? 0 : input.defaultCostThb,
+      defaultCostThb: input.entryMode === 'profit_only' || input.manualCostPrice ? 0 : input.defaultCostThb,
       defaultAgentPriceThb: input.entryMode === 'profit_only' || input.manualAgentPrice ? 0 : input.defaultAgentPriceThb,
       createdAt: timestamp,
       updatedAt: timestamp,
       syncStatus: statusForWrite()
     }
-    await db.putProject(project)
+    await db.putProject(project, owner)
     return project
   },
 
   async updateProjectPrices(id: string, input: ProjectPricesInput): Promise<Project> {
-    const userId = await activeUserId()
+    validateProjectRules(input)
+    const owner = (await ownerContext(true))!
+    const userId = owner.userId
     const current = (await db.getProjects()).find((project) => project.id === id && project.userId === userId)
     if (!current) throw new Error('当前账号无法修改这个项目价格。')
-    if (current.entryMode === 'profit_only') throw new Error('仅录利润项目没有默认售价和成本，请在记录中填写利润。')
+    if (input.quantityUnit && !['person', 'item'].includes(input.quantityUnit)) throw new Error('请选择有效的数量单位。')
     const manualAgentPrice = input.manualAgentPrice ?? current.manualAgentPrice ?? false
-    if (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0 || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0)) {
+    const manualCostPrice = input.manualCostPrice ?? current.manualCostPrice ?? false
+    if (current.entryMode !== 'profit_only' && (!manualCostPrice && (!Number.isFinite(input.defaultCostThb) || input.defaultCostThb < 0) || !manualAgentPrice && (!Number.isFinite(input.defaultAgentPriceThb) || input.defaultAgentPriceThb < 0))) {
       throw new Error('成本和代理售价必须是大于或等于 0 的金额。')
     }
+    if (current.entryMode !== 'profit_only') validateAmountPrecision([...(manualCostPrice ? [] : [input.defaultCostThb]), ...(manualAgentPrice ? [] : [input.defaultAgentPriceThb])])
     const updated: Project = {
       ...projectDisplay(current),
-      defaultCostThb: input.defaultCostThb,
-      defaultAgentPriceThb: manualAgentPrice ? 0 : input.defaultAgentPriceThb,
-      manualAgentPrice,
+      ...resolveProjectRules({ ...current, quantityUnit: input.quantityUnit ?? current.quantityUnit, defaultAmountBasis: input.defaultAmountBasis ?? current.defaultAmountBasis, settlementMode: input.settlementMode ?? current.settlementMode }),
+      quantityUnit: current.entryMode === 'profit_only' ? current.quantityUnit ?? 'person' : input.quantityUnit ?? current.quantityUnit ?? 'person',
+      defaultCostThb: current.entryMode === 'profit_only' || manualCostPrice ? 0 : input.defaultCostThb,
+      defaultAgentPriceThb: current.entryMode === 'profit_only' || manualAgentPrice ? 0 : input.defaultAgentPriceThb,
+      manualAgentPrice: current.entryMode !== 'profit_only' && manualAgentPrice,
+      manualCostPrice: current.entryMode !== 'profit_only' && manualCostPrice,
       updatedAt: nextModifiedAt(current.updatedAt),
       syncStatus: statusForWrite()
     }
-    await db.putProject(updated)
+    await db.putProject(updated, owner)
     return updated
   },
 
-  async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord): Promise<TicketRecord> {
+  async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> {
+    const owner = (await ownerContext(true))!
+    const fingerprint = !existing && operationId ? ticketCreateFingerprint(input) : undefined
+    if (fingerprint && operationId) {
+      const accepted = await db.getTicketCreateOperation(operationId, owner)
+      if (accepted) {
+        if (accepted.receipt.fingerprint !== fingerprint) throw new Error('这次提交已经保存过不同内容，请重新打开新增记录。')
+        assertCurrent(owner)
+        return ticketWithCurrentRefunds(accepted.ticket, owner)
+      }
+    }
+    if (!isValidCalendarDate(input.issueDate)) throw new Error('请填写有效的日期。')
+    if ((input.guestName ?? '').trim().length > 100) throw new Error('客户姓名最多100个字符。')
+    validateProjectRules({ settlementMode: input.settlementMode })
     if ((!existing && !input.issueTime) || (input.issueTime && !isValidIssueTime(input.issueTime))) throw new Error('请填写有效的曼谷时间（HH:mm）。')
-    const amountBasis = input.amountBasis ?? (existing ? existing.amountBasis ?? 'total' : 'per_person')
-    if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
-    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error(`按${quantityLabels(input).label}计算时，${quantityLabels(input).label}必须是大于或等于1的整数。`)
     if (input.personCount == null ? !existing || existing.personCount != null : !isValidPersonCount(input.personCount)) {
       throw new Error(`${quantityLabels(input).label}必须是大于或等于1的整数。`)
     }
-    const settings = await getSettings()
-    const userId = settings.lastCloudUserId ?? settings.localUserId
+    const userId = owner.userId
     const normalizedName = normalizeSupplier(input.supplierName)
     const suppliers = await db.getSuppliers()
     const supplier = suppliers.find((item) => item.userId === userId && item.normalizedName === normalizedName)
+    const projects = await db.getProjects()
+    const selectedProject = projects.find(item => item.id === input.projectId && item.userId === userId)
+    if (selectedProject?.manualSupplier && !supplier) throw new Error('请选择当前账号已录入的供货商。')
     const currentTicket = existing ? await db.getTicket(existing.id) : undefined
     if (existing && (currentTicket ?? existing).userId !== userId) throw new Error('当前账号无法编辑这条记录，请重新打开记录。')
     if (existing && (await db.getRefunds()).some((row) => row.ticketId === existing.id && row.userId === userId)) throw new Error('已有退票明细的原票不可编辑，请保留完整记录。')
@@ -448,14 +737,16 @@ export const ledgerRepository = {
     }
 
     if (supplier && supplier.name !== input.supplierName.trim()) {
-      await db.putSupplier({ ...supplier, name: input.supplierName.trim(), updatedAt: changedAt, syncStatus: statusForWrite() })
+      await db.putSupplier({ ...supplier, name: input.supplierName.trim(), updatedAt: changedAt, syncStatus: statusForWrite() }, owner)
     } else if (!supplier) {
-      await db.putSupplier(nextSupplier)
+      await db.putSupplier(nextSupplier, owner)
     }
-    const projects = await db.getProjects()
-    const project = projects.find((item) => item.id === input.projectId && item.supplierId === nextSupplier.id && item.userId === userId)
+    const project = selectedProject && (selectedProject.manualSupplier || selectedProject.supplierId === nextSupplier.id) ? selectedProject : undefined
     if (!project || cleanProjectLabel(project.name) !== cleanProjectLabel(input.projectName) || cleanProjectLabel(project.subItemName) !== cleanProjectLabel(input.subItemName)) throw new Error('请选择该供货商已录入的项目子项。')
-    const entryMode = project.entryMode ?? 'standard'
+    const amountBasis = input.amountBasis ?? (existing?.projectId === project.id ? existing.amountBasis ?? 'total' : resolveProjectRules(project).defaultAmountBasis)
+    if (!['total', 'per_person'].includes(amountBasis)) throw new Error('请选择有效的计价方式。')
+    if (amountBasis === 'per_person' && (input.personCount == null || !isValidPersonCount(input.personCount))) throw new Error(`按${quantityLabels(input).label}计算时，${quantityLabels(input).label}必须是大于或等于1的整数。`)
+    const entryMode = existing?.projectId === project.id ? existing.entryMode ?? 'standard' : project.entryMode ?? 'standard'
     if (entryMode === 'profit_only') {
       if (typeof input.manualProfitThb !== 'number' || !Number.isFinite(input.manualProfitThb) || input.manualProfitThb < 0) throw new Error('请填写大于或等于0的利润金额。')
     } else if (!Number.isFinite(input.agentPriceThb) || !Number.isFinite(input.costThb) || input.agentPriceThb < 0 || input.costThb < 0) {
@@ -463,13 +754,15 @@ export const ledgerRepository = {
     }
 
     const ticket: TicketRecord = {
-      quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? project.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
+      guestName: input.guestName?.trim() ?? currentTicket?.guestName ?? existing?.guestName ?? '',
+      settlementMode: existing?.projectId === project.id ? (currentTicket ?? existing).settlementMode : entryMode === 'profit_only' ? 'monthly' : input.settlementMode ?? resolveProjectRules(project).settlementMode,
+      quantityUnit: existing?.projectId === project.id ? existing.quantityUnit ?? 'person' : project.quantityUnit ?? 'person',
       amountBasis,
       personCount: input.personCount ?? null,
       entryMode,
       issueTime: input.issueTime || null,
       manualProfitThb: entryMode === 'profit_only' ? input.manualProfitThb : null,
-      id: existing?.id ?? createId(),
+      id: existing?.id ?? operationId ?? createId(),
       userId,
       issueDate: input.issueDate,
       supplierId: nextSupplier.id,
@@ -488,13 +781,37 @@ export const ledgerRepository = {
     validateAmountPrecision(entryMode === 'profit_only' ? [ticket.manualProfitThb!] : [ticket.agentPriceThb, ticket.costThb])
     const totals = getTicketAmounts(ticket)
     validateAmountPrecision([totals.agentPriceThb, totals.costThb, Math.abs(totals.profitThb)])
-    await db.putTicket(ticket)
-    return ticket
+    if (fingerprint) return ticketWithCurrentRefunds(await db.putNewTicketOnce(ticket, fingerprint, owner), owner)
+    await db.putTicket(ticket, owner)
+    return ticketWithCurrentRefunds(ticket, owner)
+  },
+
+  async createMedicineTickets(entries: MedicineTicketEntry[]): Promise<TicketRecord[]> {
+    const owner = (await ownerContext(true))!
+    validateMedicineBatchShape(entries)
+    const fingerprints = entries.map(entry => ticketCreateFingerprint(entry.input))
+    const receipts = await Promise.all(entries.map(entry => db.getTicketCreateOperation(entry.operationId, owner)))
+    assertCurrent(owner)
+    for (let index = 0; index < entries.length; index++) if (receipts[index] && receipts[index]!.receipt.fingerprint !== fingerprints[index]) throw new Error('这批药品中有提交编号已保存过不同内容，请重新打开新增记录。')
+    if (receipts.every(Boolean)) return ticketsWithCurrentRefunds(receipts.map(receipt => receipt!.ticket), owner)
+
+    const [projects, suppliers] = await Promise.all([db.getProjects(), db.getSuppliers()])
+    assertCurrent(owner)
+    const prepared = entries.map((entry, index) => {
+      const accepted = receipts[index]
+      if (accepted) return { ticket: accepted.ticket, fingerprint: fingerprints[index] }
+      const project = projects.find(row => row.id === entry.input.projectId && row.userId === owner.userId)
+      const supplier = project && suppliers.find(row => row.id === project.supplierId && row.userId === owner.userId)
+      if (!project || !supplier) throw new Error('请选择当前账号已录入的药品商品套餐。')
+      return { ticket: stageMedicineTicket(entry, project, supplier, owner), fingerprint: fingerprints[index], projectUpdatedAt: project.updatedAt, supplierUpdatedAt: supplier.updatedAt }
+    })
+    return ticketsWithCurrentRefunds(await db.putMedicineTicketsOnce(prepared, owner), owner)
   },
 
   async deleteTicket(ticket: TicketRecord): Promise<TicketRecord> {
+    const owner = (await ownerContext(true))!
     const currentTicket = await db.getTicket(ticket.id)
-    if ((currentTicket ?? ticket).userId !== await activeUserId()) throw new Error('当前账号无法删除这条记录。')
+    if ((currentTicket ?? ticket).userId !== owner.userId) throw new Error('当前账号无法删除这条记录。')
     if ((await db.getRefunds()).some((row) => row.ticketId === ticket.id && row.userId === ticket.userId)) throw new Error('已有退票明细的原票不可删除，请保留完整记录。')
     const deletedAt = nextModifiedAt(ticket.updatedAt, currentTicket?.updatedAt)
     const deleted = {
@@ -503,13 +820,15 @@ export const ledgerRepository = {
       updatedAt: deletedAt,
       syncStatus: statusForWrite()
     }
-    await db.putTicket(deleted)
+    await db.putTicket(deleted, owner)
     return deleted
   },
 
   async synchronise(user: User, externalSignal?: AbortSignal): Promise<SyncResult> {
     const client = getSupabase()
     if (!client) return { synced: false, message: '尚未配置云端同步' }
+    const owner = await ownerContext()
+    if (!owner || owner.userId !== user.id) return { synced: false, message: '账号正在切换，请重新打开当前账号账本。' }
     if (!navigator.onLine) return { synced: false, message: '当前离线，记录会保存在本机并在联网后同步' }
 
     const controller = new AbortController()
@@ -520,18 +839,23 @@ export const ledgerRepository = {
     if (externalSignal?.aborted) controller.abort()
     try {
       controller.signal.throwIfAborted()
-      const settings = await getSettings()
-      if (settings.lastCloudUserId !== user.id) {
-        // Only anonymous records are adopted; another logged-in account's
-        // cached data stays owned by that account and is never reassigned.
-        await db.adoptLocalRecords(settings.localUserId, user.id, now(), settings)
-      }
-      const common = { client, userId: user.id, signal: controller.signal }
+      assertCurrent(owner)
+      const common = { client, userId: user.id, signal: controller.signal, owner }
+      // Read refund locks before uploading any original ticket. A disconnected
+      // device may otherwise keep attempting an edit that the server forbids.
+      const [remoteRefunds, remoteTickets] = await Promise.all([
+        fetchCloudRows<CloudRefund>(client, 'ticket_refunds', user.id, controller.signal, owner),
+        fetchCloudRows<CloudTicket>(client, 'tickets', user.id, controller.signal, owner)
+      ])
+      await db.mergeRemoteRefunds(remoteRefunds.map(toLocalRefund), owner)
+      const lockedTicketIds = new Set(remoteRefunds.map(refund => refund.ticket_id))
+      await db.mergeRemoteTickets(remoteTickets.map(toLocalTicket), owner, lockedTicketIds)
       for (let attempt = 0; ; attempt++) {
-        const suppliers = (await fetchCloudRows<CloudSupplier>(client, 'suppliers', user.id, controller.signal)).map(toLocalSupplier)
-        const projects = (await fetchCloudRows<CloudProject>(client, 'projects', user.id, controller.signal)).map(toLocalProject)
+        const suppliers = (await fetchCloudRows<CloudSupplier>(client, 'suppliers', user.id, controller.signal, owner)).map(toLocalSupplier)
+        const projects = (await fetchCloudRows<CloudProject>(client, 'projects', user.id, controller.signal, owner)).map(toLocalProject)
         controller.signal.throwIfAborted()
-        await db.reconcileCatalogue(user.id, suppliers, projects)
+        assertCurrent(owner)
+        await db.reconcileCatalogue(user.id, suppliers, projects, owner)
         try {
           await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier })
           await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject })
@@ -542,8 +866,9 @@ export const ledgerRepository = {
           if (attempt || (error as { code?: string }).code !== '23505') throw error
         }
       }
-      await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket })
+      await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket, initialRemote: remoteTickets.map(toLocalTicket), lockedTicketIds })
       await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund })
+      await db.mergeRemoteShow79Settlements((await fetchCloudRows<CloudShow79Settlement>(client, 'show79_settlements', user.id, controller.signal, owner)).map(toLocalShow79Settlement), owner)
       return { synced: true }
     } catch (error) {
       if (externalSignal?.aborted) throw error

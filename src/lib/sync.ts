@@ -22,12 +22,24 @@ export const nextModifiedAt = (...previousVersions: (string | undefined)[]) =>
 export const needsUpload = <T extends VersionedRecord>(local: T, remote?: T) =>
   !remote || isNewer(local.updatedAt, remote.updatedAt)
 
+// Older caches/clients have no rule fields. A newer price/note edit must not
+// erase explicit settings that were already synchronized by another device.
+export const preserveRuleFields = <T>(preferred: T, fallback: T): T => {
+  let result = preferred as T & Record<string, unknown>
+  const other = fallback as T & Record<string, unknown>
+  for (const key of ['defaultAmountBasis', 'settlementMode', 'manualCostPrice', 'manualSupplier']) {
+    if (result[key] == null && other[key] != null) result = { ...result, [key]: other[key] }
+  }
+  return result
+}
+
 // Called inside an IndexedDB read/write transaction. A newer edit made while a
 // network request was in flight must not be replaced or marked as synchronized.
 export const mergeRemoteRecord = <T extends VersionedRecord>(current: T | undefined, remote: T): T => {
   if (!current) return { ...remote, syncStatus: 'synced' }
-  if (current.userId !== remote.userId || isNewer(current.updatedAt, remote.updatedAt)) return current
-  return { ...remote, syncStatus: 'synced' }
+  if (current.userId !== remote.userId) return current
+  if (isNewer(current.updatedAt, remote.updatedAt)) return preserveRuleFields(current, remote)
+  return { ...preserveRuleFields(remote, current), syncStatus: 'synced' }
 }
 
 export interface SyncQueue {

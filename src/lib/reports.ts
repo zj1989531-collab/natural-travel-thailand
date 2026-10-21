@@ -1,9 +1,13 @@
 import type { TicketRecord } from '../types'
-import { activeTickets, bySupplier, isMonthlySettlementProject, monthDateRange, summarise } from './stats'
+import { activeTickets, bySupplier, monthDateRange, summarise } from './stats'
+import { ticketSettlementMode } from './project-rules'
 import { getEffectivePersonCount, getRefundState } from './refunds'
 import { isItemQuantity } from './quantity'
 import { cleanProjectLabel, ticketDisplay } from './project-labels'
 import { summariseQuantities } from './effective-quantities'
+import { mainLedgerTickets } from './show79'
+import { getBangkokDate, isValidCalendarDate } from './format'
+import { buildReportCounts } from './report-counts'
 
 export type ReportMode = 'day' | 'month' | 'range' | 'all'
 export interface ReportQuery {
@@ -14,6 +18,19 @@ export interface ReportQuery {
   endDate: string
   supplierId: string
   projectName?: string
+  guestName?: string
+}
+
+export type ReportShortcut = 'today' | 'this-month' | 'last-month'
+export const reportShortcutQuery = (query: ReportQuery, shortcut: ReportShortcut, today = getBangkokDate()): ReportQuery => {
+  if (!isValidCalendarDate(today)) throw new Error('当前日期无效，请重新选择报表日期。')
+  const currentMonth = today.slice(0, 7)
+  if (shortcut === 'today') return { ...query, mode: 'day', date: today, month: currentMonth, startDate: today, endDate: today }
+  const previous = new Date(`${currentMonth}-01T00:00:00Z`)
+  previous.setUTCMonth(previous.getUTCMonth() - 1)
+  const month = shortcut === 'last-month' ? previous.toISOString().slice(0, 7) : currentMonth
+  const range = monthDateRange(month)
+  return { ...query, mode: 'month', month, date: shortcut === 'last-month' ? range.start : today, startDate: range.start, endDate: range.end }
 }
 
 const isCalendarDate = (value: string) => {
@@ -23,7 +40,9 @@ const isCalendarDate = (value: string) => {
 }
 
 export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
-  const active = activeTickets(tickets).filter((ticket) => isCalendarDate(ticket.issueDate))
+  const guestName = (query.guestName ?? '').trim()
+  const guestSearch = guestName.normalize('NFKC').toLocaleLowerCase()
+  const active = activeTickets(mainLedgerTickets(tickets)).filter((ticket) => isCalendarDate(ticket.issueDate))
   const allDates = active.map((ticket) => ticket.issueDate).sort()
   const range = query.mode === 'all' ? { start: allDates[0] ?? query.date, end: allDates.at(-1) ?? query.date }
     : query.mode === 'month' ? monthDateRange(query.month)
@@ -35,10 +54,11 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
   const selected = active.filter((ticket) =>
     isCalendarDate(ticket.issueDate) && ticket.issueDate >= range.start && ticket.issueDate <= range.end &&
     (!query.supplierId || ticket.supplierId === query.supplierId) &&
+    (!guestSearch || (ticket.guestName ?? '').normalize('NFKC').toLocaleLowerCase().includes(guestSearch)) &&
     (!query.projectName || cleanProjectLabel(ticket.projectName || '未分类项目') === cleanProjectLabel(query.projectName)))
     .map(ticketDisplay)
     .sort((a, b) => a.issueDate.localeCompare(b.issueDate) || (a.issueTime ?? '').localeCompare(b.issueTime ?? '') || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
-  const monthlyRecords = selected.filter((ticket) => ticket.entryMode === 'profit_only' || isMonthlySettlementProject(ticket.projectName))
+  const monthlyRecords = selected.filter((ticket) => ticketSettlementMode(ticket) === 'monthly')
   const monthlyIds = new Set(monthlyRecords.map((ticket) => ticket.id))
   const records = query.mode === 'day' ? selected.filter((ticket) => !monthlyIds.has(ticket.id)) : selected
   const headcountRecords = records.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && !isItemQuantity(ticket))
@@ -77,6 +97,7 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     ...range,
     supplierId: query.supplierId,
     projectName: cleanProjectLabel(query.projectName ?? ''),
+    guestName,
     effectiveQuantity: summariseQuantities(selected),
     itemQuantity: { recordCount: itemRecords.length, quantityCount: itemQuantityDays.reduce((sum, day) => sum + day.quantityCount, 0), unknownCount: itemQuantityDays.reduce((sum, day) => sum + day.unknownCount, 0), days: itemQuantityDays },
     quantity: {
@@ -87,9 +108,11 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     },
     records,
     monthlyRecords,
+    counts: buildReportCounts(records),
+    monthlyCounts: buildReportCounts(monthlyRecords),
     summary: roundSummary(records),
     monthlySummary: roundSummary(monthlyRecords),
-    supplierStats: bySupplier(records),
+    supplierStats: bySupplier(records).map((supplier) => ({ ...supplier, ...buildReportCounts(records.filter((ticket) => ticket.supplierId === supplier.supplierId)) })),
     recordedPeople: knownHeadcounts.reduce((total, ticket) => total + getEffectivePersonCount(ticket)!, 0),
     unknownHeadcounts: headcountRecords.length - knownHeadcounts.length
   }

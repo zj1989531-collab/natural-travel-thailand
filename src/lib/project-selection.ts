@@ -1,5 +1,6 @@
 import type { Project, TicketInput } from '../types'
 import { cleanProjectLabel, projectDisplay } from './project-labels'
+import { resolveProjectRules } from './project-rules'
 
 export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) => {
   projects = projects.map((project) => ({ ...project, name: cleanProjectLabel(project.name) }))
@@ -16,14 +17,15 @@ export const projectNames = (projects: Pick<Project, 'name' | 'entryMode'>[]) =>
 const clearSelection = (form: TicketInput, projectName: string, quantityUnit: Project['quantityUnit'] = 'person'): TicketInput => ({
   ...form, quantityUnit, projectName, projectId: '', supplierName: '', subItemName: '',
   agentPriceThb: Number.NaN, costThb: Number.NaN,
-  entryMode: 'standard', manualProfitThb: null
+  entryMode: 'standard', manualProfitThb: null, settlementMode: null
 })
 
 const applyProject = (form: TicketInput, project: Project): TicketInput => ({
-  ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.supplierName,
+  ...form, quantityUnit: project.quantityUnit ?? 'person', projectId: project.id, projectName: project.name, supplierName: project.manualSupplier ? '' : project.supplierName,
+  amountBasis: resolveProjectRules(project).defaultAmountBasis, settlementMode: resolveProjectRules(project).settlementMode,
   subItemName: project.subItemName, entryMode: project.entryMode ?? 'standard', manualProfitThb: null,
   agentPriceThb: project.entryMode === 'profit_only' ? 0 : project.manualAgentPrice ? Number.NaN : project.defaultAgentPriceThb,
-  costThb: project.entryMode === 'profit_only' ? 0 : project.defaultCostThb
+  costThb: project.entryMode === 'profit_only' ? 0 : project.manualCostPrice ? Number.NaN : project.defaultCostThb
 })
 
 export const chooseProject = (form: TicketInput, projects: Project[], name: string): TicketInput => {
@@ -42,5 +44,5 @@ export const chooseProjectOption = (form: TicketInput, projects: Project[], id: 
 
 export const projectOptionLabel = (project: Project, choices: Project[]) => {
   const name = cleanProjectLabel(project.subItemName) || '不分套餐'
-  return new Set(choices.map((choice) => choice.supplierId)).size > 1 ? `${name} · ${project.supplierName}` : name
+  return new Set(choices.map((choice) => choice.supplierId)).size > 1 ? `${name} · ${project.manualSupplier ? '出票时选择供货商' : project.supplierName}` : name
 }

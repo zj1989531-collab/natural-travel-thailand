@@ -52,7 +52,12 @@ begin
   end if;
   if new.cancelled_at is not null then raise exception '新增退票不能预先标记撤销。'; end if;
   if original.deleted_at is not null or original.entry_mode='profit_only' then raise exception '此记录不能办理退票。'; end if;
-  if new.refund_date<original.issue_date then raise exception '退票日期不能早于出票日期。'; end if;
+  -- A ticket's issue_date can be its future viewing/travel date. The refund
+  -- date records the actual refund day; accounting still uses the original ticket.
+  if new.refund_date is null or not isfinite(new.refund_date) or new.refund_date < date '1000-01-01' or
+    new.refund_date > (clock_timestamp() at time zone 'Asia/Bangkok')::date then
+    raise exception '退款日期无效，不能晚于曼谷今天。';
+  end if;
   select coalesce(sum(person_count),0),coalesce(sum(refund_revenue_thb),0),coalesce(sum(returned_cost_thb),0),coalesce(bool_or(is_full),false)
     into prior_count,prior_revenue,prior_cost,prior_full
     from public.ticket_refunds where ticket_id=new.ticket_id and user_id=new.user_id and cancelled_at is null;

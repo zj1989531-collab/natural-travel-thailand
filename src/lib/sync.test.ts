@@ -23,6 +23,19 @@ const record = (updatedAt: string, syncStatus: VersionedRecord['syncStatus'] = '
 })
 
 describe('synchronization versions', () => {
+  it('retains manual-cost and supplier-choice flags missing from older clients, but accepts explicit false', () => {
+    const row: ReturnType<typeof record> & { manualCostPrice?: boolean; manualSupplier?: boolean } = { ...record('2026-10-17T01:00:00Z'), manualCostPrice: true, manualSupplier: true }
+    expect(mergeRemoteRecord(row, record('2026-10-17T02:00:00Z'))).toMatchObject({ manualCostPrice: true, manualSupplier: true })
+    expect(mergeRemoteRecord(row, { ...record('2026-10-17T02:00:00Z'), manualCostPrice: false })).toMatchObject({ manualCostPrice: false, manualSupplier: true })
+  })
+  it('preserves rule fields missing from an older client in either merge direction', () => {
+    const old = record('2026-10-13T01:00:02.000Z')
+    const configured: ReturnType<typeof record> & { defaultAmountBasis?: string; settlementMode?: string } = { ...record('2026-10-13T01:00:01.000Z'), defaultAmountBasis: 'total', settlementMode: 'monthly' }
+    expect(mergeRemoteRecord(old, configured)).toMatchObject({ ...old, defaultAmountBasis: 'total', settlementMode: 'monthly' })
+    expect(mergeRemoteRecord(configured, old)).toMatchObject({ ...old, syncStatus: 'synced', defaultAmountBasis: 'total', settlementMode: 'monthly' })
+    expect(mergeRemoteRecord(configured, { ...old, settlementMode: 'daily' })).toMatchObject({ settlementMode: 'daily', defaultAmountBasis: 'total' })
+    expect(mergeRemoteRecord(configured, { ...old, userId: 'other' })).toBe(configured)
+  })
   it('does not upload equal versions again after a realtime event', () => {
     const local = record('2026-10-13T01:00:00.000Z')
     const remote = { ...local, updatedAt: '2026-10-13T01:00:00+00:00', syncStatus: 'synced' as const }

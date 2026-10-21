@@ -5,7 +5,7 @@ import { isItemQuantity } from './quantity'
 // Existing catalogues have no separate booking unit. Recognize explicit whole
 // vehicle/boat/table/room packages without changing their saved price basis.
 export const isWholeBooking = (record: Pick<TicketRecord, 'projectName' | 'subItemName'>) =>
-  /包车|包船|游艇会|整车|整船|整床|整间|包台|包厢|私人床位/.test(`${record.projectName} ${record.subItemName}`)
+  /包车|叫车|包船|游艇会|整车|整船|整床|整间|包台|包厢|私人床位/.test(`${record.projectName} ${record.subItemName}`)
 
 export const summariseQuantities = (tickets: TicketRecord[]) => tickets.reduce((result, ticket) => {
   if (ticket.deletedAt || ticket.entryMode === 'profit_only') return result
