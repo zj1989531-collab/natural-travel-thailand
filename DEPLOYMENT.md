@@ -15,7 +15,7 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 
 1. 打开 https://supabase.com/dashboard ，使用自己的账号登录或注册。账号、验证码和数据库密码自己保存，无需发给任何人。
 2. 新建 Free 组织和项目；项目可命名为 natural-travel-thailand，区域选 Singapore（若可用）。保存生成的数据库密码，等待项目创建完成。
-3. 打开项目 SQL Editor，新建查询，先执行仓库 `supabase/schema.sql`，再执行 `supabase/refunds.sql`。它们会创建供货商、项目套餐、票务记录、退票明细表，以及账号行级权限和实时同步配置。现有项目不要重复创建表；使用对应升级迁移。
+3. 打开项目 SQL Editor，新建查询，执行仓库 `supabase/schema.sql`。它会创建供货商、项目套餐、票务记录、退票明细表，以及账号行级权限和实时同步配置。现有项目不要重复执行它；改为按文件名顺序运行尚未应用的 `supabase/migrations/` 脚本，并在升级前导出账本备份。
 4. 在 Authentication → URL Configuration 设置 Site URL 为 https://zj1989531-collab.github.io/natural-travel-thailand/ ，Redirect URLs 添加这个完整地址和 http://localhost:5173/ 。
 5. 保留默认 Magic Link 邮件模板，先用注册 Supabase 时的邮箱登录；默认发信服务只允许组织成员的邮箱。其他邮箱需要配置自定义 SMTP 后才可使用。两台设备登录同一个邮箱。
 

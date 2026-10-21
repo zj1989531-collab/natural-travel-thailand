@@ -32,6 +32,18 @@ function RecordTable({ records, caption }: { records: TicketRecord[]; caption: s
 
 export function ReportPreview({ report, supplierName, pendingCount = 0, generatedAt }: { report: LedgerReport; supplierName: string; pendingCount?: number; generatedAt: string }) {
   const itemsOnly = report.projectName === '药品' || report.records.length > 0 && report.records.every(isItemQuantity)
+  const insights = (() => {
+    const refunded = report.records.filter(ticket => getRefundState(ticket).active.length > 0)
+    const losses = report.records.filter(ticket => getProfit(ticket) < 0)
+    const projects = new Map<string, number>()
+    const days = new Map<string, number>()
+    for (const ticket of report.records) {
+      const profit = getProfit(ticket)
+      projects.set(ticket.projectName || '未分类项目', (projects.get(ticket.projectName || '未分类项目') ?? 0) + profit)
+      days.set(ticket.issueDate, (days.get(ticket.issueDate) ?? 0) + profit)
+    }
+    return { refunded, losses, projects: [...projects.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3), days: [...days.entries()].sort(([a], [b]) => a.localeCompare(b)) }
+  })()
   return <article className="report-paper" aria-label="格式化报表预览">
     <header className="report-paper-heading">
       <p className="eyebrow">票务盈利簿 · THB · Asia/Bangkok</p>
@@ -43,6 +55,13 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     <div className="report-totals">
       <div className={report.summary.profitThb < 0 ? 'report-loss' : 'report-profit'}><span>总利润</span><strong>{formatThb(report.summary.profitThb)}</strong></div>
     </div>
+    <section className="report-insights" aria-label="经营提示">
+      <div><span>退款率</span><strong>{report.records.length ? `${(insights.refunded.length / report.records.length * 100).toFixed(1)}%` : '—'}</strong></div>
+      <div className={insights.losses.length ? 'insight-warning' : ''}><span>负利润记录</span><strong>{insights.losses.length} 笔</strong></div>
+      <div><span>平均单笔利润</span><strong>{report.records.length ? formatThb(report.summary.profitThb / report.records.length) : '—'}</strong></div>
+    </section>
+    {insights.losses.length > 0 && <p className="report-notice">发现 {insights.losses.length} 笔负利润记录，建议优先核对售价、成本或退款金额。</p>}
+    {insights.projects.length > 0 && <section className="report-section report-ranking"><h3>项目利润排行</h3>{insights.projects.map(([name, profit], index) => <div key={name} className="ranking-row"><span><b>{index + 1}</b>{name}</span><strong className={profit < 0 ? 'loss-value' : 'profit-value'}>{formatThb(profit)}</strong></div>)}</section>}
     {!itemsOnly && <section className="report-quantity" aria-label="项目出票数量查询">
       <h3>项目出票数量查询</h3>
       <div className="report-quantity-metrics"><div><span>出票记录数</span><strong>{formatNumber(report.quantity.recordCount)} 笔</strong></div><div><span>已录人数</span><strong>{formatNumber(report.quantity.peopleCount)} 人</strong></div></div>

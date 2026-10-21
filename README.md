@@ -34,7 +34,7 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 执行 [supabase/schema.sql](./supabase/schema.sql)。
+1. 新建一个 Supabase 项目，并在 **SQL Editor** 执行 [supabase/schema.sql](./supabase/schema.sql)。该文件已包含退票、实时同步及行级权限所需的全部数据库对象。
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
@@ -45,7 +45,7 @@ pnpm dev:sync
 
 线上构建在 GitHub 仓库的 Settings → Secrets and variables → Actions 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`，然后重新运行 Deploy ticket ledger。两端登录同一邮箱，在线修改会自动同步；离线修改会排队，联网后自动上传。页面恢复前台时会重新核对数据，另有定时重试。
 
-新项目执行 `schema.sql` 即可。若此前已经建库，按当前版本执行需要的 `supabase/migrations/` 升级脚本，再执行 `005_enable_realtime_sync.sql` 启用实时订阅和最新修改优先的数据库保护。
+新项目只需执行 `schema.sql`。若此前已经建库，请按文件名顺序执行尚未应用的 `supabase/migrations/` 脚本；其中 `006_complete_current_schema.sql` 会补齐退款、数量单位和仅录利润等当前功能所需的表、列、权限与触发器。升级前请先导出账本备份。
 
 ## 功能边界
 

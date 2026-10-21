@@ -1,4 +1,7 @@
--- Execute after schema.sql. Refunds are immutable financial events; only voiding is allowed.
+-- Legacy standalone patch for databases created before the consolidated schema.
+-- New projects must run schema.sql only; existing projects should use migration
+-- 006_complete_current_schema.sql instead. Refunds are immutable financial
+-- events; only voiding is allowed.
 create table public.ticket_refunds (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
