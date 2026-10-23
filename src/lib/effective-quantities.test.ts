@@ -42,10 +42,11 @@ describe('effective ticket/order/item quantities', () => {
     expect(summariseQuantities([missing, { ...missing, quantityUnit: 'item' }, { ...missing, projectName: '包车' }])).toMatchObject({ ticketCount: 0, itemCount: 0, orderCount: 1, unknownCount: 2 })
     expect(quantityParts(summariseQuantities([]))).toEqual(['门票 0 张'])
   })
-  it('retains daily exclusion rules and uses the same quantities in report queries', () => {
+  it('excludes boxing from daily and main report quantities while retaining ordinary orders', () => {
     const monthly = { ...ticket, projectName: '泰拳' }
     expect(summariseQuantities(ticketsForDailyStats([monthly], ticket.issueDate)).ticketCount).toBe(0)
     const report = buildReport([monthly, { ...ticket, id: 'order', projectName: '包车' }], { mode: 'day', date: ticket.issueDate, month: '2026-10', supplierId: '', startDate: ticket.issueDate, endDate: ticket.issueDate })
-    expect(report.effectiveQuantity).toMatchObject({ ticketCount: 5, orderCount: 1 })
+    expect(report.effectiveQuantity).toMatchObject({ ticketCount: 0, orderCount: 1 })
+    expect(report.monthlyRecords).toEqual([])
   })
 })

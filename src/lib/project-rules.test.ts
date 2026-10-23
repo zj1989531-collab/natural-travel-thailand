@@ -20,7 +20,7 @@ describe('package rules and historical settlement snapshots', () => {
   it('resolves ordinary tickets, items and commission, while respecting explicit choices', () => {
     expect(resolveProjectRules(project)).toEqual({ defaultAmountBasis: 'per_person', settlementMode: 'daily' })
     expect(resolveProjectRules({ ...project, quantityUnit: 'item' }).defaultAmountBasis).toBe('per_person')
-    expect(resolveProjectRules({ ...project, name: '泰拳', settlementMode: 'daily', defaultAmountBasis: 'total' })).toEqual({ defaultAmountBasis: 'total', settlementMode: 'daily' })
+    expect(resolveProjectRules({ ...project, name: '嘉年华', settlementMode: 'daily', defaultAmountBasis: 'total' })).toEqual({ defaultAmountBasis: 'total', settlementMode: 'daily' })
     expect(resolveProjectRules({ ...project, entryMode: 'profit_only', settlementMode: 'daily' })).toEqual({ defaultAmountBasis: 'per_person', settlementMode: 'monthly' })
   })
   it('applies package defaults consistently to name selection, search and recent option selection', () => {
@@ -35,7 +35,7 @@ describe('package rules and historical settlement snapshots', () => {
     expect(project).not.toHaveProperty('defaultAmountBasis')
   })
   it('uses saved settlement instead of current name classification, in daily, month and year statistics', () => {
-    const daily = { ...ticket, projectName: '泰拳', settlementMode: 'daily' as const }
+    const daily = { ...ticket, projectName: '嘉年华', settlementMode: 'daily' as const }
     const monthly = { ...ticket, id: 'm', settlementMode: 'monthly' as const }
     expect(ticketsForDailyStats([daily, monthly], ticket.issueDate)).toEqual([daily])
     expect(summarise(ticketsInMonth([daily, monthly], '2026-10')).profitThb).toBe(20)
@@ -43,7 +43,7 @@ describe('package rules and historical settlement snapshots', () => {
     const report = buildReport([daily, monthly], { mode: 'day', date: ticket.issueDate, month: '2026-10', startDate: ticket.issueDate, endDate: ticket.issueDate, supplierId: '' })
     expect(report.records).toEqual([daily])
     expect(report.quantity.peopleCount).toBe(8)
-    expect(ticketSettlementMode({ ...ticket, projectName: '泰拳' })).toBe('monthly')
+    expect(ticketSettlementMode({ ...ticket, projectName: '嘉年华' })).toBe('monthly')
     expect(ticketSettlementMode(ticket)).toBe('daily')
   })
   it('exports explicit defaults and snapshots, leaving missing legacy fields missing', () => {

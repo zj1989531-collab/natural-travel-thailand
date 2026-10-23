@@ -36,6 +36,8 @@ const strip = (value: string) => value.replace(/^[\s,，;；、:：|/]+|[\s,，;
 const projectKey = (project: Project) => key(cleanProjectLabel(project.name))
 const projectAliases = (project: Project) => {
   const aliases = [project.name, cleanProjectLabel(project.name)]
+  const show = projectKey(project).match(/^(69|79|89|99)(?:秀|show)?$/)
+  if (show) aliases.push(show[1], `${show[1]}秀`, `${show[1]}show`)
   if (/^(?:imagine)?79(?:秀|show)?$/.test(projectKey(project))) aliases.push('79', '79秀', '79show', 'imagine79show')
   return [...new Set(aliases.filter(Boolean))]
 }
@@ -49,6 +51,7 @@ const priceValue = (value: string) => {
 export const parseTicketCommand = (text: string, projects: Project[], today = getBangkokDate()): ParsedTicketCommand => {
   let remaining = normalized(text)
   if (!remaining) throw new Error('请先输入或黏贴订单文字。')
+  remaining = remaining.replace(/^((?:69|79|89|99)(?:\s*成人)?\s*秀?)(?:\s*出票|\s*记录)?\s*格式\s*[:：]?\s*(?:\r?\n|$)/i, '$1\n')
   const fields: Partial<TicketInput> = {}
   const warnings: string[] = []
   const catalogue = projects.filter((project) => !project.mergedIntoId)
@@ -60,7 +63,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   }
   if (/(?:成人\s*\d+[\s\S]*儿童\s*\d+|儿童\s*\d+[\s\S]*成人\s*\d+)/.test(remaining)) throw new Error('成人和儿童等多个套餐请分别填写订单。')
 
-  const dates = [...remaining.matchAll(/\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}日?|今天|今日|明天|明日|后天/g)]
+  const dates = [...remaining.matchAll(/\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}日?|(?<!\d)\d{1,2}\s*月\s*\d{1,2}日?|今天|今日|明天|明日|后天/g)]
   if (dates.length > 1) throw new Error('检测到多个日期，请每次填写一个观看日期。')
   if (dates.length) {
     const value = dates[0][0]
@@ -70,7 +73,9 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
       date.setUTCDate(date.getUTCDate() + (/明/.test(value) ? 1 : value === '后天' ? 2 : 0))
       fields.issueDate = date.toISOString().slice(0, 10)
     } else {
-      const [year, month, day] = value.match(/\d+/g)!
+      const numbers = value.match(/\d+/g)!
+      if (numbers.length === 2 && !isValidCalendarDate(today)) throw new Error('当前日期无效，请明确填写年份。')
+      const [year, month, day] = numbers.length === 3 ? numbers : [today.slice(0, 4), ...numbers]
       fields.issueDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
       if (!isValidCalendarDate(fields.issueDate)) throw new Error('观看日期无效，请核对年月日。')
     }
@@ -112,7 +117,13 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   if (bases.size > 1) throw new Error('总价和单人／单件金额不能混填，请统一计价方式。')
   if (bases.size) fields.amountBasis = [...bases][0]
 
-  const projectMatches = catalogue.flatMap((project) => projectAliases(project).flatMap((alias) => occurrences(remaining, alias).map((match) => ({ ...match, project, alias }))))
+  // Bare show numbers in an explicitly labelled quantity belong to that field.
+  // Preserve the original string for count parsing after project matching.
+  const quantitySpans = [...remaining.matchAll(/(?:人数|数量)\s*[:：]?\s*[+-]?\s*\d+(?:\.\d+)?\s*(?:人|位|名|张|个|件|瓶|盒)?|(?<![\d.A-Za-z])[+-]?\s*\d+(?:\.\d+)?\s*(?:人|位|名|张|个|件|瓶|盒)(?=$|[\s,，;；、]|(?:69|79|89|99)(?:秀|show)?(?=$|[\s,，;；、]))/g)]
+    .map(match => ({ start: match.index!, end: match.index! + match[0].length }))
+  const projectMatches = catalogue.flatMap((project) => projectAliases(project).flatMap((alias) => occurrences(remaining, alias)
+    .filter(match => !/^\d+$/.test(alias) || !quantitySpans.some(span => span.start <= match.start && span.end >= match.end))
+    .map((match) => ({ ...match, project, alias }))))
     .sort((a, b) => (b.end - b.start) - (a.end - a.start))
   const longest = projectMatches.filter((match) => !projectMatches.some((other) =>
     other.end - other.start > match.end - match.start && other.start <= match.start && other.end >= match.end))
@@ -160,7 +171,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
     throw new Error(`此项目没有匹配的套餐／供货商：${[...new Set(unmatchedLabels.map((match) => strip(match.value)))].join('、')}，请核对目录后重新填写。`)
   }
   remaining = remaining.replace(/(?:项目名称|项目|套餐|供货商|供应商|人数|数量|观看日期|出行日期|出票日期|日期|时间|场次)\s*[:：]?/g, ' ')
-  const explicitName = /(?:客户姓名|客户|姓名|guest(?:\s*name)?)\s*[:：]?/i.exec(remaining)
+  const explicitName = /(?:客户姓名|客户|姓名|名字|guest(?:\s*name)?)(?:\s*\(\s*所有人\s*\))?\s*[:：]?/i.exec(remaining)
   let nameText = remaining
   if (explicitName) {
     const before = strip(remaining.slice(0, explicitName.index))
