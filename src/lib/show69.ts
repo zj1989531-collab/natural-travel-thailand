@@ -1,6 +1,7 @@
 import { getBangkokDate, isValidCalendarDate, isValidPersonCount } from './format'
 
-export interface Show69RecordInput { date: string; guestName: string; people: number }
+export type BoxingCategory = 'asian' | 'western'
+export interface Show69RecordInput { date: string; guestName: string; people: number; boxingCategory?: BoxingCategory; projectId?: string }
 
 // Historical record snapshots are classified without changing their names.
 export const isShow69Project = (name: string): boolean => {
@@ -54,7 +55,7 @@ export function parseShow69Command(text: string, today = getBangkokDate()): Show
   if (/(?:^|[\s,，;；、:：|])(?:79|89|99)(?:\s*成人)?\s*(?:秀|show)?(?=$|[\s,，;；、:：|])/i.test(remaining)) {
     throw new Error('这里仅记录69秀，请核对项目名称。')
   }
-  const counts = [...remaining.matchAll(/人数\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)(?![\d.A-Za-z])\s*(?:人|位|名|张|个)?|(?<![\d.A-Za-z])([+-]?\s*\d+(?:\.\d+)?)\s*(?:人|位|名|张|个)/g)]
+  const counts = [...remaining.matchAll(/人数\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)(?![\d.A-Za-z])[ \t]*(?:人|位|名|张|个)?|(?<![\d.A-Za-z])([+-]?\s*\d+(?:\.\d+)?)\s*(?:人|位|名|张|个)/g)]
   if (counts.length !== 1) throw new Error('请填写一个人数，例如“人数：3”或“3人”；不要同时填写多个人数。')
   const people = Number((counts[0][1] ?? counts[0][2]).replace(/\s/g, ''))
   if (!isValidPersonCount(people)) throw new Error('人数必须是大于或等于1的整数。')

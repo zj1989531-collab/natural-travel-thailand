@@ -3,9 +3,9 @@ import type { ReactNode } from 'react'
 export type MonthlyTicketChannel = 'show69' | 'show79' | 'boxing'
 
 const channels: { id: MonthlyTicketChannel; name: string; description: string }[] = [
-  { id: 'show69', name: '69秀', description: '日期、所有人姓名、人数' },
+  { id: 'show69', name: '69秀', description: '自动带价 · 按人数计算' },
   { id: 'show79', name: '79秀', description: '订单、人数与月度分账' },
-  { id: 'boxing', name: '泰拳', description: '日期、所有人姓名、人数' }
+  { id: 'boxing', name: '泰拳', description: '亚洲人 / 欧美人 · 自动带价' }
 ]
 
 export function MonthlyTicketsView({ selected, onSelect, onBack, children }: {

@@ -18,6 +18,7 @@ import { Show69View } from './components/Show69View'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
 import { MonthlyTicketsView } from './components/MonthlyTicketsView'
+import { boxingCategoryForTicket } from './lib/monthly-pricing'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
@@ -120,11 +121,11 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
   const applyFilledForm = (next: TicketInput) => {
     if (saveLock.current || pendingMedicineSave) return
     if (!ticket && isShow69Project(next.projectName) && onShow69) {
-      onShow69({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1 })
+      onShow69({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined })
       return
     }
     if (!ticket && isBoxingProject(next.projectName) && onBoxing) {
-      onBoxing({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1 })
+      onBoxing({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined, boxingCategory: boxingCategoryForTicket(next) })
       return
     }
     setWarning(null); setError(''); setForm(next)
@@ -1106,8 +1107,8 @@ export default function App() {
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
         </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
-          {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} onSave={saveShow69} onDelete={deleteTicket} />
-            : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} onSave={saveBoxing} onDelete={deleteTicket} />
+          {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} />
+            : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} />
             : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">

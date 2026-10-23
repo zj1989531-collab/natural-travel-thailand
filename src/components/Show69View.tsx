@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { TicketRecord } from '../types'
-import { createId, getBangkokDate, getBangkokMonth, MAX_PERSON_COUNT } from '../lib/format'
+import type { Project, TicketRecord } from '../types'
+import { createId, formatThb, getBangkokDate, getBangkokMonth, isValidPersonCount, MAX_PERSON_COUNT } from '../lib/format'
 import { isShow69Project, parseShow69Command, validateShow69Record, type Show69RecordInput } from '../lib/show69'
 import { isBoxingProject, parseBoxingCommand } from '../lib/boxing'
+import { boxingCategoryForTicket, monthlyPricingOptions, resolveMonthlyPricing } from '../lib/monthly-pricing'
+import { getTicketAmounts, getOriginalTicketAmounts } from '../lib/ticket-amounts'
 import './Show69View.css'
 
 interface Props {
   kind?: 'show69' | 'boxing'
   accountId?: string
   initialInput?: Show69RecordInput
+  projects?: Project[]
   tickets: TicketRecord[]
   onSave: (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
@@ -18,7 +21,7 @@ type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operat
 type Range = 'month' | 'date' | 'all'
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
-export function Show69View({ kind = 'show69', accountId, initialInput, tickets, onSave, onDelete }: Props) {
+export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete }: Props) {
   const title = kind === 'boxing' ? '泰拳' : '69秀'
   const commandHelpId = `${kind}-command-help`
   const [input, setInput] = useState<Show69RecordInput>(() => initialInput ? { ...initialInput } : emptyInput())
@@ -48,6 +51,19 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
   const latest = useRef({ tickets, onSave, onDelete, accountId, kind })
   latest.current = { tickets, onSave, onDelete, accountId, kind }
   const busy = saving || deleting
+  const pricingOptions = useMemo(() => editing ? [] : monthlyPricingOptions(kind, projects, input.boxingCategory), [editing, kind, projects, input.boxingCategory])
+  const pricingResult = useMemo(() => {
+    if (editing || kind === 'boxing' && !input.boxingCategory) return { pricing: undefined, error: '' }
+    try { return { pricing: resolveMonthlyPricing(kind, input, projects), error: '' } }
+    catch (failure) { return { pricing: undefined, error: failure instanceof Error ? failure.message : '请核对所选价格套餐。' } }
+  }, [editing, kind, input, projects])
+  const pricing = pricingResult.pricing
+  const selectedProjectId = input.projectId ?? (pricingOptions.length === 1 ? pricingOptions[0].id : '')
+  const invalidProjectSelection = !editing && Boolean(input.projectId?.trim()) && !pricingOptions.some(project => project.id === input.projectId?.trim())
+  const entryAmounts = editing ? getTicketAmounts({ ...editing, personCount: input.people })
+    : pricing && isValidPersonCount(input.people) ? getOriginalTicketAmounts({ ...pricing, personCount: input.people, amountBasis: 'per_person', entryMode: 'standard' }) : undefined
+  const originalAmounts = editing ? getOriginalTicketAmounts({ ...editing, personCount: 1 }) : undefined
+  const categoryLabel = (category: Show69RecordInput['boxingCategory']) => category === 'asian' ? '亚洲人' : category === 'western' ? '欧美人' : '未标注票种'
 
   useEffect(() => {
     mountedRef.current = true
@@ -79,7 +95,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
     try {
       const parsed = kind === 'boxing' ? parseBoxingCommand(text) : parseShow69Command(text)
       setInput(parsed)
-      setCommandMessage(`已填入：${parsed.date.replaceAll('-', '/')} · ${parsed.guestName} · ${parsed.people}人。请核对后保存。`)
+      setCommandMessage(`已填入：${parsed.date.replaceAll('-', '/')} · ${parsed.guestName} · ${parsed.people}人。${kind === 'boxing' && !parsed.boxingCategory ? '请选择亚洲人或欧美人票种后保存。' : '请核对票种和价格后保存。'}`)
     } catch (failure) { setCommandError(failure instanceof Error ? failure.message : '未能识别，请核对日期、所有人姓名和人数。') }
   }
   const pasteAndFill = async () => {
@@ -130,14 +146,15 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
     setError(''); setMessage('')
     try {
       validateShow69Record(input)
-      const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim() }, existing: editing, operationId: editing ? undefined : createId() }
+      const matched = editing ? undefined : resolveMonthlyPricing(kind, input, projects)
+      const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim(), ...(!editing ? { projectId: matched?.project?.id, boxingCategory: matched?.boxingCategory } : {}) }, existing: editing, operationId: editing ? undefined : createId() }
       operationRef.current = operation
       await runSave(operation)
     } catch (failure) { setError(failure instanceof Error ? failure.message : '记录未保存，请核对填写内容。') }
   }
   const edit = (ticket: TicketRecord) => {
     if (mutationLock.current || operationRef.current || ticket.refunds?.length) return
-    cancelPaste(); setEditing(ticket); setInput({ date: ticket.issueDate, guestName: ticket.guestName ?? '', people: ticket.personCount ?? Number.NaN })
+    cancelPaste(); setEditing(ticket); setInput({ date: ticket.issueDate, guestName: ticket.guestName ?? '', people: ticket.personCount ?? Number.NaN, projectId: ticket.projectId ?? undefined, boxingCategory: kind === 'boxing' ? boxingCategoryForTicket(ticket) : undefined })
     setCommand(''); setCommandError(''); setCommandMessage(''); setError(''); setMessage('')
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -163,10 +180,10 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
 
   return <section className="show79-view show69-view">
     <div className="records-heading"><div><p className="eyebrow">独立记录 · 曼谷时间</p><h1>{title}</h1></div></div>
-    <p className="sheet-copy">单独记录日期、所有人姓名和人数，不计入主账本每日统计、月报、年报及排行。</p>
+    <p className="sheet-copy">单独记录日期、所有人姓名和人数，按票种自动带入价格，不计入主账本每日统计、月报、年报及排行。</p>
     <section className="show79-entry"><h2>{editing ? `编辑${title}记录` : `新增${title}记录`}</h2>
       {!editing && <div className="show79-command">
-        <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
+        <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3${kind === 'boxing' ? '\n票种：亚洲人' : ''}`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
           if (mutationLock.current || operationRef.current) return
           const text = event.clipboardData.getData('text/plain')
           if (!text.trim()) return
@@ -183,6 +200,19 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
           <label>日期<input type="date" required value={input.date} onChange={event => update('date', event.target.value)} /></label>
           <label>名字（所有人）<textarea required rows={3} maxLength={100} value={input.guestName} placeholder="填写所有人的姓名，用逗号分隔" onChange={event => update('guestName', event.target.value)} /></label>
           <label>人数<input type="number" inputMode="numeric" required min="1" max={MAX_PERSON_COUNT} step="1" value={Number.isFinite(input.people) ? input.people : ''} onChange={event => update('people', event.target.value === '' ? Number.NaN : Number(event.target.value))} /></label>
+          {kind === 'boxing' && (editing ? <p className="sheet-copy">票种：{categoryLabel(boxingCategoryForTicket(editing))} · 保留原记录</p> : <label>票种<select required value={input.boxingCategory ?? ''} onChange={event => {
+            cancelPaste(); setInput(current => ({ ...current, boxingCategory: (event.target.value || undefined) as Show69RecordInput['boxingCategory'], projectId: undefined })); setError(''); setMessage('')
+          }}><option value="" disabled>请选择亚洲人或欧美人</option><option value="asian">亚洲人</option><option value="western">欧美人</option></select></label>)}
+          {!editing && (kind !== 'boxing' || input.boxingCategory) && pricingOptions.length > 1 && <label>供货商套餐<select required value={selectedProjectId} onChange={event => update('projectId', event.target.value || undefined)}><option value="" disabled>请选择本次价格套餐</option>{pricingOptions.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name}{project.subItemName ? ` · ${project.subItemName}` : ''}</option>)}</select></label>}
+          {editing ? <p className="sheet-copy">保留原记录的套餐、金额与计价方式，仅修改日期、姓名和人数。</p> : pricing?.project && <p className="sheet-copy">价格套餐：{pricing.project.supplierName} · {pricing.project.name}{pricing.project.subItemName ? ` · ${pricing.project.subItemName}` : ''}</p>}
+          {kind === 'boxing' && !editing && !input.boxingCategory && <p className="sheet-copy" role="status">请选择亚洲人或欧美人票种，系统将自动带入对应价格。</p>}
+          {pricingResult.error && <p className="form-error" role="alert">{pricingResult.error}</p>}
+          {pricingResult.error && invalidProjectSelection && <button type="button" className="secondary-button" onClick={() => update('projectId', undefined)}>重新匹配价格</button>}
+          {(pricing || editing) && <section className="show69-pricing" aria-label={editing ? '原记录价格' : '自动匹配价格'}>
+            <p>{editing ? editing.amountBasis === 'per_person' ? '原记录每人金额' : '原记录整单金额' : '每人价格'}（THB）</p>
+            <dl><div><dt>代理价</dt><dd>{formatThb(editing ? originalAmounts!.agentPriceThb : pricing!.agentPriceThb)}</dd></div><div><dt>成本</dt><dd>{formatThb(editing ? originalAmounts!.costThb : pricing!.costThb)}</dd></div><div><dt>利润</dt><dd>{formatThb(editing ? originalAmounts!.profitThb : pricing!.profitThb)}</dd></div></dl>
+            {entryAmounts ? <><p>{editing?.amountBasis === 'total' || editing && !editing.amountBasis ? '整单合计' : `${input.people} 人合计`}（THB）</p><dl><div><dt>总售价</dt><dd>{formatThb(entryAmounts.agentPriceThb)}</dd></div><div><dt>总成本</dt><dd>{formatThb(entryAmounts.costThb)}</dd></div><div><dt>总利润</dt><dd>{formatThb(entryAmounts.profitThb)}</dd></div></dl></> : <p className="sheet-copy">请填写有效人数以计算合计。</p>}
+          </section>}
           <button type="submit" className="primary-button" disabled={busy || pasting}>{saving ? '保存中…' : editing ? '保存修改' : '保存记录'}</button>
         </fieldset>
         {editing && !pendingSave && <button type="button" className="text-action" disabled={busy} onClick={() => { clearEntry(); setMessage('') }}>取消编辑</button>}
@@ -199,12 +229,16 @@ export function Show69View({ kind = 'show69', accountId, initialInput, tickets, 
       <label className="show69-search">搜索姓名<input type="search" value={search} placeholder="输入任一人的姓名" onChange={event => setSearch(event.target.value)} /></label>
       <p className="sheet-copy">当前范围 {records.length} 条记录</p>
       {!records.length && <p className="empty-card">当前范围没有{title}记录。</p>}
-      <div className="records-list">{records.map(ticket => <article className="ticket-card" key={ticket.id}>
+      <div className="records-list">{records.map(ticket => {
+        const amounts = getTicketAmounts(ticket)
+        return <article className="ticket-card" key={ticket.id}>
         <div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')}</p><strong className="show69-names">{ticket.guestName?.trim() || '姓名未记录'}</strong></div><strong>{ticket.personCount ?? '未填'} 人</strong></div>
+        {kind === 'boxing' && <p className="sheet-copy">票种：{categoryLabel(boxingCategoryForTicket(ticket))}</p>}
+        <div className="show69-record-amounts"><span>净售价 {formatThb(amounts.agentPriceThb)}</span><span>净成本 {formatThb(amounts.costThb)}</span><strong>净利润 {formatThb(amounts.profitThb)}</strong></div>
         {ticket.syncStatus !== 'synced' && <p className="sheet-copy">等待同步</p>}
         {Boolean(ticket.refunds?.length) && <p className="sheet-copy">此记录已有退票明细，保留原记录。</p>}
         <div className="ticket-actions"><button type="button" disabled={busy || pasting || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" className="danger-action" disabled={busy || pasting || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => void remove(ticket)}>删除</button></div>
-      </article>)}</div>
+      </article>})}</div>
     </section>
   </section>
 }
