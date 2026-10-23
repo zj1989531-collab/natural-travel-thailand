@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import type { Project, TicketInput } from '../types'
 import { applyTicketCommand, parseTicketCommand, type ParsedTicketCommand } from '../lib/ticket-command'
 import { quantityLabels } from '../lib/quantity'
+import { isShow69Command, parseShow69Command, type Show69RecordInput } from '../lib/show69'
 
-export function TicketQuickFill({ projects, current, disabled, onFill, onBusyChange }: {
+export function TicketQuickFill({ projects, current, disabled, onFill, onBusyChange, onShow69 }: {
   projects: Project[]
   current: TicketInput
   disabled: boolean
   onFill: (input: TicketInput) => void
   onBusyChange: (busy: boolean) => void
+  onShow69?: (input: Show69RecordInput) => void
 }) {
   const [command, setCommand] = useState('')
   const [error, setError] = useState('')
@@ -46,6 +48,12 @@ export function TicketQuickFill({ projects, current, disabled, onFill, onBusyCha
     if (latest.current.disabled) return
     cancelRead(); clearFeedback()
     try {
+      if (onShow69 && isShow69Command(text)) {
+        const input = parseShow69Command(text)
+        onBusyChange(false)
+        onShow69(input)
+        return
+      }
       const parsed = parseTicketCommand(text, latest.current.projects)
       if (parsed.candidates.length === 1) apply(parsed, parsed.candidates[0])
       else { setPending(parsed); setWarnings(parsed.warnings); onBusyChange(true) }

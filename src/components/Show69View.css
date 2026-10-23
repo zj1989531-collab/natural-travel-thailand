@@ -1,0 +1,6 @@
+.show69-view .show69-names { display: block; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.show69-view .ticket-card-main > div { min-width: 0; }
+.show69-view .ticket-card-main > strong { flex-shrink: 0; }
+.show69-view .show69-search { margin: 14px 0; }
+.show69-view .show69-retry { display: grid; gap: 12px; margin-top: 16px; }
+.show69-view .form-fields { display: grid; gap: 16px; }

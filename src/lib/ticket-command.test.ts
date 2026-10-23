@@ -22,6 +22,27 @@ const current: TicketInput = {
 const parse = (text: string, projects = catalogue, today = '2026-10-15') => parseTicketCommand(text, projects, today)
 
 describe('catalogue ticket command parsing', () => {
+  it.each(['69', '79', '89', '99'])('maps standalone %s to its show catalogue entry without confusing money or quantities', code => {
+    const shows = ['69', '79', '89', '99'].map(value => project(value, `${value}秀`))
+    const parsed = parse(`${code} 张三 今天 2人 售价79 成本69`, shows)
+    expect(parsed.candidates.map(item => item.id)).toEqual([code])
+    expect(parsed.fields).toMatchObject({ guestName: '张三', personCount: 2, agentPriceThb: 79, costThb: 69 })
+    expect(parse(`${code} 张三 今天 人数89`, shows).candidates.map(item => item.id)).toEqual([code])
+    expect(parse(`${code} 张三 今天 99人`, shows).candidates.map(item => item.id)).toEqual([code])
+  })
+
+  it('recognizes the labelled multi-person template, preserving every customer and date without a year', () => {
+    const parsed = parse('69出票格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3', [project('69', '69秀')])
+    expect(parsed.candidates.map(item => item.id)).toEqual(['69'])
+    expect(parsed.fields).toMatchObject({ issueDate: '2026-10-23', guestName: '韩廷富 邵建华 江华兴', personCount: 3 })
+  })
+
+  it('does not infer a show from explicit monetary or quantity fields', () => {
+    const shows = ['69', '79', '89', '99'].map(value => project(value, `${value}秀`))
+    expect(() => parse('张三 今天 人数69 售价79 成本89', shows)).toThrow('未找到目录')
+    expect(() => parse('张三 今天 69人 售价79 成本89', shows)).toThrow('未找到目录')
+  })
+
   it.each(['李湘光 龙粉萍 今天 2个79', '79 李湘光 龙粉萍 2人 今天', '７９\n李湘光 龙粉萍\n２位\n今天'])('parses 79 commands in flexible order: %s', (text) => {
     const parsed = parse(text)
     expect(parsed.candidates.map((item) => item.id)).toEqual(['79'])

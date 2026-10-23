@@ -40,12 +40,14 @@ describe('monthly commission settlement statistics', () => {
     expect(isMonthlySettlementProject(name)).toBe(false)
   })
 
-  it('excludes all six categories from every daily metric but keeps only the five non-79 settlement categories in monthly totals', () => {
+  it('excludes monthly projects from daily metrics and both independent shows from main monthly totals', () => {
     const tickets = ['69秀', '79秀', '泰拳', '东方嘉年华', '格兰岛跟团一日游', '芭提雅潜水（SH）', '普通项目'].map((projectName, index) => makeTicket({ id: `record-${index}`, projectName, agentPriceThb: 100, costThb: 80 }))
     expect(summarise(ticketsForDailyStats(tickets, '2026-10-13'))).toEqual({ count: 1, agentPriceThb: 100, costThb: 80, profitThb: 20 })
     const monthly = ticketsInMonth(tickets, '2026-10')
-    expect(summarise(monthly)).toEqual({ count: 6, agentPriceThb: 600, costThb: 480, profitThb: 120 })
-    expect(bySupplier(monthly)[0]).toMatchObject({ count: 6, profitThb: 120 })
+    expect(summarise(monthly)).toEqual({ count: 5, agentPriceThb: 500, costThb: 400, profitThb: 100 })
+    expect(bySupplier(monthly)[0]).toMatchObject({ count: 5, agentPriceThb: 500, costThb: 400, profitThb: 100 })
+    expect(monthly.map(ticket => ticket.projectName)).not.toContain('69秀')
+    expect(monthly.map(ticket => ticket.projectName)).not.toContain('79秀')
     expect(ticketsOnDate(tickets, '2026-10-13')).toHaveLength(7)
   })
 

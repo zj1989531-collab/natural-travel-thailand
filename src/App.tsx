@@ -14,6 +14,8 @@ import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { Show79View } from './components/Show79View'
+import { Show69View } from './components/Show69View'
+import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
@@ -40,7 +42,7 @@ import { chooseProject, chooseProjectOption } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, SettlementMode, Supplier, TicketInput, TicketRecord } from './types'
 
-type View = 'dashboard' | 'records' | 'reports' | 'show79'
+type View = 'dashboard' | 'records' | 'reports' | 'show69' | 'show79'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -57,6 +59,7 @@ interface TicketFormProps {
   onManageSuppliers: () => void
   onSave: (input: TicketInput, operationId?: string) => Promise<void>
   onSaveMedicine?: (entries: MedicineTicketEntry[]) => Promise<void>
+  onShow69?: (input: Show69RecordInput) => void
 }
 
 const emptyForm = (): TicketInput => ({
@@ -77,7 +80,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine }: TicketFormProps) {
+export function TicketForm({ ticket, projects, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69 }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -113,6 +116,10 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
 
   const applyFilledForm = (next: TicketInput) => {
     if (saveLock.current || pendingMedicineSave) return
+    if (!ticket && isShow69Project(next.projectName) && onShow69) {
+      onShow69({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1 })
+      return
+    }
     setWarning(null); setError(''); setForm(next)
     const selected = projects.find(row => row.id === next.projectId)
     setMedicineLines(!ticket && selected && isMedicineProject(selected) ? [{ ...createMedicineLine(selected), personCount: next.personCount ?? 1, amountBasis: next.amountBasis ?? resolveProjectRules(selected).defaultAmountBasis, agentPriceThb: next.agentPriceThb, costThb: next.costThb }] : [])
@@ -241,7 +248,7 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
           const details = (event.target as HTMLElement).closest('details')
           if (details) details.open = true
         }} onSubmit={event => { event.preventDefault(); void attemptSave() }}>
-          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} />}
+          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} onShow69={onShow69} />}
           {medicineMode && <section className="ticket-order-summary" aria-label="订单核对摘要"><p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')}</p><p>药品 · 已选 {medicineLines.length} 项，各子项数量和利润分别统计。</p></section>}
           {!medicineMode && form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
             <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
@@ -267,7 +274,7 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
           {!medicineMode && (manualSupplier ? <label>供货商<select value={form.supplierName} onChange={event => update('supplierName', event.target.value)} required><option value="">请自行选择供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}</select></label> : form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>)}
           {!medicineMode && (manualCostPrice ? <p className="sheet-copy">成本不预设，请填写本次{perPerson ? single : '整单'}成本{manualAgentPrice ? '及代理售价' : '；售价已自动带入'}。</p> : manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>)}
           {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
-          {!medicineMode && !isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
+          {!medicineMode && !isShow69Project(form.projectName) && !isShow79Project(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
           {!medicineMode && (form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
@@ -570,6 +577,7 @@ export default function App() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('dashboard')
+  const [show69Draft, setShow69Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | undefined>()
   const [formOpen, setFormOpen] = useState(false)
@@ -663,6 +671,7 @@ export default function App() {
         setSupplierSheetOpen(false)
         setConflictsOpen(false)
         setSelectedTicket(undefined)
+        setShow69Draft(undefined)
         setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
         setQuery(''); setSupplierFilter(''); setToast('')
       }
@@ -810,6 +819,12 @@ export default function App() {
   }
 
   const financialAccountId = user?.id ?? (cloudConfigured ? '' : localUserId)
+  const openShow69 = (input?: Show69RecordInput) => {
+    setShow69Draft({ id: createId(), accountId: financialAccountId, input })
+    setFormOpen(false)
+    setSelectedTicket(undefined)
+    setView('show69')
+  }
   const openRefund = (id = '') => {
     if (requestLoginForWrite()) return
     try {
@@ -886,6 +901,19 @@ export default function App() {
     setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
     try { await refresh() }
     catch { if (epoch === accountEpochRef.current) setToast('79秀订单已保存；页面刷新未完成，请同步核对，无需再次保存。') }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    void synchronise()
+    return saved
+  }
+
+  const saveShow69 = async (input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
+    requireCloudLogin()
+    const epoch = accountEpochRef.current
+    const saved = await ledgerRepository.createOrUpdateShow69Record(input, existing, operationId)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    try { await refresh() }
+    catch { if (epoch === accountEpochRef.current) setToast('69秀记录已保存；页面刷新未完成，请同步核对，无需再次保存。') }
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     void synchronise()
     return saved
@@ -978,6 +1006,7 @@ export default function App() {
     setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
     setFormOpen(false); setRefundOpen(false); setSupplierSheetOpen(false); setConflictsOpen(false)
     setSelectedTicket(undefined)
+    setShow69Draft(undefined)
     syncAbortRef.current?.abort()
     syncQueueRef.current?.clearPending()
     try {
@@ -1032,10 +1061,10 @@ export default function App() {
             </section>
           )}
 
-          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含79秀独立账本及其他月结返佣项目。" />
-          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；79秀独立统计。" />
+          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含69秀、79秀独立记录及其他月结返佣项目。" />
+          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；69秀、79秀独立记录。" />
           <ProfitTrendPanel tickets={mainTickets} today={today} pendingCount={unsyncedCount} offline={offline} />
-          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；79秀独立统计，退票回算原记录年份。" />
+          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；69秀、79秀独立记录，退票回算原记录年份。" />
 
           <section className="ranking-section">
             <div className="section-heading">
@@ -1056,7 +1085,7 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
+        </> : view === 'show69' ? <Show69View key={`${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} onSave={saveShow69} onDelete={deleteTicket} /> : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
@@ -1092,15 +1121,15 @@ export default function App() {
         </>}
       </div>
 
-      <BottomNavigation view={view} onViewChange={setView} onAdd={openNewForm} onRefund={() => openRefund()} />
+      <BottomNavigation view={view} onViewChange={next => { setShow69Draft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : openNewForm()} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}
       {toast && <div className="toast" role="status">{toast}</div>}
-      {view !== 'show79' && view !== 'reports' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(mainTickets).length)}</button>}
+      {view !== 'show69' && view !== 'show79' && view !== 'reports' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(mainTickets).length)}</button>}
     </main>
   )
 }
