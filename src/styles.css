@@ -174,7 +174,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 @media (min-width: 700px) { .app-shell { padding-bottom: 32px; }.app-header { max-width: 760px; margin: auto; }.page-content { padding: 24px 20px 30px; }.bottom-nav { position: sticky; bottom: 14px; width: 410px; height: 60px; padding: 5px 18px; border: 1px solid #dfe6e1; border-radius: 18px; }.bottom-nav .nav-action { width: 44px; height: 44px; font-size: 27px; transform: translateY(-12px); }.export-button { right: max(22px, calc((100vw - 760px) / 2)); bottom: 23px; }.toast { bottom: 94px; } }
 
 /* Independent show records share the existing mobile ledger shell. */
-.bottom-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); padding-left: 8px; padding-right: 8px; }
+.bottom-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); padding-left: 8px; padding-right: 8px; }
 .show79-view h2 { margin: 0 0 12px; font-size: 20px; }
 .show79-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
 .show79-view label { display: grid; gap: 7px; color: #435d50; font-size: 13px; font-weight: 700; min-width: 0; }
@@ -201,20 +201,14 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .show79-share { display: grid; gap: 10px; margin: 14px 0; }
 .show79-orders { margin-bottom: 28px; }
 .show79-view button:disabled { opacity: .5; cursor: not-allowed; }
-@media (min-width: 700px) { .bottom-nav { width: 410px; } }
-.monthly-ticket-entry { margin: 24px 0; }
-.monthly-ticket-entry > button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 20px; border: 1px solid #cfdfd5; border-radius: 18px; background: #edf6f0; color: #195d4b; text-align: left; font: inherit; cursor: pointer; }
-.monthly-ticket-entry strong { display: block; font-size: 20px; }
-.monthly-ticket-entry small { display: block; margin-top: 7px; font-size: 13px; color: #567365; }
-.monthly-ticket-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #195d4b; color: #fff; font-size: 20px; }
-.monthly-ticket-arrow { margin-left: auto; font-size: 32px; }
+@media (min-width: 700px) { .bottom-nav { width: 480px; } }
 .monthly-ticket-back { margin-bottom: 16px; }
 .monthly-ticket-channels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 20px 0 26px; }
 .monthly-ticket-channels > button { display: grid; align-content: start; gap: 8px; padding: 15px 10px; border: 1px solid #d4ded7; border-radius: 13px; background: #fff; color: #435d50; text-align: left; font: inherit; cursor: pointer; }
 .monthly-ticket-channels strong { font-size: 18px; }
 .monthly-ticket-channels span { font-size: 12px; line-height: 1.6; }
 .monthly-ticket-channels .selected { border-color: #176a59; background: #edf6f0; color: #176a59; box-shadow: inset 0 0 0 1px #176a59; }
-.monthly-ticket-entry button:focus-visible, .monthly-ticket-channels button:focus-visible { outline: 3px solid #7ac7af; outline-offset: 3px; }
+.bottom-nav button:focus-visible, .monthly-ticket-channels button:focus-visible { outline: 3px solid #7ac7af; outline-offset: 3px; }
 /* Shared form grouping keeps native disabled behavior without extra chrome. */
 .form-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 14px; }
 .form-fields > * { min-width: 0; }

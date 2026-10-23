@@ -17,7 +17,7 @@ import { Show79View } from './components/Show79View'
 import { Show69View } from './components/Show69View'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
-import { MonthlyTicketsEntry, MonthlyTicketsView } from './components/MonthlyTicketsView'
+import { MonthlyTicketsView } from './components/MonthlyTicketsView'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
@@ -1104,7 +1104,6 @@ export default function App() {
             )}
           </section>
 
-          <MonthlyTicketsEntry onOpen={() => { setShow69Draft(undefined); setBoxingDraft(undefined); setView('monthly') }} />
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
         </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} onSave={saveShow69} onDelete={deleteTicket} />
@@ -1146,7 +1145,7 @@ export default function App() {
         </>}
       </div>
 
-      <BottomNavigation view={view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : openNewForm()} onRefund={() => openRefund()} />
+      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : openNewForm()} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}

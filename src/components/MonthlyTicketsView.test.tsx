@@ -1,15 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MonthlyTicketsEntry, MonthlyTicketsView } from './MonthlyTicketsView'
+import { MonthlyTicketsView } from './MonthlyTicketsView'
 
-describe('首页月结票入口和二级表单通道', () => {
-  it('provides one homepage entry for all three monthly channels', () => {
-    const html = renderToStaticMarkup(<MonthlyTicketsEntry onOpen={() => {}} />)
-    expect(html.match(/<button/g)).toHaveLength(1)
-    for (const label of ['月结票', '69秀', '79秀', '泰拳']) expect(html).toContain(label)
-    expect(html).toContain('aria-label="月结票入口"')
-  })
-
+describe('月结票二级表单通道', () => {
   it('shows the three channels and a clear return to the homepage', () => {
     const html = renderToStaticMarkup(<MonthlyTicketsView onSelect={() => {}} onBack={() => {}} />)
     for (const label of ['返回首页', '月结票', '69秀', '79秀', '泰拳', '不计入每日统计']) expect(html).toContain(label)

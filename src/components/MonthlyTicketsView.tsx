@@ -8,16 +8,6 @@ const channels: { id: MonthlyTicketChannel; name: string; description: string }[
   { id: 'boxing', name: '泰拳', description: '日期、所有人姓名、人数' }
 ]
 
-export function MonthlyTicketsEntry({ onOpen }: { onOpen: () => void }) {
-  return <section className="monthly-ticket-entry" aria-label="月结票入口">
-    <button type="button" onClick={onOpen}>
-      <span className="monthly-ticket-icon" aria-hidden="true">票</span>
-      <span><strong>月结票</strong><small>69秀 · 79秀 · 泰拳</small></span>
-      <span className="monthly-ticket-arrow" aria-hidden="true">›</span>
-    </button>
-  </section>
-}
-
 export function MonthlyTicketsView({ selected, onSelect, onBack, children }: {
   selected?: MonthlyTicketChannel
   onSelect: (channel: MonthlyTicketChannel) => void
