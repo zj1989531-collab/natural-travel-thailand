@@ -67,10 +67,15 @@ beforeEach(async () => {
   await ledgerRepository.activateAccount('user-1')
 })
 
-describe('69秀 independent record persistence', () => {
+describe.each([
+  { projectName: '69秀', historicalName: '69成人秀', save: ledgerRepository.createOrUpdateShow69Record },
+  { projectName: '泰拳', historicalName: '泰拳比赛 VIP', save: ledgerRepository.createOrUpdateBoxingRecord }
+])('$projectName independent record persistence', ({ projectName, historicalName, save }) => {
+  const historicalRecord = () => ({ ...historical(), projectName: historicalName })
   it('accepts the three record fields without a user-selected catalogue or monetary input', async () => {
-    const record = await ledgerRepository.createOrUpdateShow69Record(input, undefined, 'save69')
-    expect(record).toMatchObject({ id: 'save69', userId: 'user-1', issueDate: input.date, guestName: input.guestName, personCount: 3, projectName: '69秀', subItemName: '独立记录', agentPriceThb: 0, costThb: 0, entryMode: 'standard', quantityUnit: 'person', settlementMode: 'monthly', syncStatus: 'pending' })
+    const record = await save(input, undefined, 'save69')
+    expect(record).toMatchObject({ id: 'save69', userId: 'user-1', issueDate: input.date, guestName: input.guestName, personCount: 3, projectName, subItemName: '独立记录', agentPriceThb: 0, costThb: 0, entryMode: 'standard', quantityUnit: 'person', settlementMode: 'monthly', syncStatus: 'pending' })
+    expect(record.supplierName).toBe(`${projectName}独立记录`)
     expect(record.issueTime).toMatch(/^\d{2}:\d{2}$/)
     expect(state.suppliers.size).toBe(1)
     expect(state.projects.size).toBe(1)
@@ -79,8 +84,8 @@ describe('69秀 independent record persistence', () => {
 
   it('deduplicates concurrent saves and retries after time or catalogue changes', async () => {
     const [first, concurrent] = await Promise.all([
-      ledgerRepository.createOrUpdateShow69Record(input, undefined, 'same-operation'),
-      ledgerRepository.createOrUpdateShow69Record(input, undefined, 'same-operation')
+      save(input, undefined, 'same-operation'),
+      save(input, undefined, 'same-operation')
     ])
     expect(concurrent).toEqual(first)
     expect(state.suppliers.size).toBe(1)
@@ -88,16 +93,16 @@ describe('69秀 independent record persistence', () => {
     expect(state.tickets.size).toBe(1)
     vi.useFakeTimers(); vi.setSystemTime(new Date('2027-01-01T12:00:00Z'))
     state.suppliers.clear(); state.projects.clear()
-    expect(await ledgerRepository.createOrUpdateShow69Record(input, undefined, 'same-operation')).toEqual(first)
+    expect(await save(input, undefined, 'same-operation')).toEqual(first)
     expect(state.suppliers.size).toBe(0)
-    await expect(ledgerRepository.createOrUpdateShow69Record({ ...input, people: 4 }, undefined, 'same-operation')).rejects.toThrow('不同内容')
+    await expect(save({ ...input, people: 4 }, undefined, 'same-operation')).rejects.toThrow('不同内容')
     expect(state.tickets.size).toBe(1)
   })
 
   it('changes only the requested fields on a historical record with no remaining catalogue', async () => {
-    const original = historical()
+    const original = historicalRecord()
     state.tickets.set(original.id, original)
-    const updated = await ledgerRepository.createOrUpdateShow69Record(input, original)
+    const updated = await save(input, original)
     expect(updated).toEqual({ ...original, issueDate: input.date, guestName: input.guestName, personCount: input.people, updatedAt: updated.updatedAt, syncStatus: 'pending', refunds: [] })
     expect(updated.updatedAt).not.toBe(original.updatedAt)
     expect(state.suppliers.size).toBe(0)
@@ -105,29 +110,29 @@ describe('69秀 independent record persistence', () => {
   })
 
   it('rejects editing a refunded record, including a cancelled refund', async () => {
-    const original = historical()
+    const original = historicalRecord()
     state.tickets.set(original.id, original)
     state.refunds.push({ id: 'refund', userId: 'user-1', ticketId: original.id, cancelledAt: '2026-10-23T00:00:00Z' } as RefundRecord)
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, original)).rejects.toThrow('已有退票')
+    await expect(save(input, original)).rejects.toThrow('已有退票')
     expect(state.tickets.get(original.id)).toEqual(original)
   })
 
   it('does not resurrect a deleted record or overwrite a stale financial snapshot', async () => {
-    const stale = historical()
+    const stale = historicalRecord()
     const current = { ...stale, agentPriceThb: 1500, note: '另一台设备已更新' }
     state.tickets.set(current.id, current)
-    const updated = await ledgerRepository.createOrUpdateShow69Record(input, stale)
+    const updated = await save(input, stale)
     expect(updated.agentPriceThb).toBe(1500)
     expect(updated.note).toBe(current.note)
     const deleted = { ...updated, deletedAt: '2026-10-23T00:00:00Z' }
     state.tickets.set(current.id, deleted)
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, stale)).rejects.toThrow('无法编辑')
+    await expect(save(input, stale)).rejects.toThrow('无法编辑')
     expect(state.tickets.get(current.id)).toEqual(deleted)
   })
 
   it('keeps a pending save pinned to the initiating account when account switches before storage', async () => {
     state.beforeTicketWrite = () => ledgerRepository.activateAccount('user-2')
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, undefined, 'switch-operation')).rejects.toThrow('账号已切换')
+    await expect(save(input, undefined, 'switch-operation')).rejects.toThrow('账号已切换')
     expect(state.tickets.size).toBe(0)
     expect(state.operations.size).toBe(0)
     expect([...state.suppliers.values()].every(row => row.userId === 'user-1')).toBe(true)
@@ -135,20 +140,57 @@ describe('69秀 independent record persistence', () => {
 
   it('does not create a project for the new account if account switches during catalogue preparation', async () => {
     state.beforeProjectRead = () => ledgerRepository.activateAccount('user-2')
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, undefined, 'catalogue-switch')).rejects.toThrow('账号已切换')
+    await expect(save(input, undefined, 'catalogue-switch')).rejects.toThrow('账号已切换')
     expect(state.projects.size).toBe(0)
     expect(state.tickets.size).toBe(0)
   })
 
   it('rejects foreign edits and operation IDs while giving each account its own catalogue', async () => {
-    const first = await ledgerRepository.createOrUpdateShow69Record(input, undefined, 'account-operation')
+    const first = await save(input, undefined, 'account-operation')
     await ledgerRepository.activateAccount('user-2')
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, first)).rejects.toThrow('当前账号')
-    await expect(ledgerRepository.createOrUpdateShow69Record(input, undefined, 'account-operation')).rejects.toThrow('提交编号已有其他记录')
-    const second = await ledgerRepository.createOrUpdateShow69Record(input, undefined, 'second-operation')
+    await expect(save(input, first)).rejects.toThrow('当前账号')
+    await expect(save(input, undefined, 'account-operation')).rejects.toThrow('提交编号已有其他记录')
+    const second = await save(input, undefined, 'second-operation')
     expect(second.userId).toBe('user-2')
     expect(second.supplierId).not.toBe(first.supplierId)
     expect(second.projectId).not.toBe(first.projectId)
     expect(state.tickets.get(first.id)?.userId).toBe('user-1')
+  })
+
+  it('rejects incomplete or invalid three-field records without writing catalogue or ticket rows', async () => {
+    for (const invalid of [{ ...input, guestName: '' }, { ...input, date: '2026-02-30' }, { ...input, people: 0 }, { ...input, people: 1.5 }]) {
+      await expect(save(invalid)).rejects.toThrow()
+    }
+    expect(state.suppliers.size).toBe(0)
+    expect(state.projects.size).toBe(0)
+    expect(state.tickets.size).toBe(0)
+  })
+})
+
+describe('independent record channel isolation', () => {
+  it('prepares separate catalogues for concurrent 69秀 and boxing saves', async () => {
+    const [show69, boxing] = await Promise.all([
+      ledgerRepository.createOrUpdateShow69Record(input, undefined, 'show69-channel'),
+      ledgerRepository.createOrUpdateBoxingRecord(input, undefined, 'boxing-channel')
+    ])
+    expect(show69.projectName).toBe('69秀')
+    expect(boxing.projectName).toBe('泰拳')
+    expect(boxing.supplierId).not.toBe(show69.supplierId)
+    expect(boxing.projectId).not.toBe(show69.projectId)
+    expect(state.suppliers.size).toBe(2)
+    expect(state.projects.size).toBe(2)
+    expect(state.tickets.size).toBe(2)
+  })
+
+  it('does not reuse an accepted operation or edit a saved record through the other channel', async () => {
+    const show69 = await ledgerRepository.createOrUpdateShow69Record(input, undefined, 'show69-operation')
+    await expect(ledgerRepository.createOrUpdateBoxingRecord(input, undefined, 'show69-operation')).rejects.toThrow('不同内容')
+    await expect(ledgerRepository.createOrUpdateBoxingRecord(input, show69)).rejects.toThrow('无法编辑')
+    const boxing = await ledgerRepository.createOrUpdateBoxingRecord(input, undefined, 'boxing-operation')
+    await expect(ledgerRepository.createOrUpdateShow69Record(input, undefined, 'boxing-operation')).rejects.toThrow('不同内容')
+    await expect(ledgerRepository.createOrUpdateShow69Record(input, boxing)).rejects.toThrow('无法编辑')
+    expect(state.tickets.get(show69.id)?.projectName).toBe('69秀')
+    expect(state.tickets.get(boxing.id)?.projectName).toBe('泰拳')
+    expect(state.tickets.size).toBe(2)
   })
 })

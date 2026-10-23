@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { TicketRecord } from '../types'
 import { createId, getBangkokDate, getBangkokMonth, MAX_PERSON_COUNT } from '../lib/format'
 import { isShow69Project, parseShow69Command, validateShow69Record, type Show69RecordInput } from '../lib/show69'
+import { isBoxingProject, parseBoxingCommand } from '../lib/boxing'
 import './Show69View.css'
 
 interface Props {
+  kind?: 'show69' | 'boxing'
   accountId?: string
   initialInput?: Show69RecordInput
   tickets: TicketRecord[]
@@ -16,12 +18,14 @@ type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operat
 type Range = 'month' | 'date' | 'all'
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
-export function Show69View({ accountId, initialInput, tickets, onSave, onDelete }: Props) {
+export function Show69View({ kind = 'show69', accountId, initialInput, tickets, onSave, onDelete }: Props) {
+  const title = kind === 'boxing' ? '泰拳' : '69秀'
+  const commandHelpId = `${kind}-command-help`
   const [input, setInput] = useState<Show69RecordInput>(() => initialInput ? { ...initialInput } : emptyInput())
   const [editing, setEditing] = useState<TicketRecord>()
   const [command, setCommand] = useState('')
   const [commandError, setCommandError] = useState('')
-  const [commandMessage, setCommandMessage] = useState(initialInput ? '已填入69秀信息，请核对日期、所有人姓名和人数后保存。' : '')
+  const [commandMessage, setCommandMessage] = useState(initialInput ? `已填入${title}信息，请核对日期、所有人姓名和人数后保存。` : '')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -33,7 +37,7 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
   const [date, setDate] = useState(getBangkokDate)
   const [search, setSearch] = useState('')
   const mountedRef = useRef(true)
-  const accountRef = useRef(accountId)
+  const accountRef = useRef({ accountId, kind })
   const accountEpochRef = useRef(0)
   const mutationLock = useRef(false)
   const pasteLock = useRef(false)
@@ -41,8 +45,8 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
   const operationRef = useRef<SaveOperation | null>(null)
   const commandRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const latest = useRef({ tickets, onSave, onDelete, accountId })
-  latest.current = { tickets, onSave, onDelete, accountId }
+  const latest = useRef({ tickets, onSave, onDelete, accountId, kind })
+  latest.current = { tickets, onSave, onDelete, accountId, kind }
   const busy = saving || deleting
 
   useEffect(() => {
@@ -51,16 +55,16 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
   }, [])
 
   useEffect(() => {
-    if (accountRef.current === accountId) return
-    accountRef.current = accountId
+    if (accountRef.current.accountId === accountId && accountRef.current.kind === kind) return
+    accountRef.current = { accountId, kind }
     accountEpochRef.current++; pasteRequest.current++
     mutationLock.current = false; pasteLock.current = false; operationRef.current = null
     setInput(emptyInput()); setEditing(undefined); setCommand(''); setCommandError(''); setCommandMessage('')
     setError(''); setMessage(''); setSaving(false); setDeleting(false); setPasting(false); setPendingSave(null)
     setRange('month'); setMonth(getBangkokMonth()); setDate(getBangkokDate()); setSearch('')
-  }, [accountId])
+  }, [accountId, kind])
 
-  const isCurrent = (epoch: number, owner: string | undefined) => mountedRef.current && epoch === accountEpochRef.current && latest.current.accountId === owner
+  const isCurrent = (epoch: number, owner: string | undefined) => mountedRef.current && epoch === accountEpochRef.current && latest.current.accountId === owner && latest.current.kind === kind
   const cancelPaste = () => { pasteRequest.current++; pasteLock.current = false; setPasting(false) }
   const clearEntry = () => {
     cancelPaste(); operationRef.current = null; setPendingSave(null); setEditing(undefined); setInput(emptyInput())
@@ -73,7 +77,7 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
     if (mutationLock.current || operationRef.current) return
     cancelPaste(); setCommandError(''); setCommandMessage(''); setError(''); setMessage('')
     try {
-      const parsed = parseShow69Command(text)
+      const parsed = kind === 'boxing' ? parseBoxingCommand(text) : parseShow69Command(text)
       setInput(parsed)
       setCommandMessage(`已填入：${parsed.date.replaceAll('-', '/')} · ${parsed.guestName} · ${parsed.people}人。请核对后保存。`)
     } catch (failure) { setCommandError(failure instanceof Error ? failure.message : '未能识别，请核对日期、所有人姓名和人数。') }
@@ -111,7 +115,7 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
       const saved = await latest.current.onSave(operation.input, operation.existing, operation.operationId)
       if (!isCurrent(epoch, owner)) return
       clearEntry(); setMonth(saved.issueDate.slice(0, 7)); setDate(saved.issueDate); setRange('month'); setSearch('')
-      setMessage(operation.existing ? '69秀记录已更新。' : '69秀记录已保存，不计入每日统计。')
+      setMessage(operation.existing ? `${title}记录已更新。` : `${title}记录已保存，不计入每日统计。`)
     } catch (failure) {
       if (!isCurrent(epoch, owner)) return
       setPendingSave(operation)
@@ -152,23 +156,23 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
     }
   }
   const records = useMemo(() => tickets
-    .filter(ticket => !ticket.deletedAt && isShow69Project(ticket.projectName))
+    .filter(ticket => !ticket.deletedAt && (kind === 'boxing' ? isBoxingProject(ticket.projectName) : isShow69Project(ticket.projectName)))
     .filter(ticket => range === 'all' || (range === 'date' ? ticket.issueDate === date : ticket.issueDate.startsWith(`${month}-`)))
     .filter(ticket => !search.trim() || (ticket.guestName ?? '').toLowerCase().includes(search.trim().toLowerCase()))
-    .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [tickets, range, month, date, search])
+    .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [tickets, kind, range, month, date, search])
 
   return <section className="show79-view show69-view">
-    <div className="records-heading"><div><p className="eyebrow">独立记录 · 曼谷时间</p><h1>69秀</h1></div></div>
+    <div className="records-heading"><div><p className="eyebrow">独立记录 · 曼谷时间</p><h1>{title}</h1></div></div>
     <p className="sheet-copy">单独记录日期、所有人姓名和人数，不计入主账本每日统计、月报、年报及排行。</p>
-    <section className="show79-entry"><h2>{editing ? '编辑69秀记录' : '新增69秀记录'}</h2>
+    <section className="show79-entry"><h2>{editing ? `编辑${title}记录` : `新增${title}记录`}</h2>
       {!editing && <div className="show79-command">
-        <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby="show69-command-help" placeholder={'日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3'} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
+        <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
           if (mutationLock.current || operationRef.current) return
           const text = event.clipboardData.getData('text/plain')
           if (!text.trim()) return
           event.preventDefault(); setCommand(text); fill(text)
         }} /></label>
-        <p className="sheet-copy" id="show69-command-help">粘贴整段信息即可自动填入；未写年份时使用曼谷当前年份。核对下方信息后保存。</p>
+        <p className="sheet-copy" id={commandHelpId}>粘贴整段信息即可自动填入；未写年份时使用曼谷当前年份。核对下方信息后保存。</p>
         <button type="button" className="secondary-button" disabled={busy || pasting || Boolean(pendingSave)} aria-busy={pasting} onClick={() => void pasteAndFill()}>{pasting ? '正在粘贴…' : '粘贴 / 自动填入'}</button>
         {command.trim() && <button type="button" className="text-action" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => fill(command)}>识别当前文字</button>}
         {commandError && <p className="form-error" role="alert">{commandError}</p>}
@@ -187,14 +191,14 @@ export function Show69View({ accountId, initialInput, tickets, onSave, onDelete 
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="sheet-copy" role="status">{message}</p>}
     </section>
-    <section className="show79-orders"><h2>69秀记录</h2>
+    <section className="show79-orders"><h2>{title}记录</h2>
       <div className="show79-filters"><label>记录范围<select value={range} onChange={event => setRange(event.target.value as Range)}><option value="month">指定月份</option><option value="date">指定日期</option><option value="all">全部记录</option></select></label>
         {range === 'month' && <label>查询月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>}
         {range === 'date' && <label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label>}
       </div>
       <label className="show69-search">搜索姓名<input type="search" value={search} placeholder="输入任一人的姓名" onChange={event => setSearch(event.target.value)} /></label>
       <p className="sheet-copy">当前范围 {records.length} 条记录</p>
-      {!records.length && <p className="empty-card">当前范围没有69秀记录。</p>}
+      {!records.length && <p className="empty-card">当前范围没有{title}记录。</p>}
       <div className="records-list">{records.map(ticket => <article className="ticket-card" key={ticket.id}>
         <div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')}</p><strong className="show69-names">{ticket.guestName?.trim() || '姓名未记录'}</strong></div><strong>{ticket.personCount ?? '未填'} 人</strong></div>
         {ticket.syncStatus !== 'synced' && <p className="sheet-copy">等待同步</p>}

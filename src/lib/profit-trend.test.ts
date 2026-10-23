@@ -57,7 +57,7 @@ describe('profit trend money and settlement', () => {
     expect(buildProfitTrend(rows, '2026-10', '2026-11-01').current.totalProfitThb).toBe(summarise(ticketsInMonth(rows, '2026-10')).profitThb)
   })
   it('uses ticket snapshots, legacy fallback and fixed monthly commission, never catalogue or note text', () => {
-    const rows = [ticket({ projectName: '泰拳', settlementMode: 'daily' }), ticket({ id: 'legacy', projectName: '泰拳', settlementMode: undefined }), ticket({ id: 'explicit', settlementMode: 'monthly' }), ticket({ id: 'note', note: '泰拳' })]
+    const rows = [ticket({ projectName: '嘉年华', settlementMode: 'daily' }), ticket({ id: 'legacy', projectName: '嘉年华', settlementMode: undefined }), ticket({ id: 'explicit', settlementMode: 'monthly' }), ticket({ id: 'note', note: '泰拳' })]
     expect(buildProfitTrend(rows, '2026-10', '2026-10-15').current).toMatchObject({ dailyProfitThb: 300, monthlyProfitThb: 300, totalProfitThb: 600 })
   })
   it('keeps partial refunds and full-refund losses on the original date and settlement', () => {

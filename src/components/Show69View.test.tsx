@@ -2,13 +2,14 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { TicketRecord } from '../types'
 import { getBangkokDate } from '../lib/format'
+import { parseBoxingCommand } from '../lib/boxing'
 import { Show69View } from './Show69View'
 
 const record = (overrides: Partial<TicketRecord> = {}): TicketRecord => {
   const date = getBangkokDate()
   return { id: '69', userId: 'user', guestName: '韩廷富,邵建华,江华兴', issueDate: date, supplierId: 'internal-supplier', supplierName: '内部供应商不可展示', projectId: 'internal-project', projectName: '69秀', subItemName: '独立记录', personCount: 3, amountBasis: 'total', agentPriceThb: 9999, costThb: 8888, note: '内部财务备注不可展示', createdAt: `${date}T00:00:00Z`, updatedAt: `${date}T00:00:00Z`, deletedAt: null, syncStatus: 'synced', ...overrides }
 }
-const render = (tickets: TicketRecord[]) => renderToStaticMarkup(<Show69View tickets={tickets} onSave={async () => tickets[0]} onDelete={async () => {}} />)
+const render = (tickets: TicketRecord[], kind: 'show69' | 'boxing' = 'show69') => renderToStaticMarkup(<Show69View kind={kind} tickets={tickets} onSave={async () => tickets[0]} onDelete={async () => {}} />)
 
 describe('69秀独立记录页面', () => {
   it('provides only the requested date, all names and headcount without ticket generation or money fields', () => {
@@ -24,12 +25,13 @@ describe('69秀独立记录页面', () => {
     const html = render([
       record({ guestName: '<b>张三</b>,李四' }),
       record({ id: '79', projectName: '79秀', guestName: '其他项目姓名' }),
+      record({ id: 'boxing', projectName: '泰拳', guestName: '泰拳客户姓名' }),
       record({ id: 'deleted', guestName: '已删除姓名', deletedAt: '2026-01-01T00:00:00Z' }),
       record({ id: 'old', issueDate: '2020-01-01', guestName: '其他月份姓名' })
     ])
     expect(html).toContain('&lt;b&gt;张三&lt;/b&gt;,李四')
     expect(html).not.toContain('<b>张三</b>')
-    for (const value of ['其他项目姓名', '已删除姓名', '其他月份姓名']) expect(html).not.toContain(value)
+    for (const value of ['其他项目姓名', '泰拳客户姓名', '已删除姓名', '其他月份姓名']) expect(html).not.toContain(value)
     expect(html).toContain('当前范围 1 条记录')
   })
 
@@ -46,5 +48,31 @@ describe('69秀独立记录页面', () => {
     expect(html).toContain('value="2026-11-02"')
     expect(html).toContain('王一,王二,王三</textarea>')
     expect(html).toContain('step="1" value="3"')
+  })
+})
+
+describe('泰拳独立记录页面', () => {
+  it('uses the shared three-field form with boxing labels and isolates its records from both shows', () => {
+    const html = render([
+      record({ id: 'boxing', projectName: '泰拳', guestName: '泰拳客户甲,泰拳客户乙', personCount: 2 }),
+      record({ id: '69', guestName: '六九客户' }),
+      record({ id: '79', projectName: '79秀', guestName: '七九客户' }),
+      record({ id: 'deleted', projectName: '泰拳', guestName: '已删除泰拳客户', deletedAt: '2026-01-01T00:00:00Z' }),
+      record({ id: 'old', projectName: '泰拳', issueDate: '2020-01-01', guestName: '其他月份泰拳客户' })
+    ], 'boxing')
+    for (const value of ['<h1>泰拳</h1>', '新增泰拳记录', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '当前范围 1 条记录', '不计入主账本每日统计']) expect(html).toContain(value)
+    for (const value of ['69秀', '79秀', '六九客户', '七九客户', '已删除泰拳客户', '其他月份泰拳客户', '售价', '成本', '确认单', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
+    expect(html).toContain('aria-describedby="boxing-command-help"')
+  })
+
+  it('prefills the shared form from a pasted boxing template without changing its names or count', () => {
+    const initialInput = parseBoxingCommand('泰拳记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3', '2026-10-23')
+    const html = renderToStaticMarkup(<Show69View kind="boxing" tickets={[]} initialInput={initialInput} onSave={async () => record({ projectName: '泰拳' })} onDelete={async () => {}} />)
+    expect(html).toContain('已填入泰拳信息，请核对日期、所有人姓名和人数后保存。')
+    expect(html).toContain('value="2026-10-23"')
+    expect(html).toContain('韩廷富,邵建华,江华兴</textarea>')
+    expect(html).toContain('step="1" value="3"')
+    expect(html).toContain('当前范围没有泰拳记录。')
+    expect(html).not.toContain('69秀')
   })
 })

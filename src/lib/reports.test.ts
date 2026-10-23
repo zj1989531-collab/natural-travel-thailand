@@ -12,7 +12,7 @@ const records = [
   ticket('ordinary'),
   ticket('legacy', { amountBasis: undefined, personCount: 5, agentPriceThb: 100, costThb: 80 }),
   ticket('unknown', { amountBasis: 'total', personCount: null, agentPriceThb: 50, costThb: 40 }),
-  ticket('monthly-ticket', { projectName: '泰拳', personCount: 2, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
+  ticket('monthly-ticket', { projectName: '嘉年华', personCount: 2, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
   ticket('manual-commission', { entryMode: 'profit_only', manualProfitThb: 25, personCount: 4, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
   ticket('deleted', { deletedAt: '2026-10-13T04:00:00Z' }),
   ticket('previous-month', { issueDate: '2026-09-30' }),
@@ -51,12 +51,12 @@ describe('formatted ledger reports', () => {
   })
 
   it('queries monthly-settlement project ticket quantities daily, monthly and cumulatively', () => {
-    const daily = buildReport(records, query({ mode: 'day', projectName: '泰拳' }))
+    const daily = buildReport(records, query({ mode: 'day', projectName: '嘉年华' }))
     expect(daily.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })
     expect(daily.quantity.days).toEqual([{ date: '2026-10-13', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
     expect(daily.summary.profitThb).toBe(0)
     expect(daily.monthlySummary.profitThb).toBe(100)
-    expect(buildReport(records, query({ projectName: '泰拳' })).summary.profitThb).toBe(100)
+    expect(buildReport(records, query({ projectName: '嘉年华' })).summary.profitThb).toBe(100)
     const all = buildReport(records, query({ mode: 'all' }))
     expect(all.start).toBe('2026-09-30')
     expect(all.end).toBe('2026-11-01')
@@ -66,18 +66,18 @@ describe('formatted ledger reports', () => {
 
   it('combines supplier and exact parent-project filters across packages, not notes or similar names', () => {
     const rows = [
-      ticket('adult', { projectName: '泰拳', subItemName: '成人', personCount: 3 }),
-      ticket('child', { projectName: '泰拳', subItemName: '儿童', personCount: 2 }),
-      ticket('other-supplier', { projectName: '泰拳', supplierId: 'supplier-b', personCount: 5 }),
-      ticket('similar', { projectName: '泰拳课程', personCount: 9 }),
-      ticket('note', { note: '泰拳', subItemName: '泰拳', personCount: 8 }),
-      ticket('deleted-project', { projectName: '泰拳', deletedAt: '2026-10-13T04:00:00Z' }),
-      ticket('commission', { projectName: '泰拳', entryMode: 'profit_only', manualProfitThb: 25, personCount: 20 })
+      ticket('adult', { projectName: '嘉年华', subItemName: '成人', personCount: 3 }),
+      ticket('child', { projectName: '嘉年华', subItemName: '儿童', personCount: 2 }),
+      ticket('other-supplier', { projectName: '嘉年华', supplierId: 'supplier-b', personCount: 5 }),
+      ticket('similar', { projectName: '嘉年华课程', personCount: 9 }),
+      ticket('note', { note: '嘉年华', subItemName: '嘉年华', personCount: 8 }),
+      ticket('deleted-project', { projectName: '嘉年华', deletedAt: '2026-10-13T04:00:00Z' }),
+      ticket('commission', { projectName: '嘉年华', entryMode: 'profit_only', manualProfitThb: 25, personCount: 20 })
     ]
-    const report = buildReport(rows, query({ projectName: '泰拳', supplierId: 'supplier-a' }))
+    const report = buildReport(rows, query({ projectName: '嘉年华', supplierId: 'supplier-a' }))
     expect(report.quantity).toMatchObject({ recordCount: 2, peopleCount: 5, unknownCount: 0 })
     expect(report.records.map((row) => row.id)).toEqual(['adult', 'child', 'commission'])
-    expect(report.projectName).toBe('泰拳')
+    expect(report.projectName).toBe('嘉年华')
     expect(buildReport(rows, query({ projectName: '未出票项目' })).quantity.recordCount).toBe(0)
   })
 
@@ -194,7 +194,7 @@ describe('formatted ledger reports', () => {
 })
 
 describe('report period shortcuts', () => {
-  const filters = query({ mode: 'range', supplierId: 'supplier-b', projectName: '泰拳', guestName: 'Jimmy' })
+  const filters = query({ mode: 'range', supplierId: 'supplier-b', projectName: '嘉年华', guestName: 'Jimmy' })
 
   it('opens today while retaining the project, supplier and customer filters', () => {
     expect(reportShortcutQuery(filters, 'today', '2026-10-16')).toEqual({ ...filters, mode: 'day', date: '2026-10-16', month: '2026-10', startDate: '2026-10-16', endDate: '2026-10-16' })

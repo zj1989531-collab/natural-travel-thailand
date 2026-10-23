@@ -50,7 +50,7 @@ describe('refund amounts, quantities and original-period accounting', () => {
     expect(report.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })
     expect(report.summary.profitThb).toBe(50)
     expect(report.quantity.days).toEqual([{ date: '2026-09-30', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
-    const monthlyOnly = { ...row, projectName: '泰拳' }
+    const monthlyOnly = { ...row, projectName: '嘉年华' }
     expect(summarise(ticketsForDailyStats([monthlyOnly], row.issueDate)).profitThb).toBe(0)
     expect(summarise(ticketsInMonth([monthlyOnly], '2026-09')).profitThb).toBe(50)
   })

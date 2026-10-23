@@ -8,6 +8,8 @@ import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
 import { quantityParts } from '../lib/effective-quantities'
 import { isShow79Project } from '../lib/show79'
+import { isShow69Project } from '../lib/show69'
+import { isBoxingProject } from '../lib/boxing'
 import { exportReportToXlsx } from '../lib/export'
 import { buildReportCounts } from '../lib/report-counts'
 import './report-mobile.css'
@@ -121,7 +123,10 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   const currentMonth = today.slice(0, 7)
   const lastMonth = reportShortcutQuery(query, 'last-month', today).month
   const generatedAt = `${getBangkokDate()} ${getBangkokTime()}`
-  const names = useMemo(() => projectNames([...projects.filter(project => !isShow79Project(project.name)), ...activeTickets(tickets).filter(ticket => !isShow79Project(ticket.projectName)).map((ticket) => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))]), [projects, tickets])
+  const names = useMemo(() => {
+    const included = (name: string) => !isShow79Project(name) && !isShow69Project(name) && !isBoxingProject(name)
+    return projectNames([...projects.filter(project => included(project.name)), ...activeTickets(tickets).filter(ticket => included(ticket.projectName)).map(ticket => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))])
+  }, [projects, tickets])
   const supplierName = suppliers.find((supplier) => supplier.id === query.supplierId)?.name ?? (query.supplierId ? '所选供货商' : '全部供货商')
   const exportCurrentReport = async () => {
     if (!result.report || exporting) return

@@ -56,16 +56,24 @@ describe('online formatted report preview', () => {
   })
 
   it('shows a project query quantity even when that project profit is excluded from the daily total', () => {
-    const html = render([{ ...record, projectName: '泰拳' }, { ...record, id: 'unknown', projectName: '泰拳', personCount: null }], { ...query, mode: 'day', projectName: '泰拳' })
-    for (const text of ['项目：泰拳', '项目出票数量查询', '门票 3 张', '每日出票数量', '以上数量仅为已录部分', '月结项目另列']) expect(html).toContain(text)
+    const html = render([{ ...record, projectName: '嘉年华' }, { ...record, id: 'unknown', projectName: '嘉年华', personCount: null }], { ...query, mode: 'day', projectName: '嘉年华' })
+    for (const text of ['项目：嘉年华', '项目出票数量查询', '门票 3 张', '每日出票数量', '以上数量仅为已录部分', '月结项目另列']) expect(html).toContain(text)
     expect(html).not.toContain('3 张票')
   })
 
   it('lists unbooked catalogue projects and historical projects, grouping packages into one parent choice', () => {
-    const catalog: Project = { id: 'catalog', userId: record.userId, name: '泰拳', normalizedName: '泰拳', supplierId: record.supplierId, supplierName: record.supplierName, subItemName: '成人', normalizedSubItemName: '成人', defaultCostThb: 600, defaultAgentPriceThb: 650, createdAt: record.createdAt, updatedAt: record.updatedAt, syncStatus: 'synced' }
+    const catalog: Project = { id: 'catalog', userId: record.userId, name: '嘉年华', normalizedName: '嘉年华', supplierId: record.supplierId, supplierName: record.supplierName, subItemName: '成人', normalizedSubItemName: '成人', defaultCostThb: 600, defaultAgentPriceThb: 650, createdAt: record.createdAt, updatedAt: record.updatedAt, syncStatus: 'synced' }
     const html = renderToStaticMarkup(<ReportView tickets={[record]} suppliers={[]} projects={[catalog, { ...catalog, id: 'child', subItemName: '儿童' }]} />)
-    expect(html.match(/<option value="泰拳">/g)).toHaveLength(1)
+    expect(html.match(/<option value="嘉年华">/g)).toHaveLength(1)
     expect(html).toContain('<option value="测试项目">')
+  })
+
+  it('keeps the three independent monthly channels out of the main report project picker', () => {
+    const projects: Project[] = ['69秀', '79秀', 'MAX 泰拳', '普通门票'].map((name, index) => ({ id: `p${index}`, userId: record.userId, name, normalizedName: name, supplierId: record.supplierId, supplierName: record.supplierName, subItemName: '', normalizedSubItemName: '', defaultCostThb: 0, defaultAgentPriceThb: 0, createdAt: record.createdAt, updatedAt: record.updatedAt, syncStatus: 'synced' }))
+    const tickets = projects.map(project => ({ ...record, id: project.id, projectName: project.name }))
+    const html = renderToStaticMarkup(<ReportView tickets={tickets} suppliers={[]} projects={projects} />)
+    for (const name of ['69秀', '79秀', 'MAX 泰拳']) expect(html).not.toContain(`<option value="${name}">`)
+    expect(html).toContain('<option value="普通门票">')
   })
 
   it('shows missing customer names explicitly and preserves names on separately listed monthly rows', () => {

@@ -3,6 +3,7 @@ import { getBangkokDate, isValidCalendarDate, isValidPersonCount } from './forma
 import { getRefundState } from './refunds'
 import { getTicketAmounts } from './ticket-amounts'
 import { isShow69Project } from './show69'
+import { isBoxingProject } from './boxing'
 
 // Match immutable project snapshots, including historical catalogue names.
 export const isShow79Project = (name: string): boolean => {
@@ -10,7 +11,7 @@ export const isShow79Project = (name: string): boolean => {
   return /^79(?:成人)?秀/.test(normalized) || /^(?:imagine)?79show(?:$|[^a-z])/.test(normalized)
 }
 
-export const mainLedgerTickets = (tickets: TicketRecord[]) => tickets.filter(ticket => !isShow79Project(ticket.projectName) && !isShow69Project(ticket.projectName))
+export const mainLedgerTickets = (tickets: TicketRecord[]) => tickets.filter(ticket => !isShow79Project(ticket.projectName) && !isShow69Project(ticket.projectName) && !isBoxingProject(ticket.projectName))
 
 export const splitShow79Profit = (profitThb: number) => {
   const cents = Math.round(profitThb * 100)

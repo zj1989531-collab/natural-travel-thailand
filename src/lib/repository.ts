@@ -16,6 +16,7 @@ import { AccountChangedError, assertLedgerOwner, type LedgerOwnerContext } from 
 import { ticketCreateFingerprint } from './sync-conflicts'
 import { isMedicineProject, validateMedicineBatchShape, type MedicineTicketEntry } from './medicine-batch'
 import { isShow69Project, validateShow69Record, type Show69RecordInput } from './show69'
+import { isBoxingProject } from './boxing'
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 let accountUserId: string | null | undefined
@@ -71,11 +72,14 @@ const assertCurrent = (owner: LedgerOwnerContext) => { if (!owner.isCurrent()) t
 
 // Catalogue preparation is shared by concurrent saves, while every read/write
 // remains pinned to the account that started the request.
-let show69CataloguePreparation: Promise<void> = Promise.resolve()
-function prepareShow69Catalogue(owner: LedgerOwnerContext): Promise<{ supplier: Supplier; project: Project }> {
-  const preparation = show69CataloguePreparation.then(async () => {
+type IndependentRecordChannel = { projectName: string; fingerprintKind: string; matchesProject: (name: string) => boolean }
+const show69RecordChannel: IndependentRecordChannel = { projectName: '69秀', fingerprintKind: 'show69_record', matchesProject: isShow69Project }
+const boxingRecordChannel: IndependentRecordChannel = { projectName: '泰拳', fingerprintKind: 'boxing_record', matchesProject: isBoxingProject }
+let independentCataloguePreparation: Promise<void> = Promise.resolve()
+function prepareIndependentCatalogue(owner: LedgerOwnerContext, channel: IndependentRecordChannel): Promise<{ supplier: Supplier; project: Project }> {
+  const preparation = independentCataloguePreparation.then(async () => {
     assertCurrent(owner)
-    const supplierName = '69秀独立记录'
+    const supplierName = `${channel.projectName}独立记录`
     const suppliers = await db.getSuppliers()
     assertCurrent(owner)
     let supplier = suppliers.find(row => row.userId === owner.userId && row.normalizedName === normalizeSupplier(supplierName))
@@ -87,12 +91,12 @@ function prepareShow69Catalogue(owner: LedgerOwnerContext): Promise<{ supplier: 
     }
     const projects = await db.getProjects()
     assertCurrent(owner)
-    let project = projects.find(row => row.userId === owner.userId && row.supplierId === supplier.id && cleanProjectLabel(row.name) === '69秀' && cleanProjectLabel(row.subItemName) === '独立记录')
+    let project = projects.find(row => row.userId === owner.userId && row.supplierId === supplier.id && cleanProjectLabel(row.name) === channel.projectName && cleanProjectLabel(row.subItemName) === '独立记录')
     if (!project) {
       const timestamp = nextModifiedAt(supplier.updatedAt)
       project = {
         id: createId(), userId: owner.userId, supplierId: supplier.id, supplierName: supplier.name,
-        name: '69秀', normalizedName: normalizeSupplier('69秀'), subItemName: '独立记录', normalizedSubItemName: normalizeSupplier('独立记录'),
+        name: channel.projectName, normalizedName: normalizeSupplier(channel.projectName), subItemName: '独立记录', normalizedSubItemName: normalizeSupplier('独立记录'),
         quantityUnit: 'person', entryMode: 'standard', defaultAmountBasis: 'per_person', settlementMode: 'monthly',
         defaultCostThb: 0, defaultAgentPriceThb: 0, manualAgentPrice: false, manualCostPrice: false, manualSupplier: false,
         createdAt: timestamp, updatedAt: timestamp, syncStatus: statusForWrite()
@@ -102,8 +106,48 @@ function prepareShow69Catalogue(owner: LedgerOwnerContext): Promise<{ supplier: 
     }
     return { supplier, project }
   })
-  show69CataloguePreparation = preparation.then(() => undefined, () => undefined)
+  independentCataloguePreparation = preparation.then(() => undefined, () => undefined)
   return preparation
+}
+
+async function saveIndependentRecord(channel: IndependentRecordChannel, input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> {
+  const owner = (await ownerContext(true))!
+  validateShow69Record(input)
+  if (existing) {
+    const current = await db.getTicket(existing.id)
+    assertCurrent(owner)
+    if (existing.userId !== owner.userId || !current || current.userId !== owner.userId || current.deletedAt || !channel.matchesProject(current.projectName)) throw new Error(`当前账号无法编辑这条${channel.projectName}记录，请重新打开记录。`)
+    const refunds = await db.getRefunds()
+    assertCurrent(owner)
+    if (refunds.some(row => row.ticketId === current.id && row.userId === owner.userId)) throw new Error('已有退票明细的原票不可编辑，请保留完整记录。')
+    // Historical records retain their original catalogue and financial
+    // snapshots even when those catalogue entries have since changed.
+    const updated: TicketRecord = { ...current, issueDate: input.date, guestName: input.guestName.trim(), personCount: input.people, updatedAt: nextModifiedAt(current.updatedAt), syncStatus: statusForWrite() }
+    await db.putTicket(updated, owner)
+    return ticketWithCurrentRefunds(updated, owner)
+  }
+
+  // The user submits three fields only. Internal time/catalogue defaults must
+  // not make a retry look like a different submission after a minute or sync.
+  const fingerprint = JSON.stringify({ kind: channel.fingerprintKind, date: input.date, guestName: input.guestName.trim(), people: input.people })
+  const id = operationId ?? createId()
+  const accepted = await db.getTicketCreateOperation(id, owner)
+  assertCurrent(owner)
+  if (accepted) {
+    if (accepted.receipt.fingerprint !== fingerprint) throw new Error('这次提交已经保存过不同内容，请重新打开新增记录。')
+    return ticketWithCurrentRefunds(accepted.ticket, owner)
+  }
+  const { supplier, project } = await prepareIndependentCatalogue(owner, channel)
+  assertCurrent(owner)
+  const timestamp = nextModifiedAt(supplier.updatedAt, project.updatedAt)
+  const ticket: TicketRecord = {
+    id, userId: owner.userId, guestName: input.guestName.trim(), issueDate: input.date, issueTime: getBangkokTime(), personCount: input.people,
+    supplierId: supplier.id, supplierName: supplier.name, projectId: project.id, projectName: channel.projectName, subItemName: '独立记录',
+    quantityUnit: 'person', entryMode: 'standard', amountBasis: 'per_person', settlementMode: 'monthly',
+    agentPriceThb: 0, costThb: 0, manualProfitThb: null, note: '',
+    createdAt: timestamp, updatedAt: timestamp, deletedAt: null, syncStatus: statusForWrite()
+  }
+  return ticketWithCurrentRefunds(await db.putNewTicketOnce(ticket, fingerprint, owner), owner)
 }
 
 async function ticketWithCurrentRefunds(ticket: TicketRecord, owner: LedgerOwnerContext): Promise<TicketRecord> {
@@ -736,43 +780,11 @@ export const ledgerRepository = {
   },
 
   async createOrUpdateShow69Record(input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> {
-    const owner = (await ownerContext(true))!
-    validateShow69Record(input)
-    if (existing) {
-      const current = await db.getTicket(existing.id)
-      assertCurrent(owner)
-      if (existing.userId !== owner.userId || !current || current.userId !== owner.userId || current.deletedAt || !isShow69Project(current.projectName)) throw new Error('当前账号无法编辑这条69秀记录，请重新打开记录。')
-      const refunds = await db.getRefunds()
-      assertCurrent(owner)
-      if (refunds.some(row => row.ticketId === current.id && row.userId === owner.userId)) throw new Error('已有退票明细的原票不可编辑，请保留完整记录。')
-      // Historical records retain their original catalogue and financial
-      // snapshots even when those catalogue entries have since changed.
-      const updated: TicketRecord = { ...current, issueDate: input.date, guestName: input.guestName.trim(), personCount: input.people, updatedAt: nextModifiedAt(current.updatedAt), syncStatus: statusForWrite() }
-      await db.putTicket(updated, owner)
-      return ticketWithCurrentRefunds(updated, owner)
-    }
+    return saveIndependentRecord(show69RecordChannel, input, existing, operationId)
+  },
 
-    // The user submits three fields only. Internal time/catalogue defaults must
-    // not make a retry look like a different submission after a minute or sync.
-    const fingerprint = JSON.stringify({ kind: 'show69_record', date: input.date, guestName: input.guestName.trim(), people: input.people })
-    const id = operationId ?? createId()
-    const accepted = await db.getTicketCreateOperation(id, owner)
-    assertCurrent(owner)
-    if (accepted) {
-      if (accepted.receipt.fingerprint !== fingerprint) throw new Error('这次提交已经保存过不同内容，请重新打开新增记录。')
-      return ticketWithCurrentRefunds(accepted.ticket, owner)
-    }
-    const { supplier, project } = await prepareShow69Catalogue(owner)
-    assertCurrent(owner)
-    const timestamp = nextModifiedAt(supplier.updatedAt, project.updatedAt)
-    const ticket: TicketRecord = {
-      id, userId: owner.userId, guestName: input.guestName.trim(), issueDate: input.date, issueTime: getBangkokTime(), personCount: input.people,
-      supplierId: supplier.id, supplierName: supplier.name, projectId: project.id, projectName: '69秀', subItemName: '独立记录',
-      quantityUnit: 'person', entryMode: 'standard', amountBasis: 'per_person', settlementMode: 'monthly',
-      agentPriceThb: 0, costThb: 0, manualProfitThb: null, note: '',
-      createdAt: timestamp, updatedAt: timestamp, deletedAt: null, syncStatus: statusForWrite()
-    }
-    return ticketWithCurrentRefunds(await db.putNewTicketOnce(ticket, fingerprint, owner), owner)
+  async createOrUpdateBoxingRecord(input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> {
+    return saveIndependentRecord(boxingRecordChannel, input, existing, operationId)
   },
 
   async createOrUpdateTicket(input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> {

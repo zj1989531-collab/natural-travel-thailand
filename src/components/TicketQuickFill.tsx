@@ -3,14 +3,16 @@ import type { Project, TicketInput } from '../types'
 import { applyTicketCommand, parseTicketCommand, type ParsedTicketCommand } from '../lib/ticket-command'
 import { quantityLabels } from '../lib/quantity'
 import { isShow69Command, parseShow69Command, type Show69RecordInput } from '../lib/show69'
+import { isBoxingCommand, parseBoxingCommand } from '../lib/boxing'
 
-export function TicketQuickFill({ projects, current, disabled, onFill, onBusyChange, onShow69 }: {
+export function TicketQuickFill({ projects, current, disabled, onFill, onBusyChange, onShow69, onBoxing }: {
   projects: Project[]
   current: TicketInput
   disabled: boolean
   onFill: (input: TicketInput) => void
   onBusyChange: (busy: boolean) => void
   onShow69?: (input: Show69RecordInput) => void
+  onBoxing?: (input: Show69RecordInput) => void
 }) {
   const [command, setCommand] = useState('')
   const [error, setError] = useState('')
@@ -48,10 +50,19 @@ export function TicketQuickFill({ projects, current, disabled, onFill, onBusyCha
     if (latest.current.disabled) return
     cancelRead(); clearFeedback()
     try {
-      if (onShow69 && isShow69Command(text)) {
+      const show69 = Boolean(onShow69) && isShow69Command(text)
+      const boxing = Boolean(onBoxing) && isBoxingCommand(text)
+      if (show69 && boxing) throw new Error('检测到多个项目，请每次只填写一个项目。')
+      if (onShow69 && show69) {
         const input = parseShow69Command(text)
         onBusyChange(false)
         onShow69(input)
+        return
+      }
+      if (onBoxing && boxing) {
+        const input = parseBoxingCommand(text)
+        onBusyChange(false)
+        onBoxing(input)
         return
       }
       const parsed = parseTicketCommand(text, latest.current.projects)
