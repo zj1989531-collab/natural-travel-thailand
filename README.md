@@ -47,6 +47,8 @@ pnpm dev:sync
 
 已有数据库先执行当前版本需要的 `supabase/migrations/` 升级脚本及 `supabase/refunds.sql`，最后执行 `supabase/project-rules.sql`，再发布前端。规则升级只新增可空字段，不回填或重写历史金额；兼容触发器防止旧客户端缺少字段时清空已有规则。电脑与手机都应刷新到新版。已有数据库还需执行 [supabase/refund-actual-date.sql](./supabase/refund-actual-date.sql)，允许在未来观看／出行日期之前按实际当天登记退款；79秀月结需先执行 [supabase/show79-settlements.sql](./supabase/show79-settlements.sql)，已有月结库执行 [supabase/show79-account-guard.sql](./supabase/show79-account-guard.sql) 增加付款账号核对。升级只替换校验函数或新增兼容入口，不重写历史业务数据。
 
+现有云端的供货商名称更正已执行 [supabase/canonical-supplier-brand.sql](./supabase/canonical-supplier-brand.sql)，同步更新供货商、套餐及历史票据名称，并兼容旧客户端拼写。该脚本用于已有业务数据，需在退款相关脚本之后执行；详见 [部署说明](./DEPLOYMENT.md#供货商名称更正)。
+
 套餐可设置默认按人／件或整单计价，以及日结／月结。旧套餐按名称推荐默认值，保存设置后固定；每次出票可临时改计价，历史记录保留自身金额与结算归属。保存前会合并提示本机缓存中疑似重复或亏损的记录，确认后仍可保存；离线提示不能保证发现另一设备尚未同步的重复业务。
 
 项目可勾选成本、售价每次手填，并可选择不预设供货商。此类套餐在每次选择后清空价格和供货商，保存实际记录时必须填写金额并选择本账号已有供货商；历史记录保留实际金额和供货商。叫车按整单计价、整单统计，不重复乘人数。旧客户端缺少新字段时不会清空云端手填规则，升级后电脑和手机均需刷新。
