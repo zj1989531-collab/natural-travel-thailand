@@ -589,6 +589,7 @@ export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [show69Draft, setShow69Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   const [boxingDraft, setBoxingDraft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
+  const [monthlyStandardDraft, setMonthlyStandardDraft] = useState<{ id: string; accountId: string; kind: 'kohlarn' | 'carnival' }>()
   const monthlyChannel = view === 'show69' || view === 'show79' || view === 'boxing' || view === 'kohlarn' || view === 'carnival' ? view : undefined
   const monthlyView = view === 'monthly' || Boolean(monthlyChannel)
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
@@ -847,6 +848,12 @@ export default function App() {
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView('boxing')
+  }
+  const openMonthlyStandard = (kind: 'kohlarn' | 'carnival') => {
+    setMonthlyStandardDraft({ id: createId(), accountId: financialAccountId, kind })
+    setFormOpen(false)
+    setSelectedTicket(undefined)
+    setView(kind)
   }
   const openRefund = (id = '') => {
     if (requestLoginForWrite()) return
@@ -1141,12 +1148,12 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
+        </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} />
             : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
-              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}`} accountId={financialAccountId} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} />
-                : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}`} accountId={financialAccountId} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} /> : null}
+              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} />
+                : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
@@ -1183,7 +1190,7 @@ export default function App() {
         </>}
       </div>
 
-      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' || view === 'carnival' ? window.scrollTo({ top: 0, behavior: 'smooth' }) : openNewForm()} onRefund={() => openRefund()} />
+      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' ? openMonthlyStandard('kohlarn') : view === 'carnival' ? openMonthlyStandard('carnival') : openNewForm()} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
