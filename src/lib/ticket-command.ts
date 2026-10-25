@@ -65,6 +65,9 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   // Dotted dates are accepted only in an explicitly labelled date field, so a
   // decimal price or quantity can never be silently interpreted as a date.
   remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[.．]\s*(\d{1,2})(?![\d.．])/g, '$1$2月$3日')
+  // Accept the common day-month-year format in labelled date fields without
+  // allowing ordinary hyphenated numbers elsewhere to become dates.
+  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{4})(?!\d)/g, '$1$4-$3-$2')
   const fields: Partial<TicketInput> = {}
   const warnings: string[] = []
   const catalogue = projects.filter((project) => !project.mergedIntoId)

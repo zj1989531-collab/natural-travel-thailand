@@ -37,6 +37,12 @@ describe('catalogue ticket command parsing', () => {
     expect(parsed.fields).toMatchObject({ issueDate: '2026-10-23', guestName: '韩廷富 邵建华 江华兴', personCount: 3 })
   })
 
+  it('recognizes a labelled day-month-year date in the 69 ticket template', () => {
+    const parsed = parse('69出票格式\n日期：25-10-2026\n名字（所有人）：贾帅\n人数：1', [project('69', '69秀')])
+    expect(parsed.candidates.map(item => item.id)).toEqual(['69'])
+    expect(parsed.fields).toMatchObject({ issueDate: '2026-10-25', guestName: '贾帅', personCount: 1 })
+  })
+
   it('recognizes the common Koh Larn alias, letter package code and labelled dotted date', () => {
     const kohLarnC = project('koh-larn-c', '格兰岛跟团一日游', { subItemName: 'C套餐' })
     const parsed = parse('格兰岛出海一日游\n套餐:c\n出行日期:10.26\n人数:1\n姓名:向绍平', [kohLarnC], '2026-10-25')
