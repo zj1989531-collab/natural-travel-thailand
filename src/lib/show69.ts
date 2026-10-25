@@ -28,10 +28,12 @@ export const isShow69Command = (text: string): boolean => {
 
 // This only fills the editable record. Persistence is a separate user action.
 export function parseShow69Command(text: string, today = getBangkokDate()): Show69RecordInput {
-  let remaining = text.normalize('NFKC').replace(/[−﹣](?=\s*\d)/g, '-').trim()
+  let remaining = text.normalize('NFKC').replace(/[‐‑‒–—−﹣－]/g, '-').trim()
   if (!remaining) throw new Error('请先输入或黏贴日期、所有人姓名和人数。')
   if (/(?:备注|说明|\bnote\s*:)\s*[:：]?/i.test(remaining)) throw new Error('69秀仅记录日期、所有人姓名和人数，请移除备注或说明后再填写。')
   remaining = remaining.replace(/^(?:69(?:\s*成人)?\s*秀?|六九(?:\s*成人)?\s*秀?)(?:\s*出票|\s*记录)?\s*格式\s*[:：]?\s*(?:\r?\n|$)/i, '')
+  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[.．]\s*(\d{1,2})(?![\d.．])/g, '$1$2月$3日')
+  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{4})(?!\d)/g, '$1$4-$3-$2')
   const dates = [...remaining.matchAll(/\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}日?|(?<!\d)\d{1,2}\s*月\s*\d{1,2}日?|今天|今日|明天|明日|后天/g)]
   if (dates.length !== 1) throw new Error('请填写一个日期，例如“10月23”“今天”或“2026/10/23”；不要同时填写多个日期。')
   const token = dates[0][0]

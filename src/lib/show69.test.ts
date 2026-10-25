@@ -24,6 +24,9 @@ describe('69 independent records', () => {
     expect(parseShow69Command(template, '2026-12-31')).toEqual({ date: '2026-10-23', guestName: '韩廷富,邵建华,江华兴', people: 3 })
     expect(parseShow69Command(template.replace('69出票格式\n', ''), '2027-01-01').date).toBe('2027-10-23')
   })
+  it.each(['-', '–', '—', '−', '﹣'])('accepts labelled day-month-year dates with %s', (dash) => {
+    expect(parseShow69Command(`69出票格式\n日期：25${dash}10${dash}2026\n名字（所有人）：贾帅\n人数：1`)).toEqual({ date: '2026-10-25', guestName: '贾帅', people: 1 })
+  })
   it.each([
     ['69 张三 今天 2人', '2026-10-23', '张三', 2],
     ['六九秀 李湘光 龙粉萍 2026年10月24日 2位', '2026-10-24', '李湘光 龙粉萍', 2],
