@@ -18,8 +18,7 @@ import { Show69View } from './components/Show69View'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
 import { MonthlyTicketsView } from './components/MonthlyTicketsView'
-import { MonthlyStandardTicketView } from './components/MonthlyStandardTicketView'
-import { boxingCategoryForTicket } from './lib/monthly-pricing'
+import { boxingCategoryForTicket, resolveMonthlyPricing } from './lib/monthly-pricing'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
@@ -945,6 +944,36 @@ export default function App() {
   const saveShow69 = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('show69', input, existing, operationId)
   const saveBoxing = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('boxing', input, existing, operationId)
 
+  const saveMainLedgerMonthlyRecord = async (kind: 'kohlarn' | 'carnival', input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
+    requireCloudLogin()
+    const epoch = accountEpochRef.current
+    const matched = existing ? undefined : resolveMonthlyPricing(kind, input, projects)
+    if (!existing && !matched?.project) throw new Error('请先选择有效的月结套餐。')
+    const project = matched?.project
+    const ticketInput: TicketInput = existing ? {
+      guestName: input.guestName.trim(), issueDate: input.date, issueTime: existing.issueTime ?? getBangkokTime(),
+      projectId: existing.projectId ?? '', projectName: existing.projectName, subItemName: existing.subItemName,
+      supplierName: existing.supplierName, personCount: input.people, amountBasis: existing.amountBasis ?? 'per_person',
+      quantityUnit: existing.quantityUnit ?? 'person', entryMode: existing.entryMode ?? 'standard', settlementMode: existing.settlementMode ?? 'monthly',
+      agentPriceThb: existing.agentPriceThb, costThb: existing.costThb, manualProfitThb: existing.manualProfitThb ?? null, note: existing.note
+    } : {
+      guestName: input.guestName.trim(), issueDate: input.date, issueTime: getBangkokTime(),
+      projectId: project!.id, projectName: project!.name, subItemName: project!.subItemName, supplierName: project!.supplierName,
+      personCount: input.people, amountBasis: 'per_person', quantityUnit: 'person', entryMode: 'standard', settlementMode: 'monthly',
+      agentPriceThb: matched!.agentPriceThb, costThb: matched!.costThb, note: ''
+    }
+    const saved = await ledgerRepository.createOrUpdateTicket(ticketInput, existing, operationId)
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
+    try { await refresh() }
+    catch { if (epoch === accountEpochRef.current) setToast(`${kind === 'kohlarn' ? '格兰岛一日游' : '东方嘉年华'}月结记录已保存；页面刷新未完成，请同步核对，无需再次保存。`) }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    void synchronise()
+    return saved
+  }
+  const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveMainLedgerMonthlyRecord('kohlarn', input, existing, operationId)
+  const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveMainLedgerMonthlyRecord('carnival', input, existing, operationId)
+
   const saveShow79Settlement = async (input: Show79SettlementInput) => {
     requireCloudLogin()
     const epoch = accountEpochRef.current
@@ -1116,8 +1145,8 @@ export default function App() {
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} />
             : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
-              : view === 'kohlarn' ? <MonthlyStandardTicketView title="格兰岛一日游" description="按人自动带入套餐价格" packageCount={kohLarnProjects.length} onAdd={openNewForm} onManageProjects={() => setSupplierSheetOpen(true)} />
-                : view === 'carnival' ? <MonthlyStandardTicketView title="东方嘉年华" description="普通票与 VIP 票按人自动带价" packageCount={carnivalProjects.length} onAdd={openNewForm} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
+              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}`} accountId={financialAccountId} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} />
+                : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}`} accountId={financialAccountId} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
@@ -1154,7 +1183,7 @@ export default function App() {
         </>}
       </div>
 
-      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : openNewForm()} onRefund={() => openRefund()} />
+      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' || view === 'carnival' ? window.scrollTo({ top: 0, behavior: 'smooth' }) : openNewForm()} onRefund={() => openRefund()} />
 
       {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}

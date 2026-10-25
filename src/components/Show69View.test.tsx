@@ -81,6 +81,18 @@ describe('泰拳独立记录页面', () => {
   })
 })
 
+describe('主账本月结项目页面', () => {
+  it.each([
+    { kind: 'kohlarn' as const, title: '格兰岛一日游', name: '格兰岛跟团一日游', subItemName: 'C套餐', agentPriceThb: 850, costThb: 720 },
+    { kind: 'carnival' as const, title: '东方嘉年华', name: '东方嘉年华', subItemName: 'VIP', agentPriceThb: 1200, costThb: 990 }
+  ])('uses the same paste-first monthly form for $title while keeping it in the main ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
+    const monthlyProject = project({ id: kind, name, normalizedName: name, subItemName, normalizedSubItemName: subItemName, defaultAgentPriceThb: agentPriceThb, defaultCostThb: costThb })
+    const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
+    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '主账本 · 月结', '计入所属月报和年报', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb)]) expect(html).toContain(value)
+    expect(html).not.toContain('不计入主账本每日统计、月报、年报及排行')
+  })
+})
+
 const project = (overrides: Partial<Project> = {}): Project => ({ id: 'show69-price', userId: 'user', name: '69秀', normalizedName: '69秀', supplierId: 'starlight', supplierName: '星光旅行社', subItemName: '', normalizedSubItemName: '', defaultAgentPriceThb: 430, defaultCostThb: 400, defaultAmountBasis: 'per_person', entryMode: 'standard', quantityUnit: 'person', settlementMode: 'monthly', createdAt: '', updatedAt: '', syncStatus: 'synced', ...overrides })
 const priceProjects = [project(), project({ id: 'asian-price', name: '泰拳', normalizedName: '泰拳', subItemName: '亚洲面孔', normalizedSubItemName: '亚洲面孔', defaultAgentPriceThb: 650, defaultCostThb: 620 }), project({ id: 'western-price', name: '泰拳', normalizedName: '泰拳', subItemName: '欧美面孔', normalizedSubItemName: '欧美面孔', defaultAgentPriceThb: 900, defaultCostThb: 850 })]
 
