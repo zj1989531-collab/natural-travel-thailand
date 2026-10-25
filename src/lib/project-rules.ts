@@ -1,9 +1,14 @@
 import type { AmountBasis, Project, SettlementMode, TicketRecord } from '../types'
 import { isWholeBooking } from './effective-quantities'
 
+const normalizedProjectName = (projectName: string) => projectName.normalize('NFKC').replace(/\s+/g, '').toLowerCase()
+
+export const isKohLarnDayTripProject = (projectName: string): boolean => /格兰岛.*一日游/.test(normalizedProjectName(projectName))
+export const isCarnivalProject = (projectName: string): boolean => /嘉年华/.test(normalizedProjectName(projectName))
+
 export const isMonthlySettlementProject = (projectName: string): boolean => {
-  const name = projectName.normalize('NFKC').replace(/\s+/g, '').toLowerCase()
-  return /^(69|79)秀/.test(name) || /泰拳|嘉年华|潜水/.test(name) || /格兰岛.*一日游/.test(name)
+  const name = normalizedProjectName(projectName)
+  return /^(69|79)秀/.test(name) || /泰拳|潜水/.test(name) || isCarnivalProject(name) || isKohLarnDayTripProject(name)
 }
 
 type ProjectRules = Pick<Project, 'name' | 'subItemName' | 'entryMode' | 'quantityUnit' | 'defaultAmountBasis' | 'settlementMode'>

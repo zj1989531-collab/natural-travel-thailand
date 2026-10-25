@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, TicketInput, TicketRecord } from '../types'
-import { resolveProjectRules, ticketSettlementMode, validateProjectRules } from './project-rules'
+import { isCarnivalProject, isKohLarnDayTripProject, resolveProjectRules, ticketSettlementMode, validateProjectRules } from './project-rules'
 import { chooseProject, chooseProjectOption } from './project-selection'
 import { ticketsForDailyStats, ticketsInMonth, ticketsInYear, summarise } from './stats'
 import { getOriginalTicketAmounts } from './ticket-amounts'
@@ -22,6 +22,12 @@ describe('package rules and historical settlement snapshots', () => {
     expect(resolveProjectRules({ ...project, quantityUnit: 'item' }).defaultAmountBasis).toBe('per_person')
     expect(resolveProjectRules({ ...project, name: '嘉年华', settlementMode: 'daily', defaultAmountBasis: 'total' })).toEqual({ defaultAmountBasis: 'total', settlementMode: 'daily' })
     expect(resolveProjectRules({ ...project, entryMode: 'profit_only', settlementMode: 'daily' })).toEqual({ defaultAmountBasis: 'per_person', settlementMode: 'monthly' })
+  })
+  it('identifies the two monthly main-ledger channels without including other Koh Larn products', () => {
+    expect(isKohLarnDayTripProject('格兰岛跟团一日游')).toBe(true)
+    expect(isKohLarnDayTripProject('黑珍珠海盗船格兰岛半日游')).toBe(false)
+    expect(isCarnivalProject('东方嘉年华')).toBe(true)
+    expect(isCarnivalProject('格兰岛跟团一日游')).toBe(false)
   })
   it('applies package defaults consistently to name selection, search and recent option selection', () => {
     const regular = { ...project, subItemName: '普通门票' }

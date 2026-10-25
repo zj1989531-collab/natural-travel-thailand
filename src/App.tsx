@@ -18,6 +18,7 @@ import { Show69View } from './components/Show69View'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
 import { MonthlyTicketsView } from './components/MonthlyTicketsView'
+import { MonthlyStandardTicketView } from './components/MonthlyStandardTicketView'
 import { boxingCategoryForTicket } from './lib/monthly-pricing'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
@@ -30,7 +31,7 @@ import { readFinancialSubmission } from './lib/financial-submission'
 import './components/ticket-entry.css'
 import { SaveWarning } from './components/SaveWarning'
 import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './lib/entry-warnings'
-import { resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
+import { isCarnivalProject, isKohLarnDayTripProject, resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
 import { filterProjects } from './lib/project-search'
 import { matchesTicketSearch, type TicketDateRange } from './lib/ticket-search'
 import { quantityParts, summariseQuantities } from './lib/effective-quantities'
@@ -45,7 +46,7 @@ import { chooseProject, chooseProjectOption } from './lib/project-selection'
 import { activeTickets, bySupplier, getProfit, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, SettlementMode, Supplier, TicketInput, TicketRecord } from './types'
 
-type View = 'dashboard' | 'records' | 'reports' | 'monthly' | 'show69' | 'show79' | 'boxing'
+type View = 'dashboard' | 'records' | 'reports' | 'monthly' | 'show69' | 'show79' | 'boxing' | 'kohlarn' | 'carnival'
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -56,6 +57,7 @@ interface TicketFormProps {
   suppliers?: Supplier[]
   ticket?: TicketRecord
   projects: Project[]
+  projectOptions?: Project[]
   knownTickets?: TicketRecord[]
   cloudLoginRequired: boolean
   onCancel: () => void
@@ -84,7 +86,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onBoxing }: TicketFormProps) {
+export function TicketForm({ ticket, projects, projectOptions, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onBoxing }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -117,6 +119,7 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
   const moreSettingsRef = useRef<HTMLDetailsElement>(null)
   const timeInputRef = useRef<HTMLInputElement>(null)
   const medicineMode = !ticket && (pendingMedicineSave || isMedicineProject({ name: form.projectName, quantityUnit: 'item', entryMode: 'standard' }) && projects.some(isMedicineProject))
+  const selectableProjects = projectOptions ?? projects
 
   const applyFilledForm = (next: TicketInput) => {
     if (saveLock.current || pendingMedicineSave) return
@@ -256,7 +259,7 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
           const details = (event.target as HTMLElement).closest('details')
           if (details) details.open = true
         }} onSubmit={event => { event.preventDefault(); void attemptSave() }}>
-          {!ticket && <TicketQuickFill projects={projects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} onShow69={onShow69} onBoxing={onBoxing} />}
+          {!ticket && <TicketQuickFill projects={selectableProjects} current={form} disabled={saving || pendingMedicineSave} onBusyChange={onFillBusy} onFill={applyFilledForm} onShow69={onShow69} onBoxing={onBoxing} />}
           {medicineMode && <section className="ticket-order-summary" aria-label="订单核对摘要"><p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')}</p><p>药品 · 已选 {medicineLines.length} 项，各子项数量和利润分别统计。</p></section>}
           {!medicineMode && form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
             <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
@@ -274,7 +277,7 @@ export function TicketForm({ ticket, projects, suppliers = [], knownTickets = []
           <label>客户姓名 <span className="muted">（可选）</span><input value={form.guestName ?? ''} maxLength={100} onChange={event => update('guestName', event.target.value)} /></label>
           {!medicineMode && <PersonCountField quantityUnit={form.quantityUnit} value={form.personCount} allowUnknown={Boolean(ticket && ticket.personCount == null && !perPerson)} multiplyAmounts={perPerson} onChange={(value) => update('personCount', value)} />}
           {ticket && !perPerson && <p className="sheet-copy">旧记录保留原总额；如切换为按{countLabel}计算，请先核对并填写{single}金额。</p>}
-          <ProjectPicker projects={projects} form={form}
+          <ProjectPicker projects={selectableProjects} form={form}
             selectedOptionIds={medicineMode ? medicineLines.map(line => line.projectId) : []}
             renderOptions={medicineMode ? choices => <MedicineItemsField projects={choices} lines={medicineLines} disabled={saving || filling || pendingMedicineSave} onChange={lines => { if (saveLock.current || fillLock.current || pendingMedicineSave) return; setMedicineLines(lines); setWarning(null); setError('') }} /> : undefined}
             onName={name => selectProject(current => chooseProject(current, projects, name))}
@@ -587,7 +590,7 @@ export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [show69Draft, setShow69Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   const [boxingDraft, setBoxingDraft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
-  const monthlyChannel = view === 'show69' || view === 'show79' || view === 'boxing' ? view : undefined
+  const monthlyChannel = view === 'show69' || view === 'show79' || view === 'boxing' || view === 'kohlarn' || view === 'carnival' ? view : undefined
   const monthlyView = view === 'monthly' || Boolean(monthlyChannel)
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
   const [selectedTicket, setSelectedTicket] = useState<TicketRecord | undefined>()
@@ -806,6 +809,9 @@ export default function App() {
   })).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, recordDateRange, supplierFilter, query, today])
 
   const mainTickets = useMemo(() => mainLedgerTickets(tickets), [tickets])
+  const kohLarnProjects = useMemo(() => projects.filter(project => isKohLarnDayTripProject(project.name)), [projects])
+  const carnivalProjects = useMemo(() => projects.filter(project => isCarnivalProject(project.name)), [projects])
+  const monthlyFormProjects = view === 'kohlarn' ? kohLarnProjects : view === 'carnival' ? carnivalProjects : undefined
 
   const monthlySupplierStats = useMemo(() => bySupplier(ticketsInMonth(tickets, month)), [tickets, month])
   const unsyncedCount = [...tickets, ...suppliers, ...projects, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length
@@ -1109,7 +1115,9 @@ export default function App() {
         </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} />
-            : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
+            : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
+              : view === 'kohlarn' ? <MonthlyStandardTicketView title="格兰岛一日游" description="按人自动带入套餐价格" packageCount={kohLarnProjects.length} onAdd={openNewForm} onManageProjects={() => setSupplierSheetOpen(true)} />
+                : view === 'carnival' ? <MonthlyStandardTicketView title="东方嘉年华" description="普通票与 VIP 票按人自动带价" packageCount={carnivalProjects.length} onAdd={openNewForm} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
@@ -1148,7 +1156,7 @@ export default function App() {
 
       <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : openNewForm()} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
