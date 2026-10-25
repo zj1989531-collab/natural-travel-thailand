@@ -11,7 +11,9 @@ export interface ParsedTicketCommand {
 }
 
 type TextMatch = { start: number; end: number; value: string }
-const normalized = (value: string) => value.normalize('NFKC').replace(/[−﹣](?=\s*\d)/g, '-').trim()
+// iOS and copied chat messages often replace a hyphen with a typographic dash.
+// Normalize every common dash before parsing dates, quantities and prices.
+const normalized = (value: string) => value.normalize('NFKC').replace(/[‐‑‒–—−﹣－]/g, '-').trim()
 const key = (value: string) => normalized(value).replace(/\s+/g, '').toLowerCase()
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const occurrences = (text: string, label: string): TextMatch[] => {

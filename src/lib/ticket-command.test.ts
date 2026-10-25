@@ -37,8 +37,8 @@ describe('catalogue ticket command parsing', () => {
     expect(parsed.fields).toMatchObject({ issueDate: '2026-10-23', guestName: '韩廷富 邵建华 江华兴', personCount: 3 })
   })
 
-  it('recognizes a labelled day-month-year date in the 69 ticket template', () => {
-    const parsed = parse('69出票格式\n日期：25-10-2026\n名字（所有人）：贾帅\n人数：1', [project('69', '69秀')])
+  it.each(['-', '–', '—', '−', '﹣'])('recognizes a labelled day-month-year date with %s in the 69 ticket template', (dash) => {
+    const parsed = parse(`69出票格式\n日期：25${dash}10${dash}2026\n名字（所有人）：贾帅\n人数：1`, [project('69', '69秀')])
     expect(parsed.candidates.map(item => item.id)).toEqual(['69'])
     expect(parsed.fields).toMatchObject({ issueDate: '2026-10-25', guestName: '贾帅', personCount: 1 })
   })
