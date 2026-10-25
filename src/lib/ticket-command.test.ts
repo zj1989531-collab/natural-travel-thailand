@@ -37,6 +37,13 @@ describe('catalogue ticket command parsing', () => {
     expect(parsed.fields).toMatchObject({ issueDate: '2026-10-23', guestName: '韩廷富 邵建华 江华兴', personCount: 3 })
   })
 
+  it('recognizes the common Koh Larn alias, letter package code and labelled dotted date', () => {
+    const kohLarnC = project('koh-larn-c', '格兰岛跟团一日游', { subItemName: 'C套餐' })
+    const parsed = parse('格兰岛出海一日游\n套餐:c\n出行日期:10.26\n人数:1\n姓名:向绍平', [kohLarnC], '2026-10-25')
+    expect(parsed.candidates.map(item => item.id)).toEqual(['koh-larn-c'])
+    expect(parsed.fields).toMatchObject({ issueDate: '2026-10-26', personCount: 1, guestName: '向绍平' })
+  })
+
   it('does not infer a show from explicit monetary or quantity fields', () => {
     const shows = ['69', '79', '89', '99'].map(value => project(value, `${value}秀`))
     expect(() => parse('张三 今天 人数69 售价79 成本89', shows)).toThrow('未找到目录')

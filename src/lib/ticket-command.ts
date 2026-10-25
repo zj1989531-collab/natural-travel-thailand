@@ -36,9 +36,19 @@ const strip = (value: string) => value.replace(/^[\s,，;；、:：|/]+|[\s,，;
 const projectKey = (project: Project) => key(cleanProjectLabel(project.name))
 const projectAliases = (project: Project) => {
   const aliases = [project.name, cleanProjectLabel(project.name)]
+  // This is the commonly used customer-facing name for the catalogue entry.
+  // Keep it as an input-only alias so historical project names stay unchanged.
+  if (projectKey(project) === '格兰岛跟团一日游') aliases.push('格兰岛出海一日游')
   const show = projectKey(project).match(/^(69|79|89|99)(?:秀|show)?$/)
   if (show) aliases.push(show[1], `${show[1]}秀`, `${show[1]}show`)
   if (/^(?:imagine)?79(?:秀|show)?$/.test(projectKey(project))) aliases.push('79', '79秀', '79show', 'imagine79show')
+  return [...new Set(aliases.filter(Boolean))]
+}
+const packageAliases = (value: string) => {
+  const cleaned = cleanProjectLabel(value)
+  const aliases = [value, cleaned]
+  const code = /^([a-h])\s*套餐(?:[·・\s].*)?$/i.exec(cleaned)
+  if (code) aliases.push(code[1])
   return [...new Set(aliases.filter(Boolean))]
 }
 const priceValue = (value: string) => {
@@ -52,6 +62,9 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   let remaining = normalized(text)
   if (!remaining) throw new Error('请先输入或黏贴订单文字。')
   remaining = remaining.replace(/^((?:69|79|89|99)(?:\s*成人)?\s*秀?)(?:\s*出票|\s*记录)?\s*格式\s*[:：]?\s*(?:\r?\n|$)/i, '$1\n')
+  // Dotted dates are accepted only in an explicitly labelled date field, so a
+  // decimal price or quantity can never be silently interpreted as a date.
+  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[.．]\s*(\d{1,2})(?![\d.．])/g, '$1$2月$3日')
   const fields: Partial<TicketInput> = {}
   const warnings: string[] = []
   const catalogue = projects.filter((project) => !project.mergedIntoId)
@@ -160,7 +173,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
       remaining = remove(remaining, longestMatches)
     }
   }
-  narrow((project) => [project.subItemName, cleanProjectLabel(project.subItemName)].filter(Boolean), '套餐')
+  narrow((project) => packageAliases(project.subItemName), '套餐')
   narrow((project) => [project.supplierName], '供货商')
 
   // Strip recognized catalogue labels that do not belong to this choice rather
