@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import type { Project, TicketRecord } from '../types'
-import { createId, formatThb, getBangkokDate, getBangkokMonth, isValidPersonCount, MAX_PERSON_COUNT } from '../lib/format'
+import type { Project, TicketInput, TicketRecord } from '../types'
+import { createId, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidPersonCount, MAX_PERSON_COUNT } from '../lib/format'
 import { isShow69Project, parseShow69Command, validateShow69Record, type Show69RecordInput } from '../lib/show69'
 import { isBoxingProject, parseBoxingCommand } from '../lib/boxing'
 import { boxingCategoryForTicket, monthlyPricingOptions, resolveMonthlyPricing, type MonthlyRecordKind } from '../lib/monthly-pricing'
 import { parseTicketCommand } from '../lib/ticket-command'
 import { isCarnivalProject, isKohLarnDayTripProject } from '../lib/project-rules'
+import { createMainLedgerMonthlyTicketSnapshot } from '../lib/monthly-main-ledger'
 import { getTicketAmounts, getOriginalTicketAmounts } from '../lib/ticket-amounts'
 import './Show69View.css'
 
@@ -15,11 +16,11 @@ interface Props {
   initialInput?: Show69RecordInput
   projects?: Project[]
   tickets: TicketRecord[]
-  onSave: (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => Promise<TicketRecord>
+  onSave: (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
 }
 
-type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string }
+type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string; snapshot?: TicketInput }
 type Range = 'month' | 'date' | 'all'
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
@@ -138,7 +139,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     const owner = latest.current.accountId
     mutationLock.current = true; setSaving(true); setError(''); setMessage('')
     try {
-      const saved = await latest.current.onSave(operation.input, operation.existing, operation.operationId)
+      const saved = await latest.current.onSave(operation.input, operation.existing, operation.operationId, operation.snapshot)
       if (!isCurrent(epoch, owner)) return
       clearEntry(); setMonth(saved.issueDate.slice(0, 7)); setDate(saved.issueDate); setRange('month'); setSearch('')
       setMessage(operation.existing ? `${title}记录已更新。` : mainLedger ? `${title}月结记录已保存，计入月报和年报。` : `${title}记录已保存，不计入每日统计。`)
@@ -157,7 +158,8 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     try {
       validateShow69Record(input)
       const matched = editing ? undefined : resolveMonthlyPricing(kind, input, projects)
-      const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim(), ...(!editing ? { projectId: matched?.project?.id, boxingCategory: matched?.boxingCategory } : {}) }, existing: editing, operationId: editing ? undefined : createId() }
+      const snapshot = mainLedger && !editing ? createMainLedgerMonthlyTicketSnapshot(input, matched!, getBangkokTime()) : undefined
+      const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim(), ...(!editing ? { projectId: matched?.project?.id, boxingCategory: matched?.boxingCategory } : {}) }, existing: editing, operationId: editing ? undefined : createId(), snapshot }
       operationRef.current = operation
       await runSave(operation)
     } catch (failure) { setError(failure instanceof Error ? failure.message : '记录未保存，请核对填写内容。') }

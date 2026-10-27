@@ -19,6 +19,7 @@ import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
 import { MonthlyTicketsView } from './components/MonthlyTicketsView'
 import { boxingCategoryForTicket, resolveMonthlyPricing } from './lib/monthly-pricing'
+import { createMainLedgerMonthlyTicketSnapshot } from './lib/monthly-main-ledger'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
 import { isShow79Project, mainLedgerTickets } from './lib/show79'
@@ -951,24 +952,17 @@ export default function App() {
   const saveShow69 = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('show69', input, existing, operationId)
   const saveBoxing = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('boxing', input, existing, operationId)
 
-  const saveMainLedgerMonthlyRecord = async (kind: 'kohlarn' | 'carnival', input: Show69RecordInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
+  const saveMainLedgerMonthlyRecord = async (kind: 'kohlarn' | 'carnival', input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput): Promise<TicketRecord> => {
     requireCloudLogin()
     const epoch = accountEpochRef.current
-    const matched = existing ? undefined : resolveMonthlyPricing(kind, input, projects)
-    if (!existing && !matched?.project) throw new Error('请先选择有效的月结套餐。')
-    const project = matched?.project
+    const matched = existing || snapshot ? undefined : resolveMonthlyPricing(kind, input, projects)
     const ticketInput: TicketInput = existing ? {
       guestName: input.guestName.trim(), issueDate: input.date, issueTime: existing.issueTime ?? getBangkokTime(),
       projectId: existing.projectId ?? '', projectName: existing.projectName, subItemName: existing.subItemName,
       supplierName: existing.supplierName, personCount: input.people, amountBasis: existing.amountBasis ?? 'per_person',
       quantityUnit: existing.quantityUnit ?? 'person', entryMode: existing.entryMode ?? 'standard', settlementMode: existing.settlementMode ?? 'monthly',
       agentPriceThb: existing.agentPriceThb, costThb: existing.costThb, manualProfitThb: existing.manualProfitThb ?? null, note: existing.note
-    } : {
-      guestName: input.guestName.trim(), issueDate: input.date, issueTime: getBangkokTime(),
-      projectId: project!.id, projectName: project!.name, subItemName: project!.subItemName, supplierName: project!.supplierName,
-      personCount: input.people, amountBasis: 'per_person', quantityUnit: 'person', entryMode: 'standard', settlementMode: 'monthly',
-      agentPriceThb: matched!.agentPriceThb, costThb: matched!.costThb, note: ''
-    }
+    } : snapshot ? { ...snapshot } : createMainLedgerMonthlyTicketSnapshot(input, matched!, getBangkokTime())
     const saved = await ledgerRepository.createOrUpdateTicket(ticketInput, existing, operationId)
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
@@ -978,8 +972,8 @@ export default function App() {
     void synchronise()
     return saved
   }
-  const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveMainLedgerMonthlyRecord('kohlarn', input, existing, operationId)
-  const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveMainLedgerMonthlyRecord('carnival', input, existing, operationId)
+  const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveMainLedgerMonthlyRecord('kohlarn', input, existing, operationId, snapshot)
+  const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveMainLedgerMonthlyRecord('carnival', input, existing, operationId, snapshot)
 
   const saveShow79Settlement = async (input: Show79SettlementInput) => {
     requireCloudLogin()

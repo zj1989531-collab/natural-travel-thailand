@@ -1,5 +1,5 @@
 -- 在 Supabase Dashboard 的 SQL Editor 中执行一次。
--- Also execute refunds.sql, project-rules.sql, show79.sql, manual-project-cost.sql.
+-- Also execute refunds.sql, project-rules.sql, show79.sql, show79-settlements.sql, manual-project-cost.sql.
 create table if not exists public.suppliers (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,

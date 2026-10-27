@@ -34,8 +34,8 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)、[supabase/manual-project-cost.sql](./supabase/manual-project-cost.sql)。已有数据库发布本版前执行最后一份脚本，支持成本手填及出票时选择供货商，保留原行级权限与历史记录。
-2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。
+1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)、[supabase/show79-settlements.sql](./supabase/show79-settlements.sql)、[supabase/manual-project-cost.sql](./supabase/manual-project-cost.sql)。已有数据库发布本版前执行最后一份脚本，支持成本手填及出票时选择供货商，保留原行级权限与历史记录。
+2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。若启用密码登录，同时在 Authentication → Password Security 开启“Prevent use of leaked passwords”（该能力需要 Supabase Pro 或更高套餐）。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
 
