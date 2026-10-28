@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { createId, formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
+import { canAutoApplyAppUpdate } from './lib/app-update-policy'
 import { PersonCountField } from './components/PersonCountField'
 import { MedicineItemsField } from './components/MedicineItemsField'
 import { buildMedicineTicketInputs, createMedicineLine, type MedicineLine } from './lib/medicine-selection'
@@ -829,6 +830,21 @@ export default function App() {
     return () => window.removeEventListener('ticket-profit-ledger:update-ready', receiveUpdateReady)
   }, [])
 
+  // Data changes already synchronise in the background. Apply a downloaded
+  // application version the same way whenever reloading cannot discard an
+  // in-progress order, refund or settings edit. Independent-ledger pages keep
+  // their entry form open, so their update waits until the user leaves it.
+  const canAutoApplyUpdate = canAutoApplyAppUpdate({
+    syncing,
+    hasOpenEditor: formOpen || refundOpen || supplierSheetOpen || loginOpen,
+    isIndependentLedger: ['show69', 'show79', 'boxing', 'kohlarn', 'carnival'].includes(view)
+  })
+  useEffect(() => {
+    if (!updateReady || !canAutoApplyUpdate) return
+    const timer = window.setTimeout(() => window.dispatchEvent(new Event('ticket-profit-ledger:apply-update')), 800)
+    return () => window.clearTimeout(timer)
+  }, [updateReady, canAutoApplyUpdate])
+
   useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(() => setToast(''), 3600)
@@ -1169,7 +1185,7 @@ export default function App() {
         </button>
       </header>
 
-      {updateReady && <section className="app-update-banner" role="status" aria-live="polite"><div><strong>新版本已准备好</strong><span>请先保存正在编辑的内容，再刷新以应用更新。</span></div><button className="secondary-button" type="button" onClick={() => window.dispatchEvent(new Event('ticket-profit-ledger:apply-update'))}>刷新更新</button></section>}
+      {updateReady && <section className="app-update-banner" role="status" aria-live="polite"><div><strong>新版本已准备好</strong><span>{canAutoApplyUpdate ? '正在自动应用更新…' : '完成当前编辑或返回首页后会自动更新，无需手动刷新。'}</span></div></section>}
       {syncConflicts.length > 0 && <section className="sync-conflict-banner" aria-label="同步记录核对"><div><strong>{syncConflicts.some(row => !row.resolvedAt) ? `${syncConflicts.filter(row => !row.resolvedAt).length} 条同步记录待核对` : '同步核对历史'}</strong><p>本机修改副本已保留，可查看差异后处理。</p></div><button type="button" className="secondary-button" onClick={() => setConflictsOpen(true)}>查看记录</button></section>}
 
       <div className="page-content">
