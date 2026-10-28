@@ -45,6 +45,14 @@ describe('69秀独立记录页面', () => {
     expect(html).toContain('disabled="">删除</button>')
   })
 
+  it('keeps refund and cancellation actions inside an independent Koh Larn ledger', () => {
+    const ticket = record({ id: 'koh-larn', projectName: '格兰岛跟团一日游', refunds: [{ id: 'refund', userId: 'user', ticketId: 'koh-larn', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] })
+    const html = renderToStaticMarkup(<Show69View kind="kohlarn" tickets={[ticket]} onSave={async () => ticket} onDelete={async () => {}} onRefund={() => {}} onCancelRefund={() => {}} />)
+    expect(html).toContain('退票</button>')
+    expect(html).toContain('退票明细')
+    expect(html).toContain('撤销此退票')
+  })
+
   it('prefills all three fields when the main entry routes recognized 69秀 information here', () => {
     const html = renderToStaticMarkup(<Show69View tickets={[]} initialInput={{ date: '2026-11-02', guestName: '王一,王二,王三', people: 3 }} onSave={async () => record()} onDelete={async () => {}} />)
     expect(html).toContain('已填入69秀信息，请核对日期、所有人姓名和人数后保存。')
@@ -81,15 +89,15 @@ describe('泰拳独立记录页面', () => {
   })
 })
 
-describe('主账本月结项目页面', () => {
+describe('独立月结项目页面', () => {
   it.each([
     { kind: 'kohlarn' as const, title: '格兰岛一日游', name: '格兰岛跟团一日游', subItemName: 'C套餐', agentPriceThb: 850, costThb: 720 },
     { kind: 'carnival' as const, title: '东方嘉年华', name: '东方嘉年华', subItemName: 'VIP', agentPriceThb: 1200, costThb: 990 }
-  ])('uses the same paste-first monthly form for $title while keeping it in the main ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
+  ])('uses the same paste-first monthly form and package safeguards for independent $title ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
     const monthlyProject = project({ id: kind, name, normalizedName: name, subItemName, normalizedSubItemName: subItemName, defaultAgentPriceThb: agentPriceThb, defaultCostThb: costThb })
     const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
-    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '主账本 · 月结', '计入所属月报和年报', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb)]) expect(html).toContain(value)
-    expect(html).not.toContain('不计入主账本每日统计、月报、年报及排行')
+    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · 月结', '不计入主账本每日统计、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb)]) expect(html).toContain(value)
+    expect(html).not.toContain('计入所属月报和年报')
   })
 })
 

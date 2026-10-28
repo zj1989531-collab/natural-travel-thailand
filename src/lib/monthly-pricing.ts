@@ -16,9 +16,14 @@ const matchesKind = (kind: MonthlyRecordKind, project: Project) =>
       : kind === 'kohlarn' ? isKohLarnDayTripProject(project.name)
         : isCarnivalProject(project.name)
 
-const validPrice = (project: Project): boolean => {
+const validPrice = (kind: MonthlyRecordKind, project: Project): boolean => {
   if (project.mergedIntoId || project.entryMode != null && project.entryMode !== 'standard' || project.quantityUnit != null && project.quantityUnit !== 'person' || project.manualAgentPrice || project.manualCostPrice || project.manualSupplier) return false
-  if (resolveProjectRules(project).defaultAmountBasis !== 'per_person') return false
+  const rules = resolveProjectRules(project)
+  if (rules.defaultAmountBasis !== 'per_person') return false
+  // These two dedicated ledgers are monthly ticket channels.  Respect an
+  // explicitly configured daily price instead of silently rewriting it into a
+  // monthly ticket at save time.
+  if ((kind === 'kohlarn' || kind === 'carnival') && rules.settlementMode !== 'monthly') return false
   const values = [project.defaultAgentPriceThb, project.defaultCostThb]
   if (values.some(value => !Number.isFinite(value) || value < 0)) return false
   if (values.every(value => value === 0)) return false
@@ -27,7 +32,7 @@ const validPrice = (project: Project): boolean => {
 
 export const monthlyPricingOptions = (kind: MonthlyRecordKind, projects: Project[], boxingCategory?: BoxingCategory): Project[] => {
   const matching = projects.filter(project => {
-    if (!validPrice(project) || !matchesKind(kind, project)) return false
+    if (!validPrice(kind, project) || !matchesKind(kind, project)) return false
     if (kind === 'boxing') {
       let category: BoxingCategory | undefined
       try { category = boxingCategoryForProject(project) } catch { return false }

@@ -4,6 +4,7 @@ import { getRefundState } from './refunds'
 import { getTicketAmounts } from './ticket-amounts'
 import { isShow69Project } from './show69'
 import { isBoxingProject } from './boxing'
+import { isCarnivalProject, isKohLarnDayTripProject } from './project-rules'
 
 // Match immutable project snapshots, including historical catalogue names.
 export const isShow79Project = (name: string): boolean => {
@@ -11,7 +12,15 @@ export const isShow79Project = (name: string): boolean => {
   return /^79(?:成人)?秀/.test(normalized) || /^(?:imagine)?79show(?:$|[^a-z])/.test(normalized)
 }
 
-export const mainLedgerTickets = (tickets: TicketRecord[]) => tickets.filter(ticket => !isShow79Project(ticket.projectName) && !isShow69Project(ticket.projectName) && !isBoxingProject(ticket.projectName))
+// These ticket types share the tickets table and cloud sync pipeline, but are
+// intentionally kept outside the main ledger's reports, rankings and exports.
+// Keeping this classification in one place prevents a new independent page
+// from accidentally leaking back into a main-ledger aggregate.
+export const isIndependentLedgerProject = (projectName: string): boolean =>
+  isShow79Project(projectName) || isShow69Project(projectName) || isBoxingProject(projectName) ||
+  isKohLarnDayTripProject(projectName) || isCarnivalProject(projectName)
+
+export const mainLedgerTickets = (tickets: TicketRecord[]) => tickets.filter(ticket => !isIndependentLedgerProject(ticket.projectName))
 
 export const splitShow79Profit = (profitThb: number) => {
   const cents = Math.round(profitThb * 100)

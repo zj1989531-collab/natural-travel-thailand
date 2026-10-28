@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Project } from '../types'
-import { createMainLedgerMonthlyTicketSnapshot } from './monthly-main-ledger'
+import { createMonthlyTicketSnapshot } from './monthly-ticket-snapshot'
 import { resolveMonthlyPricing } from './monthly-pricing'
 
 const project: Project = {
@@ -10,11 +10,11 @@ const project: Project = {
   entryMode: 'standard', quantityUnit: 'person', createdAt: '', updatedAt: '', syncStatus: 'synced'
 }
 
-describe('主账本月结保存快照', () => {
+describe('独立月结票保存快照', () => {
   it('freezes the chosen package, prices and Bangkok issue time for a retry', () => {
     const input = { date: '2026-10-26', guestName: ' 向绍平 ', people: 1, projectId: project.id }
     const pricing = resolveMonthlyPricing('kohlarn', input, [project])
-    const snapshot = createMainLedgerMonthlyTicketSnapshot(input, pricing, '18:35')
+    const snapshot = createMonthlyTicketSnapshot(input, pricing, '18:35')
 
     expect(snapshot).toEqual({
       guestName: '向绍平', issueDate: '2026-10-26', issueTime: '18:35',

@@ -43,8 +43,8 @@ describe('profit trend ranges', () => {
 })
 
 describe('profit trend money and settlement', () => {
-  it('keeps the newly published 79 show independent in both comparison periods', () => {
-    const rows = ['79秀', '79成人秀', '７９秀', '79 show', 'IMAGINE79SHOW', '普通门票'].flatMap((projectName, index) => [ticket({ id: `now-${index}`, projectName }), ticket({ id: `old-${index}`, projectName, issueDate: '2026-09-15' })])
+  it('keeps every independent ledger out of both comparison periods', () => {
+    const rows = ['79秀', '79成人秀', '７９秀', '79 show', 'IMAGINE79SHOW', '格兰岛跟团一日游', '东方嘉年华', '普通门票'].flatMap((projectName, index) => [ticket({ id: `now-${index}`, projectName }), ticket({ id: `old-${index}`, projectName, issueDate: '2026-09-15' })])
     const result = buildProfitTrend(rows, '2026-10', '2026-10-15')
     expect(result.current.totalProfitThb).toBe(150); expect(result.previous.totalProfitThb).toBe(150)
     expect(result.current.totalProfitThb).toBe(summarise(ticketsInMonth(rows, '2026-10')).profitThb)
@@ -57,7 +57,7 @@ describe('profit trend money and settlement', () => {
     expect(buildProfitTrend(rows, '2026-10', '2026-11-01').current.totalProfitThb).toBe(summarise(ticketsInMonth(rows, '2026-10')).profitThb)
   })
   it('uses ticket snapshots, legacy fallback and fixed monthly commission, never catalogue or note text', () => {
-    const rows = [ticket({ projectName: '嘉年华', settlementMode: 'daily' }), ticket({ id: 'legacy', projectName: '嘉年华', settlementMode: undefined }), ticket({ id: 'explicit', settlementMode: 'monthly' }), ticket({ id: 'note', note: '泰拳' })]
+    const rows = [ticket({ projectName: '潜水', settlementMode: 'daily' }), ticket({ id: 'legacy', projectName: '潜水', settlementMode: undefined }), ticket({ id: 'explicit', settlementMode: 'monthly' }), ticket({ id: 'note', note: '泰拳' })]
     expect(buildProfitTrend(rows, '2026-10', '2026-10-15').current).toMatchObject({ dailyProfitThb: 300, monthlyProfitThb: 300, totalProfitThb: 600 })
   })
   it('keeps partial refunds and full-refund losses on the original date and settlement', () => {

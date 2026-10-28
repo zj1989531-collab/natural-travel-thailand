@@ -5,10 +5,11 @@ import { resolveMonthlyPricing } from './monthly-pricing'
 type MonthlyPricing = ReturnType<typeof resolveMonthlyPricing>
 
 /**
- * Freeze every field that participates in a new main-ledger ticket fingerprint.
- * A confirmation retry must never re-read a changed price table or clock.
+ * Freeze every field that participates in a new dedicated monthly-ticket
+ * fingerprint. A confirmation retry must never re-read a changed price table
+ * or Bangkok clock.
  */
-export const createMainLedgerMonthlyTicketSnapshot = (
+export const createMonthlyTicketSnapshot = (
   input: Show69RecordInput,
   pricing: MonthlyPricing,
   issueTime: string

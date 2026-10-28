@@ -17,6 +17,17 @@ describe('refund form and preserved history', () => {
     expect(html).toContain('value="1800"')
     expect(html).toContain('aria-modal="true"')
   })
+  it('keeps independent Koh Larn and carnival tickets available when their dedicated ledger opens the refund sheet', () => {
+    const independent = [
+      { ...ticket, id: 'koh-larn', projectName: '格兰岛跟团一日游' },
+      { ...ticket, id: 'carnival', projectName: '东方嘉年华' }
+    ]
+    const html = renderToStaticMarkup(<RefundSheet tickets={independent} initialTicketId="koh-larn" onClose={() => {}} onSave={async () => {}} />)
+    expect(html).toContain('<option value="koh-larn" selected="">')
+    expect(html).toContain('格兰岛跟团一日游')
+    expect(html).toContain('东方嘉年华')
+    expect(html).toContain('原票归属日期：2026-10-13')
+  })
   it('does not offer full-refunded, deleted or profit-only records', () => {
     const html = renderToStaticMarkup(<RefundSheet tickets={[{ ...ticket, refunds: [refund] }, { ...ticket, id: 'deleted', deletedAt: ticket.updatedAt }, { ...ticket, id: 'manual', entryMode: 'profit_only' }]} onClose={() => {}} onSave={async () => {}} />)
     expect(html).toContain('没有符合条件的可退票记录')

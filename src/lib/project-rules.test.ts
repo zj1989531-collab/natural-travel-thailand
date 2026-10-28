@@ -41,7 +41,7 @@ describe('package rules and historical settlement snapshots', () => {
     expect(project).not.toHaveProperty('defaultAmountBasis')
   })
   it('uses saved settlement instead of current name classification, in daily, month and year statistics', () => {
-    const daily = { ...ticket, projectName: '嘉年华', settlementMode: 'daily' as const }
+    const daily = { ...ticket, projectName: '普通项目', settlementMode: 'daily' as const }
     const monthly = { ...ticket, id: 'm', settlementMode: 'monthly' as const }
     expect(ticketsForDailyStats([daily, monthly], ticket.issueDate)).toEqual([daily])
     expect(summarise(ticketsInMonth([daily, monthly], '2026-10')).profitThb).toBe(20)

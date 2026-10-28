@@ -52,7 +52,9 @@ describe('refund amounts, quantities and original-period accounting', () => {
     expect(report.quantity.days).toEqual([{ date: '2026-09-30', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
     const monthlyOnly = { ...row, projectName: '嘉年华' }
     expect(summarise(ticketsForDailyStats([monthlyOnly], row.issueDate)).profitThb).toBe(0)
-    expect(summarise(ticketsInMonth([monthlyOnly], '2026-09')).profitThb).toBe(50)
+    expect(summarise(ticketsInMonth([monthlyOnly], '2026-09')).profitThb).toBe(0)
+    const independentReport = buildReport([monthlyOnly], { mode: 'month', month: '2026-09', date: '2026-09-30', startDate: '2026-09-01', endDate: '2026-09-30', supplierId: '' })
+    expect(independentReport).toMatchObject({ records: [], summary: { profitThb: 0 }, quantity: { recordCount: 0 } })
   })
   it('retains voided history but restores all quantities and money', () => {
     const row = projected([{ ...refund, cancelledAt: '2026-10-02T00:00:00Z' }])

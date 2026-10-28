@@ -19,10 +19,10 @@ import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
 import { MonthlyTicketsView } from './components/MonthlyTicketsView'
 import { boxingCategoryForTicket, resolveMonthlyPricing } from './lib/monthly-pricing'
-import { createMainLedgerMonthlyTicketSnapshot } from './lib/monthly-main-ledger'
+import { createMonthlyTicketSnapshot } from './lib/monthly-ticket-snapshot'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
 import type { SyncConflictRecord } from './lib/sync-conflicts'
-import { isShow79Project, mainLedgerTickets } from './lib/show79'
+import { isIndependentLedgerProject, isShow79Project, mainLedgerTickets } from './lib/show79'
 import type { Show79SettlementInput, Show79SettlementRecord } from './lib/show79-settlement'
 import { ProjectPicker } from './components/ProjectPicker'
 import { TicketQuickFill } from './components/TicketQuickFill'
@@ -66,6 +66,8 @@ interface TicketFormProps {
   onSaveMedicine?: (entries: MedicineTicketEntry[]) => Promise<void>
   onShow69?: (input: Show69RecordInput) => void
   onBoxing?: (input: Show69RecordInput) => void
+  onKohLarn?: (input: Show69RecordInput) => void
+  onCarnival?: (input: Show69RecordInput) => void
 }
 
 const emptyForm = (): TicketInput => ({
@@ -86,7 +88,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, projectOptions, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onBoxing }: TicketFormProps) {
+export function TicketForm({ ticket, projects, projectOptions, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onBoxing, onKohLarn, onCarnival }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -120,6 +122,7 @@ export function TicketForm({ ticket, projects, projectOptions, suppliers = [], k
   const timeInputRef = useRef<HTMLInputElement>(null)
   const medicineMode = !ticket && (pendingMedicineSave || isMedicineProject({ name: form.projectName, quantityUnit: 'item', entryMode: 'standard' }) && projects.some(isMedicineProject))
   const selectableProjects = projectOptions ?? projects
+  const independentLedgerProject = isIndependentLedgerProject(form.projectName)
 
   const applyFilledForm = (next: TicketInput) => {
     if (saveLock.current || pendingMedicineSave) return
@@ -129,6 +132,14 @@ export function TicketForm({ ticket, projects, projectOptions, suppliers = [], k
     }
     if (!ticket && isBoxingProject(next.projectName) && onBoxing) {
       onBoxing({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined, boxingCategory: boxingCategoryForTicket(next) })
+      return
+    }
+    if (!ticket && isKohLarnDayTripProject(next.projectName) && onKohLarn) {
+      onKohLarn({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined })
+      return
+    }
+    if (!ticket && isCarnivalProject(next.projectName) && onCarnival) {
+      onCarnival({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined })
       return
     }
     setWarning(null); setError(''); setForm(next)
@@ -284,8 +295,8 @@ export function TicketForm({ ticket, projects, projectOptions, suppliers = [], k
             onOption={(id, name) => selectProject(current => chooseProjectOption({ ...current, projectName: name ?? current.projectName }, projects, id))} />
           {!medicineMode && (manualSupplier ? <label>供货商<select value={form.supplierName} onChange={event => update('supplierName', event.target.value)} required><option value="">请自行选择供货商</option>{suppliers.map(supplier => <option key={supplier.id} value={supplier.name}>{supplier.name}</option>)}</select></label> : form.supplierName && <p className="sheet-copy">供货商：{form.supplierName}（自动带入）</p>)}
           {!medicineMode && (manualCostPrice ? <p className="sheet-copy">成本不预设，请填写本次{perPerson ? single : '整单'}成本{manualAgentPrice ? '及代理售价' : '；售价已自动带入'}。</p> : manualAgentPrice && <p className="sheet-copy">售价不预设，请填写本次{perPerson ? single : '整单'}售价；成本已自动带入。</p>)}
-          {isShow79Project(form.projectName) && <p className="sheet-copy">79秀独立记账，不计入主账本日报、月报、年报；请前往79秀页面查看分账。</p>}
-          {!medicineMode && !isShow69Project(form.projectName) && !isShow79Project(form.projectName) && !isBoxingProject(form.projectName) && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
+          {!medicineMode && independentLedgerProject && form.projectId && <p className="sheet-copy">{isShow79Project(form.projectName) ? '79秀独立记账；请前往79秀页面查看分账。' : `${form.projectName}独立记账。`}不计入主账本日报、月报、年报及排行。</p>}
+          {!medicineMode && !independentLedgerProject && form.projectId && <p className="sheet-copy">结算方式：{ticketSettlementMode(form) === 'monthly' ? '月结（计入所属月报、年报，不计每日概览）' : '日结（计入每日、月度和年度利润）'}{ticket && '；保留此记录原结算归属。'}</p>}
           {form.entryMode === 'profit_only' && <p className="sheet-copy">{perPerson ? '只填写单人返佣利润，系统按人数计算返佣总额。' : '只填写本次返佣总额，不填写售价或成本。'}请勿重复录入已统计的项目利润。</p>}
           {projects.length === 0 && <button className="inline-action" type="button" onClick={onManageSuppliers}>还没有项目价格，去录入</button>}
           {!medicineMode && (form.entryMode === 'profit_only' ? <label>{perPerson ? '单人返佣利润（THB）' : '返佣总额（THB）'}<input inputMode="decimal" type="number" min="0" step="0.01" value={form.manualProfitThb ?? ''} onChange={(event) => update('manualProfitThb', event.target.value === '' ? null : Number(event.target.value))} required /></label> : <div className="form-grid">
@@ -590,7 +601,7 @@ export default function App() {
   const [view, setView] = useState<View>('dashboard')
   const [show69Draft, setShow69Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   const [boxingDraft, setBoxingDraft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
-  const [monthlyStandardDraft, setMonthlyStandardDraft] = useState<{ id: string; accountId: string; kind: 'kohlarn' | 'carnival' }>()
+  const [monthlyStandardDraft, setMonthlyStandardDraft] = useState<{ id: string; accountId: string; kind: 'kohlarn' | 'carnival'; input?: Show69RecordInput }>()
   const monthlyChannel = view === 'show69' || view === 'show79' || view === 'boxing' || view === 'kohlarn' || view === 'carnival' ? view : undefined
   const monthlyView = view === 'monthly' || Boolean(monthlyChannel)
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [view])
@@ -688,6 +699,7 @@ export default function App() {
         setSelectedTicket(undefined)
         setShow69Draft(undefined)
         setBoxingDraft(undefined)
+        setMonthlyStandardDraft(undefined)
         setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
         setQuery(''); setSupplierFilter(''); setToast('')
       }
@@ -815,6 +827,15 @@ export default function App() {
   const monthlyFormProjects = view === 'kohlarn' ? kohLarnProjects : view === 'carnival' ? carnivalProjects : undefined
 
   const monthlySupplierStats = useMemo(() => bySupplier(ticketsInMonth(tickets, month)), [tickets, month])
+  const refundScopeTickets = useMemo(() => {
+    if (refundTicketId) return tickets
+    if (view === 'show69') return tickets.filter(ticket => isShow69Project(ticket.projectName))
+    if (view === 'show79') return tickets.filter(ticket => isShow79Project(ticket.projectName))
+    if (view === 'boxing') return tickets.filter(ticket => isBoxingProject(ticket.projectName))
+    if (view === 'kohlarn') return tickets.filter(ticket => isKohLarnDayTripProject(ticket.projectName))
+    if (view === 'carnival') return tickets.filter(ticket => isCarnivalProject(ticket.projectName))
+    return mainTickets
+  }, [refundTicketId, view, tickets, mainTickets])
   const unsyncedCount = [...tickets, ...suppliers, ...projects, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length
 
   const openNewForm = () => {
@@ -850,8 +871,8 @@ export default function App() {
     setSelectedTicket(undefined)
     setView('boxing')
   }
-  const openMonthlyStandard = (kind: 'kohlarn' | 'carnival') => {
-    setMonthlyStandardDraft({ id: createId(), accountId: financialAccountId, kind })
+  const openMonthlyStandard = (kind: 'kohlarn' | 'carnival', input?: Show69RecordInput) => {
+    setMonthlyStandardDraft({ id: createId(), accountId: financialAccountId, kind, input })
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView(kind)
@@ -903,7 +924,7 @@ export default function App() {
     try { await refresh() } catch { refreshed = false }
     if (epoch !== accountEpochRef.current) return
     setFormOpen(false)
-    setToast(!refreshed ? '订单已保存；页面刷新未完成，请同步核对，无需再次保存。' : isShow79Project(saved.projectName) ? '79秀订单已保存，独立计算，不计入主账本报表。' : ticketSettlementMode(saved) === 'monthly'
+    setToast(!refreshed ? '订单已保存；页面刷新未完成，请同步核对，无需再次保存。' : isIndependentLedgerProject(saved.projectName) ? `${saved.projectName}订单已保存，独立计算，不计入主账本报表。` : ticketSettlementMode(saved) === 'monthly'
       ? '月结记录已保存，计入所属月报、年报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
     void synchronise()
@@ -952,7 +973,7 @@ export default function App() {
   const saveShow69 = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('show69', input, existing, operationId)
   const saveBoxing = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('boxing', input, existing, operationId)
 
-  const saveMainLedgerMonthlyRecord = async (kind: 'kohlarn' | 'carnival', input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput): Promise<TicketRecord> => {
+  const saveIndependentMonthlyRecord = async (kind: 'kohlarn' | 'carnival', input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput): Promise<TicketRecord> => {
     requireCloudLogin()
     const epoch = accountEpochRef.current
     const matched = existing || snapshot ? undefined : resolveMonthlyPricing(kind, input, projects)
@@ -962,7 +983,7 @@ export default function App() {
       supplierName: existing.supplierName, personCount: input.people, amountBasis: existing.amountBasis ?? 'per_person',
       quantityUnit: existing.quantityUnit ?? 'person', entryMode: existing.entryMode ?? 'standard', settlementMode: existing.settlementMode ?? 'monthly',
       agentPriceThb: existing.agentPriceThb, costThb: existing.costThb, manualProfitThb: existing.manualProfitThb ?? null, note: existing.note
-    } : snapshot ? { ...snapshot } : createMainLedgerMonthlyTicketSnapshot(input, matched!, getBangkokTime())
+    } : snapshot ? { ...snapshot } : createMonthlyTicketSnapshot(input, matched!, getBangkokTime())
     const saved = await ledgerRepository.createOrUpdateTicket(ticketInput, existing, operationId)
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     setTickets(current => [...current.filter(row => row.id !== saved.id), ticketDisplay(saved)])
@@ -972,8 +993,8 @@ export default function App() {
     void synchronise()
     return saved
   }
-  const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveMainLedgerMonthlyRecord('kohlarn', input, existing, operationId, snapshot)
-  const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveMainLedgerMonthlyRecord('carnival', input, existing, operationId, snapshot)
+  const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveIndependentMonthlyRecord('kohlarn', input, existing, operationId, snapshot)
+  const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveIndependentMonthlyRecord('carnival', input, existing, operationId, snapshot)
 
   const saveShow79Settlement = async (input: Show79SettlementInput) => {
     requireCloudLogin()
@@ -1064,6 +1085,7 @@ export default function App() {
     setSelectedTicket(undefined)
     setShow69Draft(undefined)
     setBoxingDraft(undefined)
+    setMonthlyStandardDraft(undefined)
     syncAbortRef.current?.abort()
     syncQueueRef.current?.clearPending()
     try {
@@ -1118,10 +1140,10 @@ export default function App() {
             </section>
           )}
 
-          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含69秀、79秀、泰拳独立记录及其他月结返佣项目。" />
-          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；69秀、79秀、泰拳独立记录。" />
+          <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录及其他月结返佣项目。" />
+          <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录。" />
           <ProfitTrendPanel tickets={mainTickets} today={today} pendingCount={unsyncedCount} offline={offline} />
-          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；69秀、79秀、泰拳独立记录，退票回算原记录年份。" />
+          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录，退票回算原记录年份。" />
 
           <section className="ranking-section">
             <div className="section-heading">
@@ -1143,11 +1165,11 @@ export default function App() {
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
         </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
-          {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} />
-            : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} />
+          {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
+            : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
             : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
-              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} />
-                : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} /> : null}
+              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
+                : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
@@ -1186,8 +1208,8 @@ export default function App() {
 
       <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' ? openMonthlyStandard('kohlarn') : view === 'carnival' ? openMonthlyStandard('carnival') : openNewForm()} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} />}
-      {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundTicketId || view === 'show79' ? tickets : mainTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} onKohLarn={input => openMonthlyStandard('kohlarn', input)} onCarnival={input => openMonthlyStandard('carnival', input)} />}
+      {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundScopeTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}

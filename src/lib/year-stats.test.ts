@@ -25,7 +25,7 @@ describe('Bangkok natural-year statistics', () => {
     expect(ticketsInYear(rows, after).map((row) => row.id)).toEqual(['new'])
   })
   it('includes monthly-settlement projects, manual commissions and items, excluding deleted records', () => {
-    const rows = [ticket('ordinary'), ticket('monthly', { projectName: '嘉年华', issueDate: '2026-02-01' }), ticket('commission', { entryMode: 'profit_only', manualProfitThb: 25, agentPriceThb: 0, costThb: 0, issueDate: '2026-12-31' }), ticket('item', { quantityUnit: 'item', projectName: '药品', issueDate: '2026-01-01' }), ticket('deleted', { deletedAt: '2026-10-14T01:00:00Z' })]
+    const rows = [ticket('ordinary'), ticket('monthly', { projectName: '普通月结项目', settlementMode: 'monthly', issueDate: '2026-02-01' }), ticket('commission', { entryMode: 'profit_only', manualProfitThb: 25, agentPriceThb: 0, costThb: 0, issueDate: '2026-12-31' }), ticket('item', { quantityUnit: 'item', projectName: '药品', issueDate: '2026-01-01' }), ticket('deleted', { deletedAt: '2026-10-14T01:00:00Z' })]
     expect(summarise(ticketsInYear(rows, '2026'))).toMatchObject({ count: 3, profitThb: 350 })
     const monthlyTotal = Array.from({ length: 12 }, (_, i) => summarise(ticketsInMonth(rows, `2026-${String(i + 1).padStart(2, '0')}`)).profitThb).reduce((sum, profit) => sum + profit, 0)
     expect(summarise(ticketsInYear(rows, '2026')).profitThb).toBe(monthlyTotal)

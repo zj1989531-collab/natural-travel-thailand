@@ -7,9 +7,7 @@ import { projectNames } from '../lib/project-selection'
 import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
 import { quantityParts } from '../lib/effective-quantities'
-import { isShow79Project } from '../lib/show79'
-import { isShow69Project } from '../lib/show69'
-import { isBoxingProject } from '../lib/boxing'
+import { isIndependentLedgerProject } from '../lib/show79'
 import { exportReportToXlsx } from '../lib/export'
 import { buildReportCounts } from '../lib/report-counts'
 import './report-mobile.css'
@@ -124,7 +122,7 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   const lastMonth = reportShortcutQuery(query, 'last-month', today).month
   const generatedAt = `${getBangkokDate()} ${getBangkokTime()}`
   const names = useMemo(() => {
-    const included = (name: string) => !isShow79Project(name) && !isShow69Project(name) && !isBoxingProject(name)
+    const included = (name: string) => !isIndependentLedgerProject(name)
     return projectNames([...projects.filter(project => included(project.name)), ...activeTickets(tickets).filter(ticket => included(ticket.projectName)).map(ticket => ({ name: ticket.projectName || '未分类项目', entryMode: ticket.entryMode }))])
   }, [projects, tickets])
   const supplierName = suppliers.find((supplier) => supplier.id === query.supplierId)?.name ?? (query.supplierId ? '所选供货商' : '全部供货商')
@@ -137,7 +135,7 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   }
 
   return <>
-    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含79秀独立账本</p><h1>格式化报表</h1></div><div className="heading-actions report-export-actions"><button className="secondary-button small" type="button" disabled={!result.report || exporting} onClick={() => void exportCurrentReport()}>{exporting ? '正在导出…' : '导出当前报表 Excel'}</button><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></div></section>
+    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含独立账本</p><h1>格式化报表</h1></div><div className="heading-actions report-export-actions"><button className="secondary-button small" type="button" disabled={!result.report || exporting} onClick={() => void exportCurrentReport()}>{exporting ? '正在导出…' : '导出当前报表 Excel'}</button><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></div></section>
     {exportError && <p className="form-error" role="alert">{exportError}</p>}
     <div className="report-quick-periods" role="group" aria-label="快捷报表日期"><button type="button" className="secondary-button small" aria-pressed={query.mode === 'day' && query.date === today} onClick={() => applyShortcut('today')}>今天</button><button type="button" className="secondary-button small" aria-pressed={query.mode === 'month' && query.month === currentMonth} onClick={() => applyShortcut('this-month')}>本月</button><button type="button" className="secondary-button small" aria-pressed={query.mode === 'month' && query.month === lastMonth} onClick={() => applyShortcut('last-month')}>上月</button></div>
     <section className="report-controls" aria-label="报表筛选">

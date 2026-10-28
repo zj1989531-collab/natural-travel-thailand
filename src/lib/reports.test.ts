@@ -12,7 +12,7 @@ const records = [
   ticket('ordinary'),
   ticket('legacy', { amountBasis: undefined, personCount: 5, agentPriceThb: 100, costThb: 80 }),
   ticket('unknown', { amountBasis: 'total', personCount: null, agentPriceThb: 50, costThb: 40 }),
-  ticket('monthly-ticket', { projectName: '嘉年华', personCount: 2, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
+  ticket('monthly-ticket', { projectName: '普通月结项目', settlementMode: 'monthly', personCount: 2, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
   ticket('manual-commission', { entryMode: 'profit_only', manualProfitThb: 25, personCount: 4, supplierId: 'supplier-b', supplierName: '测试供货商乙' }),
   ticket('deleted', { deletedAt: '2026-10-13T04:00:00Z' }),
   ticket('previous-month', { issueDate: '2026-09-30' }),
@@ -51,12 +51,12 @@ describe('formatted ledger reports', () => {
   })
 
   it('queries monthly-settlement project ticket quantities daily, monthly and cumulatively', () => {
-    const daily = buildReport(records, query({ mode: 'day', projectName: '嘉年华' }))
+    const daily = buildReport(records, query({ mode: 'day', projectName: '普通月结项目' }))
     expect(daily.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })
     expect(daily.quantity.days).toEqual([{ date: '2026-10-13', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
     expect(daily.summary.profitThb).toBe(0)
     expect(daily.monthlySummary.profitThb).toBe(100)
-    expect(buildReport(records, query({ projectName: '嘉年华' })).summary.profitThb).toBe(100)
+    expect(buildReport(records, query({ projectName: '普通月结项目' })).summary.profitThb).toBe(100)
     const all = buildReport(records, query({ mode: 'all' }))
     expect(all.start).toBe('2026-09-30')
     expect(all.end).toBe('2026-11-01')
@@ -66,18 +66,18 @@ describe('formatted ledger reports', () => {
 
   it('combines supplier and exact parent-project filters across packages, not notes or similar names', () => {
     const rows = [
-      ticket('adult', { projectName: '嘉年华', subItemName: '成人', personCount: 3 }),
-      ticket('child', { projectName: '嘉年华', subItemName: '儿童', personCount: 2 }),
-      ticket('other-supplier', { projectName: '嘉年华', supplierId: 'supplier-b', personCount: 5 }),
-      ticket('similar', { projectName: '嘉年华课程', personCount: 9 }),
-      ticket('note', { note: '嘉年华', subItemName: '嘉年华', personCount: 8 }),
-      ticket('deleted-project', { projectName: '嘉年华', deletedAt: '2026-10-13T04:00:00Z' }),
-      ticket('commission', { projectName: '嘉年华', entryMode: 'profit_only', manualProfitThb: 25, personCount: 20 })
+      ticket('adult', { projectName: '普通月结项目', subItemName: '成人', personCount: 3 }),
+      ticket('child', { projectName: '普通月结项目', subItemName: '儿童', personCount: 2 }),
+      ticket('other-supplier', { projectName: '普通月结项目', supplierId: 'supplier-b', personCount: 5 }),
+      ticket('similar', { projectName: '普通月结项目课程', personCount: 9 }),
+      ticket('note', { note: '普通月结项目', subItemName: '普通月结项目', personCount: 8 }),
+      ticket('deleted-project', { projectName: '普通月结项目', deletedAt: '2026-10-13T04:00:00Z' }),
+      ticket('commission', { projectName: '普通月结项目', entryMode: 'profit_only', manualProfitThb: 25, personCount: 20 })
     ]
-    const report = buildReport(rows, query({ projectName: '嘉年华', supplierId: 'supplier-a' }))
+    const report = buildReport(rows, query({ projectName: '普通月结项目', supplierId: 'supplier-a' }))
     expect(report.quantity).toMatchObject({ recordCount: 2, peopleCount: 5, unknownCount: 0 })
     expect(report.records.map((row) => row.id)).toEqual(['adult', 'child', 'commission'])
-    expect(report.projectName).toBe('嘉年华')
+    expect(report.projectName).toBe('普通月结项目')
     expect(buildReport(rows, query({ projectName: '未出票项目' })).quantity.recordCount).toBe(0)
   })
 
@@ -89,6 +89,20 @@ describe('formatted ledger reports', () => {
     expect(buildReport([missing, { ...known, deletedAt: '2026-10-13T04:00:00Z' }], query()).quantity).toMatchObject({ peopleCount: 0, recordCount: 1, unknownCount: 1 })
     expect(buildReport([records[4]], query()).quantity).toMatchObject({ peopleCount: 0, recordCount: 0, unknownCount: 0, days: [] })
     expect(buildReport([], query({ mode: 'all' })).quantity.recordCount).toBe(0)
+  })
+  it('keeps Koh Larn and carnival out of all main report modes regardless of legacy settlement snapshots', () => {
+    const rows = [
+      ticket('normal'),
+      ticket('koh-larn-daily', { projectName: '格兰岛跟团一日游', settlementMode: 'daily' }),
+      ticket('carnival-legacy', { projectName: '东方嘉年华', settlementMode: undefined })
+    ]
+    for (const mode of ['day', 'month', 'range', 'all'] as const) {
+      const report = buildReport(rows, query({ mode }))
+      expect(report.records.map(row => row.id)).toEqual(['normal'])
+      expect(report.quantity).toMatchObject({ recordCount: 1, peopleCount: 3 })
+      expect(report.summary.profitThb).toBe(150)
+      expect(report.monthlyRecords).toEqual([])
+    }
   })
   it('includes all active monthly records, using multiplied amounts and preserving legacy totals', () => {
     const report = buildReport(records, query())
@@ -194,7 +208,7 @@ describe('formatted ledger reports', () => {
 })
 
 describe('report period shortcuts', () => {
-  const filters = query({ mode: 'range', supplierId: 'supplier-b', projectName: '嘉年华', guestName: 'Jimmy' })
+  const filters = query({ mode: 'range', supplierId: 'supplier-b', projectName: '普通月结项目', guestName: 'Jimmy' })
 
   it('opens today while retaining the project, supplier and customer filters', () => {
     expect(reportShortcutQuery(filters, 'today', '2026-10-16')).toEqual({ ...filters, mode: 'day', date: '2026-10-16', month: '2026-10', startDate: '2026-10-16', endDate: '2026-10-16' })

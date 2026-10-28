@@ -40,7 +40,7 @@ describe('monthly record per-person pricing', () => {
     const changed = project('current', { defaultAgentPriceThb: 440.25, defaultCostThb: 405.1 })
     expect(resolveMonthlyPricing('show69', input, [changed])).toMatchObject({ project: changed, agentPriceThb: 440.25, costThb: 405.1, profitThb: 35.15 })
   })
-  it('uses configured main-ledger prices for Koh Larn and carnival, with no invented fallback', () => {
+  it('uses configured dedicated-ledger prices for Koh Larn and carnival, with no invented fallback', () => {
     const kohLarn = project('koh-larn-c', { name: '格兰岛跟团一日游', subItemName: 'C套餐', defaultAgentPriceThb: 850, defaultCostThb: 720 })
     const carnival = project('carnival-vip', { name: '东方嘉年华', subItemName: 'VIP', defaultAgentPriceThb: 1200, defaultCostThb: 990 })
     expect(monthlyPricingOptions('kohlarn', [kohLarn, carnival])).toEqual([kohLarn])
@@ -48,6 +48,14 @@ describe('monthly record per-person pricing', () => {
     expect(resolveMonthlyPricing('kohlarn', { ...input, projectId: kohLarn.id }, [kohLarn])).toMatchObject({ project: kohLarn, agentPriceThb: 850, costThb: 720, profitThb: 130 })
     expect(resolveMonthlyPricing('carnival', { ...input, projectId: carnival.id }, [carnival])).toMatchObject({ project: carnival, agentPriceThb: 1200, costThb: 990, profitThb: 210 })
     expect(() => resolveMonthlyPricing('kohlarn', input, [])).toThrow('维护有效的月结套餐')
+  })
+  it('does not turn explicitly daily Koh Larn or carnival prices into monthly-channel tickets', () => {
+    const dailyKohLarn = project('koh-larn-daily', { name: '格兰岛跟团一日游', settlementMode: 'daily', defaultAgentPriceThb: 850, defaultCostThb: 720 })
+    const dailyCarnival = project('carnival-daily', { name: '东方嘉年华', settlementMode: 'daily', defaultAgentPriceThb: 1200, defaultCostThb: 990 })
+    expect(monthlyPricingOptions('kohlarn', [dailyKohLarn])).toEqual([])
+    expect(monthlyPricingOptions('carnival', [dailyCarnival])).toEqual([])
+    expect(() => resolveMonthlyPricing('kohlarn', { ...input, projectId: dailyKohLarn.id }, [dailyKohLarn])).toThrow('重新选择')
+    expect(() => resolveMonthlyPricing('carnival', { ...input, projectId: dailyCarnival.id }, [dailyCarnival])).toThrow('重新选择')
   })
   it('requires an explicit choice between real suppliers even when their prices match', () => {
     const second = project('second', { supplierId: 'other', supplierName: '其他旅行社' })

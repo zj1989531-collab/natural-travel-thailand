@@ -3,7 +3,7 @@ import type { TicketRecord } from '../types'
 import { buildShow79Report, isShow79Project, mainLedgerTickets, parseShow79Command, splitShow79Profit, voucherDate } from './show79'
 import { summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear } from './stats'
 import { buildReport, type ReportQuery } from './reports'
-import { createLedgerBackup } from './export'
+import { buildRefundExportRows, buildTicketExportRows, createLedgerBackup } from './export'
 
 const ticket = (id: string, overrides: Partial<TicketRecord> = {}): TicketRecord => ({ id, userId: 'user', projectName: '79秀', projectId: '79', subItemName: '门票', issueDate: '2026-10-15', issueTime: '18:30', guestName: 'jimmy', supplierId: 'supplier', supplierName: '供货商', amountBasis: 'per_person', personCount: 2, agentPriceThb: 650, costThb: 600, note: '', createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', deletedAt: null, syncStatus: 'synced', ...overrides })
 
@@ -12,8 +12,13 @@ describe('79 show independent ledger', () => {
     for (const name of ['79秀', '７９ 秀', '79成人秀', 'Imagine 79 Show', '79 Show']) expect(isShow79Project(name)).toBe(true)
     for (const name of ['69秀', '179秀', '普通门票', '79商品']) expect(isShow79Project(name)).toBe(false)
   })
-  it('excludes money, quantity, monthly sections and rankings from every main report', () => {
-    const rows = [ticket('79', { settlementMode: 'daily' }), ticket('normal', { projectName: '普通门票', personCount: 3 })]
+  it('excludes every independent ledger from money, quantity, monthly sections and rankings', () => {
+    const rows = [
+      ticket('79', { settlementMode: 'daily' }),
+      ticket('koh-larn', { projectName: '格兰岛跟团一日游', settlementMode: 'daily' }),
+      ticket('carnival', { projectName: '东方嘉年华', settlementMode: undefined }),
+      ticket('normal', { projectName: '普通门票', personCount: 3 })
+    ]
     expect(mainLedgerTickets(rows).map(row => row.id)).toEqual(['normal'])
     expect(summarise(ticketsForDailyStats(rows, '2026-10-15')).profitThb).toBe(150)
     expect(summarise(ticketsInMonth(rows, '2026-10')).profitThb).toBe(150)
@@ -27,7 +32,12 @@ describe('79 show independent ledger', () => {
       expect(report.supplierStats[0].profitThb).toBe(150)
       expect(report.monthlyRecords).toEqual([])
     }
-    expect(buildReport(rows, { ...query, projectName: '79秀' }).records).toEqual([])
+    for (const projectName of ['79秀', '格兰岛跟团一日游', '东方嘉年华']) {
+      const report = buildReport(rows, { ...query, projectName })
+      expect(report.records).toEqual([])
+      expect(report.quantity.recordCount).toBe(0)
+      expect(report.summary.profitThb).toBe(0)
+    }
   })
   it('reports daily and monthly people separately with actual profit and a 40/60 split', () => {
     const rows = [ticket('today'), ticket('other-day', { issueDate: '2026-10-01', personCount: 3 }), ticket('previous', { issueDate: '2026-09-30' }), ticket('next', { issueDate: '2026-11-01' }), ticket('normal', { projectName: '69秀' }), ticket('deleted', { deletedAt: '2026-10-15T01:00:00Z' })]
@@ -59,6 +69,15 @@ describe('79 show independent ledger', () => {
   it('preserves customer names and independent orders in the full backup', () => {
     const backup = createLedgerBackup({ suppliers: [], projects: [], tickets: [ticket('79')] })
     expect(backup.tickets[0]).toMatchObject({ guestName: 'jimmy', projectName: '79秀' })
+  })
+  it('excludes Koh Larn and carnival from ordinary exports without losing them from full backups', () => {
+    const kohLarn = ticket('koh-larn', { projectName: '格兰岛跟团一日游', refunds: [{ id: 'refund-koh-larn', userId: 'user', ticketId: 'koh-larn', personCount: 1, isFull: false, refundRevenueThb: 650, returnedCostThb: 600, refundDate: '2026-10-16', refundTime: '10:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] })
+    const carnival = ticket('carnival', { projectName: '东方嘉年华' })
+    const normal = ticket('normal', { projectName: '普通门票' })
+    const main = mainLedgerTickets([normal, kohLarn, carnival])
+    expect(buildTicketExportRows(main).map(row => row['原票编号'])).toEqual(['normal'])
+    expect(buildRefundExportRows(main)).toEqual([])
+    expect(createLedgerBackup({ suppliers: [], projects: [], tickets: [normal, kohLarn, carnival] }).tickets.map(row => row.id)).toEqual(['normal', 'koh-larn', 'carnival'])
   })
 })
 

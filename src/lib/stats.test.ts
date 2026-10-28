@@ -44,11 +44,13 @@ describe('monthly commission settlement statistics', () => {
     const tickets = ['69秀', '79秀', '泰拳', '东方嘉年华', '格兰岛跟团一日游', '芭提雅潜水（SH）', '普通项目'].map((projectName, index) => makeTicket({ id: `record-${index}`, projectName, agentPriceThb: 100, costThb: 80 }))
     expect(summarise(ticketsForDailyStats(tickets, '2026-10-13'))).toEqual({ count: 1, agentPriceThb: 100, costThb: 80, profitThb: 20 })
     const monthly = ticketsInMonth(tickets, '2026-10')
-    expect(summarise(monthly)).toEqual({ count: 4, agentPriceThb: 400, costThb: 320, profitThb: 80 })
-    expect(bySupplier(monthly)[0]).toMatchObject({ count: 4, agentPriceThb: 400, costThb: 320, profitThb: 80 })
+    expect(summarise(monthly)).toEqual({ count: 2, agentPriceThb: 200, costThb: 160, profitThb: 40 })
+    expect(bySupplier(monthly)[0]).toMatchObject({ count: 2, agentPriceThb: 200, costThb: 160, profitThb: 40 })
     expect(monthly.map(ticket => ticket.projectName)).not.toContain('69秀')
     expect(monthly.map(ticket => ticket.projectName)).not.toContain('79秀')
     expect(monthly.map(ticket => ticket.projectName)).not.toContain('泰拳')
+    expect(monthly.map(ticket => ticket.projectName)).not.toContain('东方嘉年华')
+    expect(monthly.map(ticket => ticket.projectName)).not.toContain('格兰岛跟团一日游')
     expect(ticketsOnDate(tickets, '2026-10-13')).toHaveLength(7)
   })
 
@@ -57,19 +59,19 @@ describe('monthly commission settlement statistics', () => {
     expect(ticketsForDailyStats([ticket], ticket.issueDate)).toEqual([ticket])
   })
 
-  it('recalculates on project and price edits and excludes deletions from both reports', () => {
+  it('removes records changed to an independent project from both main reports', () => {
     const daily = makeTicket({ projectName: '普通项目', agentPriceThb: 100, costThb: 80 })
     const edited = { ...daily, projectName: '嘉年华', agentPriceThb: 120 }
     expect(summarise(ticketsForDailyStats([daily], daily.issueDate)).profitThb).toBe(20)
     expect(summarise(ticketsForDailyStats([edited], edited.issueDate)).count).toBe(0)
-    expect(summarise(ticketsInMonth([edited], '2026-10')).profitThb).toBe(40)
+    expect(summarise(ticketsInMonth([edited], '2026-10')).profitThb).toBe(0)
     const deleted = { ...edited, deletedAt: '2026-10-13T02:00:00.000Z' }
     expect(summarise(ticketsForDailyStats([deleted], deleted.issueDate)).count).toBe(0)
     expect(summarise(ticketsInMonth([deleted], '2026-10')).count).toBe(0)
   })
 
   it('includes the 1st and last day, excluding adjacent months', () => {
-    const tickets = ['2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'].map((issueDate) => makeTicket({ id: issueDate, issueDate, projectName: '嘉年华' }))
+    const tickets = ['2026-09-30', '2026-10-01', '2026-10-31', '2026-11-01'].map((issueDate) => makeTicket({ id: issueDate, issueDate, projectName: '普通月结项目', settlementMode: 'monthly' }))
     expect(ticketsInMonth(tickets, '2026-10').map((ticket) => ticket.issueDate)).toEqual(['2026-10-01', '2026-10-31'])
     expect(monthDateRange('2026-02')).toEqual({ start: '2026-02-01', end: '2026-02-28' })
     expect(monthDateRange('2024-02')).toEqual({ start: '2024-02-01', end: '2024-02-29' })
@@ -95,7 +97,7 @@ describe('profit statistics', () => {
     expect(bySupplier([ticket])[0]).toMatchObject(total)
     expect(summarise([{ ...ticket, personCount: 5 }]).profitThb).toBe(250)
     expect(summarise([{ ...ticket, deletedAt: '2026-10-13T02:00:00Z' }]).profitThb).toBe(0)
-    const monthly = { ...ticket, projectName: '嘉年华' }
+    const monthly = { ...ticket, projectName: '普通月结项目', settlementMode: 'monthly' as const }
     expect(ticketsForDailyStats([monthly], monthly.issueDate)).toEqual([])
     expect(summarise(ticketsInMonth([monthly], '2026-10'))).toEqual(total)
     const commission = { ...ticket, entryMode: 'profit_only' as const, manualProfitThb: 50.25 }
