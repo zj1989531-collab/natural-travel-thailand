@@ -189,15 +189,24 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
       if (isCurrent(epoch, owner)) { mutationLock.current = false; setDeleting(false) }
     }
   }
-  const records = useMemo(() => tickets
+  const scopedRecords = useMemo(() => tickets
     .filter(ticket => !ticket.deletedAt && (kind === 'boxing' ? isBoxingProject(ticket.projectName) : kind === 'kohlarn' ? isKohLarnDayTripProject(ticket.projectName) : kind === 'carnival' ? isCarnivalProject(ticket.projectName) : isShow69Project(ticket.projectName)))
     .filter(ticket => range === 'all' || (range === 'date' ? ticket.issueDate === date : ticket.issueDate.startsWith(`${month}-`)))
-    .filter(ticket => !search.trim() || (ticket.guestName ?? '').toLowerCase().includes(search.trim().toLowerCase()))
-    .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [tickets, kind, range, month, date, search])
+    .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [tickets, kind, range, month, date])
+  const records = useMemo(() => scopedRecords
+    .filter(ticket => !search.trim() || (ticket.guestName ?? '').toLowerCase().includes(search.trim().toLowerCase())), [scopedRecords, search])
+  const metrics = useMemo(() => scopedRecords.reduce((summary, ticket) => {
+    const remainingPeople = getRefundState(ticket).remainingPeople
+    if (remainingPeople == null || ticket.entryMode === 'profit_only') summary.unknownPeople += 1
+    else summary.people += remainingPeople
+    return summary
+  }, { people: 0, unknownPeople: 0 }), [scopedRecords])
+  const rangeLabel = range === 'month' ? `${month.replace('-', '/')} 月` : range === 'date' ? date.replaceAll('-', '/') : '全部记录'
 
   return <section className="show79-view show69-view">
     <div className="records-heading"><div><p className="eyebrow">{requiresPackage ? '独立账本 · 月结套餐 · 曼谷时间' : '独立记录 · 曼谷时间'}</p><h1>{title}</h1></div></div>
     <p className="sheet-copy">记录日期、所有人姓名和人数，按套餐自动带入价格。不计入主账本每日统计、月报、年报及排行。</p>
+    <section className="show79-metrics" aria-label={`${title}订单与人数统计`}><div><span>订单数 · {rangeLabel}</span><strong>{scopedRecords.length} 单</strong><small>含已全退订单</small></div><div><span>有效人数 · {rangeLabel}</span><strong>{metrics.people} 人</strong>{metrics.unknownPeople > 0 && <small>另有{metrics.unknownPeople}笔人数未填</small>}</div></section>
     <section className="show79-entry"><h2>{editing ? `编辑${title}记录` : `新增${title}记录`}</h2>
       {!editing && <div className="show79-command">
         <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3${kind === 'boxing' ? '\n票种：亚洲人' : requiresPackage ? '\n套餐：C' : ''}`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
@@ -244,7 +253,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
         {range === 'date' && <label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label>}
       </div>
       <label className="show69-search">搜索姓名<input type="search" value={search} placeholder="输入任一人的姓名" onChange={event => setSearch(event.target.value)} /></label>
-      <p className="sheet-copy">当前范围 {records.length} 条记录</p>
+      <p className="sheet-copy">{search.trim() ? `搜索结果 ${records.length}` : `当前范围 ${records.length}`} 条记录</p>
       {!records.length && <p className="empty-card">当前范围没有{title}记录。</p>}
       <div className="records-list">{records.map(ticket => {
         const amounts = getTicketAmounts(ticket)

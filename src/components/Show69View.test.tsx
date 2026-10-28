@@ -38,6 +38,18 @@ describe('69秀独立记录页面', () => {
     expect(html).toContain('当前范围 1 条记录')
   })
 
+  it('summarises independent orders and remaining people after refunds', () => {
+    const html = render([
+      record({ id: 'partially-refunded', personCount: 3, refunds: [{ id: 'refund', userId: 'user', ticketId: 'partially-refunded', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] }),
+      record({ id: 'active', personCount: 2 })
+    ])
+    expect(html).toContain('69秀订单与人数统计')
+    expect(html).toContain('订单数 ·')
+    expect(html).toContain('2 单')
+    expect(html).toContain('有效人数 ·')
+    expect(html).toContain('4 人')
+  })
+
   it('keeps legacy records with refund history read-only', () => {
     const html = render([record({ refunds: [{ id: 'refund', userId: 'user', ticketId: '69', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] })])
     expect(html).toContain('此记录已有退票明细，保留原记录。')
