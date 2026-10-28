@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Project, TicketInput, TicketRecord } from '../types'
-import { createId, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidPersonCount, MAX_PERSON_COUNT } from '../lib/format'
+import { createId, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime, isValidCalendarDate, isValidPersonCount, MAX_PERSON_COUNT } from '../lib/format'
 import { isShow69Project, parseShow69Command, validateShow69Record, type Show69RecordInput } from '../lib/show69'
 import { isBoxingProject, parseBoxingCommand } from '../lib/boxing'
 import { boxingCategoryForTicket, monthlyPricingOptions, resolveMonthlyPricing, type MonthlyRecordKind } from '../lib/monthly-pricing'
@@ -22,13 +22,13 @@ interface Props {
   onDelete: (ticket: TicketRecord) => Promise<void>
   onRefund?: (ticketId: string) => void
   onCancelRefund?: (refundId: string) => void
+  onManageProjects?: () => void
 }
 
 type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string; snapshot?: TicketInput }
-type Range = 'month' | 'date' | 'all'
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
-export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onRefund, onCancelRefund }: Props) {
+export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
   const title = kind === 'boxing' ? '泰拳' : kind === 'kohlarn' ? '格兰岛一日游' : kind === 'carnival' ? '东方嘉年华' : '69秀'
   const requiresPackage = kind === 'kohlarn' || kind === 'carnival'
   const needsFrozenMonthlySnapshot = requiresPackage
@@ -44,9 +44,9 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
   const [deleting, setDeleting] = useState(false)
   const [pasting, setPasting] = useState(false)
   const [pendingSave, setPendingSave] = useState<SaveOperation | null>(null)
-  const [range, setRange] = useState<Range>('month')
   const [month, setMonth] = useState(getBangkokMonth)
   const [date, setDate] = useState(getBangkokDate)
+  const [dayOnly, setDayOnly] = useState(false)
   const [search, setSearch] = useState('')
   const mountedRef = useRef(true)
   const accountRef = useRef({ accountId, kind })
@@ -86,7 +86,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     mutationLock.current = false; pasteLock.current = false; operationRef.current = null
     setInput(emptyInput()); setEditing(undefined); setCommand(''); setCommandError(''); setCommandMessage('')
     setError(''); setMessage(''); setSaving(false); setDeleting(false); setPasting(false); setPendingSave(null)
-    setRange('month'); setMonth(getBangkokMonth()); setDate(getBangkokDate()); setSearch('')
+    setDayOnly(false); setMonth(getBangkokMonth()); setDate(getBangkokDate()); setSearch('')
   }, [accountId, kind])
 
   const isCurrent = (epoch: number, owner: string | undefined) => mountedRef.current && epoch === accountEpochRef.current && latest.current.accountId === owner && latest.current.kind === kind
@@ -146,7 +146,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     try {
       const saved = await latest.current.onSave(operation.input, operation.existing, operation.operationId, operation.snapshot)
       if (!isCurrent(epoch, owner)) return
-      clearEntry(); setMonth(saved.issueDate.slice(0, 7)); setDate(saved.issueDate); setRange('month'); setSearch('')
+      clearEntry(); setMonth(saved.issueDate.slice(0, 7)); setDate(saved.issueDate); setDayOnly(false); setSearch('')
       setMessage(operation.existing ? `${title}记录已更新。` : `${title}记录已保存，不计入主账本报表。`)
     } catch (failure) {
       if (!isCurrent(epoch, owner)) return
@@ -189,25 +189,27 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
       if (isCurrent(epoch, owner)) { mutationLock.current = false; setDeleting(false) }
     }
   }
-  const scopedRecords = useMemo(() => tickets
-    .filter(ticket => !ticket.deletedAt && (kind === 'boxing' ? isBoxingProject(ticket.projectName) : kind === 'kohlarn' ? isKohLarnDayTripProject(ticket.projectName) : kind === 'carnival' ? isCarnivalProject(ticket.projectName) : isShow69Project(ticket.projectName)))
-    .filter(ticket => range === 'all' || (range === 'date' ? ticket.issueDate === date : ticket.issueDate.startsWith(`${month}-`)))
-    .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)), [tickets, kind, range, month, date])
-  const records = useMemo(() => scopedRecords
-    .filter(ticket => !search.trim() || (ticket.guestName ?? '').toLowerCase().includes(search.trim().toLowerCase())), [scopedRecords, search])
-  const metrics = useMemo(() => scopedRecords.reduce((summary, ticket) => {
-    const remainingPeople = getRefundState(ticket).remainingPeople
-    if (remainingPeople == null || ticket.entryMode === 'profit_only') summary.unknownPeople += 1
-    else summary.people += remainingPeople
-    return summary
-  }, { people: 0, unknownPeople: 0 }), [scopedRecords])
-  const rangeLabel = range === 'month' ? `${month.replace('-', '/')} 月` : range === 'date' ? date.replaceAll('-', '/') : '全部记录'
+  const report = useMemo(() => {
+    if (!isValidCalendarDate(date) || !isValidCalendarDate(`${month}-01`)) return { dayRecords: [], records: [], dayPeople: 0, monthPeople: 0, dayUnknown: 0, monthUnknown: 0, profitThb: 0, error: '请选择有效的日期和月份。' }
+    const matching = kind === 'boxing' ? isBoxingProject : kind === 'kohlarn' ? isKohLarnDayTripProject : kind === 'carnival' ? isCarnivalProject : isShow69Project
+    const all = tickets.filter(ticket => !ticket.deletedAt && matching(ticket.projectName) && isValidCalendarDate(ticket.issueDate))
+    const sort = (rows: TicketRecord[]) => rows.sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))
+    const dayRecords = sort(all.filter(ticket => ticket.issueDate === date))
+    const records = sort(all.filter(ticket => ticket.issueDate.startsWith(`${month}-`)))
+    const people = (rows: TicketRecord[]) => rows.reduce((sum, ticket) => sum + (ticket.entryMode === 'profit_only' ? 0 : getRefundState(ticket).remainingPeople ?? 0), 0)
+    const unknown = (rows: TicketRecord[]) => rows.filter(ticket => ticket.entryMode !== 'profit_only' && getRefundState(ticket).remainingPeople == null).length
+    const profitThb = records.reduce((sum, ticket) => sum + Math.round(getTicketAmounts(ticket).profitThb * 100), 0) / 100
+    return { dayRecords, records, dayPeople: people(dayRecords), monthPeople: people(records), dayUnknown: unknown(dayRecords), monthUnknown: unknown(records), profitThb, error: '' }
+  }, [tickets, kind, date, month])
+  const records = (dayOnly ? report.dayRecords : report.records)?.filter(ticket => !search.trim() || `${ticket.guestName ?? ''} ${ticket.note}`.toLowerCase().includes(search.trim().toLowerCase())) ?? []
 
   return <section className="show79-view show69-view">
-    <div className="records-heading"><div><p className="eyebrow">{requiresPackage ? '独立账本 · 月结套餐 · 曼谷时间' : '独立记录 · 曼谷时间'}</p><h1>{title}</h1></div></div>
-    <p className="sheet-copy">记录日期、所有人姓名和人数，按套餐自动带入价格。不计入主账本每日统计、月报、年报及排行。</p>
-    <section className="show79-metrics" aria-label={`${title}订单与人数统计`}><div><span>订单数 · {rangeLabel}</span><strong>{scopedRecords.length} 单</strong><small>含已全退订单</small></div><div><span>有效人数 · {rangeLabel}</span><strong>{metrics.people} 人</strong>{metrics.unknownPeople > 0 && <small>另有{metrics.unknownPeople}笔人数未填</small>}</div></section>
-    <section className="show79-entry"><h2>{editing ? `编辑${title}记录` : `新增${title}记录`}</h2>
+    <div className="records-heading"><div><p className="eyebrow">独立账本 · THB · 曼谷时间</p><h1>{title}</h1></div>{onManageProjects && <button type="button" className="secondary-button small" onClick={onManageProjects}>供货商 / 套餐</button>}</div>
+    <p className="sheet-copy">{title}的订单、人数和利润独立统计，不计入主账本日报、月报、年报及排行。</p>
+    <div className="show79-filters"><label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>报表月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label></div>
+    {report.error && <p role="alert" className="form-error">{report.error}</p>}
+    {!report.error && <div className="show79-metrics" aria-label={`${title}统计`}><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replace('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数（含退票记录）</span><strong>{report.records.length} 单</strong></div></div>}
+    <section className="show79-entry"><h2>{editing ? `编辑${title}订单` : `新增${title}订单`}</h2>
       {!editing && <div className="show79-command">
         <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3${kind === 'boxing' ? '\n票种：亚洲人' : requiresPackage ? '\n套餐：C' : ''}`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
           if (mutationLock.current || operationRef.current) return
@@ -247,14 +249,8 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="sheet-copy" role="status">{message}</p>}
     </section>
-    <section className="show79-orders"><h2>{title}记录</h2>
-      <div className="show79-filters"><label>记录范围<select value={range} onChange={event => setRange(event.target.value as Range)}><option value="month">指定月份</option><option value="date">指定日期</option><option value="all">全部记录</option></select></label>
-        {range === 'month' && <label>查询月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label>}
-        {range === 'date' && <label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label>}
-      </div>
-      <label className="show69-search">搜索姓名<input type="search" value={search} placeholder="输入任一人的姓名" onChange={event => setSearch(event.target.value)} /></label>
-      <p className="sheet-copy">{search.trim() ? `搜索结果 ${records.length}` : `当前范围 ${records.length}`} 条记录</p>
-      {!records.length && <p className="empty-card">当前范围没有{title}记录。</p>}
+    <section className="show79-orders"><h2>{title}订单</h2><div className="show79-filters"><label>订单范围<select value={dayOnly ? 'day' : 'month'} onChange={event => setDayOnly(event.target.value === 'day')}><option value="month">指定月份</option><option value="day">指定日期</option></select></label><label>搜索客户 / 备注<input value={search} onChange={event => setSearch(event.target.value)} /></label></div>
+      {!records.length && <p className="empty-card">当前范围没有{title}订单。</p>}
       <div className="records-list">{records.map(ticket => {
         const amounts = getTicketAmounts(ticket)
         const refund = getRefundState(ticket)

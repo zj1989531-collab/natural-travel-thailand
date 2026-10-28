@@ -14,14 +14,14 @@ const render = (tickets: TicketRecord[], kind: 'show69' | 'boxing' = 'show69') =
 describe('69秀独立记录页面', () => {
   it('provides record fields and automatic read-only prices without ticket generation or settlement', () => {
     const html = render([record()])
-    for (const value of ['69秀', '一键填写信息', '日期', '名字（所有人）', '人数', '保存记录', '不计入主账本每日统计', '韩廷富,邵建华,江华兴', '3 人']) expect(html).toContain(value)
+    for (const value of ['69秀', '一键填写信息', '日期', '名字（所有人）', '人数', '保存记录', '不计入主账本日报', '韩廷富,邵建华,江华兴', '3 人', '当日人数', '月人数', '月实际利润', '月订单数（含退票记录）']) expect(html).toContain(value)
     for (const value of ['确认单', '生成图片', '打印', '月度分账', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
     expect(html).toContain('自动匹配价格')
     expect(html).toContain('净售价 ' + formatThb(9999))
     expect(html).toContain('净成本 ' + formatThb(8888))
     expect(html).toContain('type="date"')
     expect(html).toContain('type="number"')
-    expect(html).toContain('全部记录')
+    expect(html).toContain('订单范围')
   })
 
   it('shows only active 69秀 records in the current month and escapes every guest name', () => {
@@ -35,7 +35,7 @@ describe('69秀独立记录页面', () => {
     expect(html).toContain('&lt;b&gt;张三&lt;/b&gt;,李四')
     expect(html).not.toContain('<b>张三</b>')
     for (const value of ['其他项目姓名', '泰拳客户姓名', '已删除姓名', '其他月份姓名']) expect(html).not.toContain(value)
-    expect(html).toContain('当前范围 1 条记录')
+    expect(html).toContain('月订单数（含退票记录）')
   })
 
   it('summarises independent orders and remaining people after refunds', () => {
@@ -43,10 +43,10 @@ describe('69秀独立记录页面', () => {
       record({ id: 'partially-refunded', personCount: 3, refunds: [{ id: 'refund', userId: 'user', ticketId: 'partially-refunded', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] }),
       record({ id: 'active', personCount: 2 })
     ])
-    expect(html).toContain('69秀订单与人数统计')
-    expect(html).toContain('订单数 ·')
+    expect(html).toContain('aria-label="69秀统计"')
+    expect(html).toContain('月订单数（含退票记录）')
     expect(html).toContain('2 单')
-    expect(html).toContain('有效人数 ·')
+    expect(html).toContain('月人数 ·')
     expect(html).toContain('4 人')
   })
 
@@ -83,7 +83,7 @@ describe('泰拳独立记录页面', () => {
       record({ id: 'deleted', projectName: '泰拳', guestName: '已删除泰拳客户', deletedAt: '2026-01-01T00:00:00Z' }),
       record({ id: 'old', projectName: '泰拳', issueDate: '2020-01-01', guestName: '其他月份泰拳客户' })
     ], 'boxing')
-    for (const value of ['<h1>泰拳</h1>', '新增泰拳记录', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '当前范围 1 条记录', '不计入主账本每日统计']) expect(html).toContain(value)
+    for (const value of ['<h1>泰拳</h1>', '新增泰拳订单', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '月订单数（含退票记录）', '不计入主账本日报']) expect(html).toContain(value)
     for (const value of ['69秀', '79秀', '六九客户', '七九客户', '已删除泰拳客户', '其他月份泰拳客户', '确认单', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
     expect(html).toContain('aria-describedby="boxing-command-help"')
   })
@@ -95,7 +95,7 @@ describe('泰拳独立记录页面', () => {
     expect(html).toContain('value="2026-10-23"')
     expect(html).toContain('韩廷富,邵建华,江华兴</textarea>')
     expect(html).toContain('step="1" value="3"')
-    expect(html).toContain('当前范围没有泰拳记录。')
+    expect(html).toContain('当前范围没有泰拳订单。')
     expect(html).not.toContain('69秀')
     expect(html).toContain('请选择亚洲人或欧美人票种，系统将自动带入对应价格。')
   })
@@ -108,7 +108,7 @@ describe('独立月结项目页面', () => {
   ])('uses the same paste-first monthly form and package safeguards for independent $title ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
     const monthlyProject = project({ id: kind, name, normalizedName: name, subItemName, normalizedSubItemName: subItemName, defaultAgentPriceThb: agentPriceThb, defaultCostThb: costThb })
     const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
-    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · 月结', '不计入主账本每日统计、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb)]) expect(html).toContain(value)
+    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数（含退票记录）']) expect(html).toContain(value)
     expect(html).not.toContain('计入所属月报和年报')
   })
 })
