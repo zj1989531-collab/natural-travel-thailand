@@ -27,6 +27,7 @@ describe('refund form and preserved history', () => {
     expect(html).toContain('格兰岛跟团一日游')
     expect(html).toContain('东方嘉年华')
     expect(html).toContain('原票归属日期：2026-10-13')
+    expect(html).toContain('将更新本独立账本中原出票日期的记录与利润')
   })
   it('does not offer full-refunded, deleted or profit-only records', () => {
     const html = renderToStaticMarkup(<RefundSheet tickets={[{ ...ticket, refunds: [refund] }, { ...ticket, id: 'deleted', deletedAt: ticket.updatedAt }, { ...ticket, id: 'manual', entryMode: 'profit_only' }]} onClose={() => {}} onSave={async () => {}} />)
@@ -65,7 +66,7 @@ describe('refund form and preserved history', () => {
     expect(dateInput).not.toContain('min=')
     expect(html).toContain('原票归属日期：2026-11-20')
     expect(html).toContain('可早于观看／出行日期')
-    expect(html).toContain('2026-11 的月报')
+    expect(html).toContain('将更新本独立账本中原出票日期的记录与利润')
   })
   it('includes the customer and separate original/actual dates in the final confirmation', () => {
     const input: RefundInput = { ...refund, operationId: refund.id, refundDate: '2026-10-16', note: '' }

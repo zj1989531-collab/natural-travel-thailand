@@ -25,7 +25,7 @@ export const summarise = (tickets: TicketRecord[]): Summary =>
 export const ticketsOnDate = (tickets: TicketRecord[], date: string): TicketRecord[] =>
   tickets.filter((ticket) => ticket.issueDate === date)
 
-// 69 and 79 shows are independent; other records retain saved settlement rules.
+// Independent-ledger records are excluded before applying saved settlement rules.
 export const ticketsForDailyStats = (tickets: TicketRecord[], date: string): TicketRecord[] =>
   activeTickets(ticketsOnDate(mainLedgerTickets(tickets), date)).filter(ticket => ticketSettlementMode(ticket) !== 'monthly')
 

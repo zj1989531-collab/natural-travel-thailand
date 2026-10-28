@@ -499,7 +499,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
             {entryMode !== 'profit_only' && <><label>数量单位<select value={quantityUnit} onChange={(event) => setQuantityUnit(event.target.value as QuantityUnit)}><option value="person">人数（人）</option><option value="item">商品数量（件）</option></select></label><label className="checkbox-label"><input type="checkbox" checked={manualAgentPrice} onChange={(event) => setManualAgentPrice(event.target.checked)} />每次录入时手动填写售价</label><label className="checkbox-label"><input type="checkbox" checked={manualCostPrice} onChange={event => setManualCostPrice(event.target.checked)} />每次录入时手动填写成本</label></>}
             <label>默认计价<select value={projectRules.defaultAmountBasis} onChange={event => setDefaultAmountBasis(event.target.value as AmountBasis)}><option value="per_person">{entryMode === 'profit_only' ? '按人数计算返佣' : quantityUnit === 'item' ? '按件计算' : '按人数计算'}</option><option value="total">{entryMode === 'profit_only' ? '返佣总额' : '整单总额'}</option></select></label>
             <label>结算方式<select value={projectRules.settlementMode} onChange={event => setSettlementMode(event.target.value as SettlementMode)} disabled={entryMode === 'profit_only'}><option value="daily">日结</option><option value="monthly">月结</option></select></label>
-            <p className="sheet-copy">选择套餐时自动带入，可在出票时临时调整计价；月结不计每日概览，计入所属月报与年报。</p>
+            <p className="sheet-copy">选择套餐时自动带入，可在出票时临时调整计价；{isIndependentLedgerProject(projectName) ? '独立账本不计入主账本日报、月报、年报及排行。' : '月结不计每日概览，计入所属月报与年报。'}</p>
             {entryMode === 'profit_only' ? <p className="sheet-copy">此项目无默认成本和售价。每次记账只填写利润，计入月报。</p> : <div className="form-grid">
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualCostPrice ? '每次手动填写成本' : '供货商成本（THB）'} value={manualCostPrice ? '' : cost} onChange={(event) => setCost(event.target.value)} required={!manualCostPrice} disabled={manualCostPrice} />
               <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualAgentPrice ? '每次手动填写售价' : '代理售价（THB）'} value={manualAgentPrice ? '' : agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required={!manualAgentPrice} disabled={manualAgentPrice} />
@@ -887,7 +887,8 @@ export default function App() {
   const saveRefund = async (input: RefundInput) => {
     requireCloudLogin()
     const epoch = accountEpochRef.current
-    const originalDate = tickets.find((ticket) => ticket.id === input.ticketId)?.issueDate
+    const originalTicket = tickets.find((ticket) => ticket.id === input.ticketId)
+    const originalDate = originalTicket?.issueDate
     await synchronise()
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
     requireCloudLogin()
@@ -897,12 +898,16 @@ export default function App() {
     let refreshed = true
     try { await refresh() } catch { refreshed = false }
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开原账号核对此笔退票。')
-    setToast(saved.cancelledAt ? '已核对：原退票已撤销，未新增退票。' : refreshed ? `退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。` : '退票已确认；页面刷新未完成，请同步核对，无需再次登记。')
+    const refundUpdateMessage = originalTicket && isIndependentLedgerProject(originalTicket.projectName)
+      ? `退票已确认，已更新${originalTicket.projectName}独立账本中原出票日期 ${originalDate ?? ''} 的记录与利润。`
+      : `退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`
+    setToast(saved.cancelledAt ? '已核对：原退票已撤销，未新增退票。' : refreshed ? refundUpdateMessage : '退票已确认；页面刷新未完成，请同步核对，无需再次登记。')
     void synchronise()
   }
   const cancelRefund = async (id: string) => {
     if (requestLoginForWrite()) return
     const epoch = accountEpochRef.current
+    const originalTicket = tickets.find(ticket => ticket.refunds?.some(refund => refund.id === id))
     if (!window.confirm('确认撤销这笔退票登记吗？原日期的利润和有效票量会恢复；退票明细仍保留。这只修改账本，不会转账。')) return
     try {
       await synchronise()
@@ -910,7 +915,7 @@ export default function App() {
       requireCloudLogin()
       await ledgerRepository.cancelRefund(id); await refresh()
       if (epoch !== accountEpochRef.current) return
-      setToast('退票已撤销，原日期统计已重新计算。'); void synchronise()
+      setToast(originalTicket && isIndependentLedgerProject(originalTicket.projectName) ? '退票已撤销，独立账本记录及利润已重新计算。' : '退票已撤销，原日期统计已重新计算。'); void synchronise()
     } catch (error) { setToast(error instanceof Error ? error.message : '撤销未完成，请刷新核对。') }
   }
 

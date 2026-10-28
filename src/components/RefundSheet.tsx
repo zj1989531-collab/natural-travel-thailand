@@ -7,6 +7,7 @@ import { getTicketAmounts } from '../lib/ticket-amounts'
 import { quantityLabels } from '../lib/quantity'
 import { useFinancialSubmission } from '../lib/use-financial-submission'
 import { useDialog } from '../lib/use-dialog'
+import { isIndependentLedgerProject } from '../lib/show79'
 
 const customerName = (ticket: TicketRecord) => ticket.guestName?.trim() || '姓名未填写'
 
@@ -98,7 +99,7 @@ export function RefundSheet({ tickets, initialTicketId = '', accountId, onClose,
       <label>原出票记录<select value={selectedId} onChange={(event) => changeTicket(event.target.value)} required><option value="">请选择需要退票的记录</option>{refundable.map((row) => <option key={row.id} value={row.id}>{customerName(row)} · {row.issueDate} {row.issueTime ?? ''} · {row.projectName}{row.subItemName ? ` / ${row.subItemName}` : ''} · {row.supplierName} · 剩余{getRefundState(row).remainingPeople ?? '未知'}{quantityLabels(row).unit} · #{row.id.slice(0, 6)}</option>)}</select></label>
       {!refundable.length && <p className="sheet-copy">没有符合条件的可退票记录。已全部退票和仅录利润的记录不会列在此处。</p>}
       {ticket && <>
-        <p className="sheet-copy">客户：<strong>{customerName(ticket)}</strong><br />原票归属日期：{ticket.issueDate} · 原{label}：{ticket.personCount ?? '未记录'} · 已退：{state?.refundedPeople ?? 0} · 剩余：{state?.remainingPeople ?? '未知'}{unit}<br />将重算 {ticket.issueDate} 的当日统计和 {ticket.issueDate.slice(0, 7)} 的月报。</p>
+        <p className="sheet-copy">客户：<strong>{customerName(ticket)}</strong><br />原票归属日期：{ticket.issueDate} · 原{label}：{ticket.personCount ?? '未记录'} · 已退：{state?.refundedPeople ?? 0} · 剩余：{state?.remainingPeople ?? '未知'}{unit}<br />{isIndependentLedgerProject(ticket.projectName) ? '将更新本独立账本中原出票日期的记录与利润。' : `将重算 ${ticket.issueDate} 的当日统计和 ${ticket.issueDate.slice(0, 7)} 的月报。`}</p>
         <label>退票范围<select value={isFull ? 'full' : 'partial'} onChange={(event) => { const full = event.target.value === 'full'; setIsFull(full); setAmounts(defaultRefundAmounts(ticket, full, people)) }}><option value="full">全部剩余{label} / 整单</option><option value="partial" disabled={state?.remainingPeople == null}>部分退票</option></select></label>
         {!isFull && <label>本次退票{label}<input inputMode="numeric" type="number" min="1" max={state?.remainingPeople ?? undefined} step="1" value={Number.isFinite(people) ? people : ''} onChange={(event) => { const value = event.target.value === '' ? NaN : Number(event.target.value); setPeople(value); setAmounts(defaultRefundAmounts(ticket, false, Number.isFinite(value) ? value : 0)) }} required /></label>}
         {ticket.personCount == null && <p className="sheet-copy">旧票{label}未知，只能整单退票，不会擅自补{label}。</p>}
