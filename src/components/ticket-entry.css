@@ -19,7 +19,7 @@
 .record-date-shortcuts { display: flex; gap: 8px; margin: 11px 0 0; }
 .record-date-shortcuts button { flex: 1; min-height: 44px; padding: 8px 12px; border: 1px solid #d7e0da; border-radius: 10px; color: #536b60; background: #fff; font-size: 13px; font-weight: 700; }
 .record-date-shortcuts button[aria-pressed="true"] { border-color: #176a59; color: #fff; background: #176a59; }
-.record-date-range { margin: 10px 0 0; color: #6f8077; font-size: 12px; line-height: 1.5; }
+.record-date-range { margin: 10px 0 0; color: #5d6f66; font-size: 12px; line-height: 1.5; }
 .records-list .ticket-actions { gap: 8px; flex-wrap: wrap; }
 .records-list .ticket-actions button { min-width: 52px; min-height: 44px; padding: 10px 12px; border-radius: 9px; }
 .records-list .ticket-actions .danger-action { margin-left: 12px; }

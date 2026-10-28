@@ -6,8 +6,12 @@ create table public.ticket_refunds (
   ticket_id uuid not null references public.tickets(id),
   person_count integer check (person_count >= 1),
   is_full boolean not null,
-  refund_revenue_thb numeric(14,2) not null check (refund_revenue_thb >= 0),
-  returned_cost_thb numeric(14,2) not null check (returned_cost_thb >= 0),
+  refund_revenue_thb numeric(14,2) not null constraint ticket_refunds_refund_revenue_thb_valid check (
+    refund_revenue_thb::text not in ('NaN', 'Infinity', '-Infinity') and refund_revenue_thb >= 0 and refund_revenue_thb <= 999999999999.99
+  ),
+  returned_cost_thb numeric(14,2) not null constraint ticket_refunds_returned_cost_thb_valid check (
+    returned_cost_thb::text not in ('NaN', 'Infinity', '-Infinity') and returned_cost_thb >= 0 and returned_cost_thb <= 999999999999.99
+  ),
   refund_date date not null,
   refund_time time without time zone not null,
   note text not null default '',
@@ -19,9 +23,8 @@ create table public.ticket_refunds (
 create index ticket_refunds_user_ticket_idx on public.ticket_refunds(user_id,ticket_id);
 create index ticket_refunds_ticket_idx on public.ticket_refunds(ticket_id);
 alter table public.ticket_refunds enable row level security;
+revoke all privileges on public.ticket_refunds from public, anon, authenticated;
 grant select,insert,update on public.ticket_refunds to authenticated;
-revoke all privileges on public.ticket_refunds from anon;
-revoke delete on public.ticket_refunds from authenticated;
 create policy "Users manage only their refunds" on public.ticket_refunds
   for all to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id);
 
@@ -79,6 +82,7 @@ end;
 $$;
 create trigger ledger_validate_refund before insert or update on public.ticket_refunds
   for each row execute function public.ledger_validate_refund();
+revoke execute on function public.ledger_validate_refund() from public, anon, authenticated;
 
 create or replace function public.ledger_protect_refunded_ticket()
 returns trigger language plpgsql security invoker set search_path=public as $$
@@ -92,6 +96,7 @@ end;
 $$;
 create trigger ledger_protect_refunded_ticket before update on public.tickets
   for each row execute function public.ledger_protect_refunded_ticket();
+revoke execute on function public.ledger_protect_refunded_ticket() from public, anon, authenticated;
 
 do $$
 begin

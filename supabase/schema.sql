@@ -7,6 +7,7 @@ create table if not exists public.suppliers (
   normalized_name text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint suppliers_id_user_id_key unique (id, user_id),
   unique (user_id, normalized_name)
 );
 
@@ -21,26 +22,35 @@ create table if not exists public.tickets (
   amount_basis text not null default 'total',
   user_id uuid not null references auth.users(id) on delete cascade,
   issue_date date not null,
-  supplier_id uuid not null references public.suppliers(id),
+  supplier_id uuid not null,
   supplier_name text not null,
   project_id uuid,
   project_name text not null,
   sub_item_name text not null,
-  agent_price_thb numeric(14, 2) not null check (agent_price_thb >= 0),
-  cost_thb numeric(14, 2) not null check (cost_thb >= 0),
+  agent_price_thb numeric(14, 2) not null constraint tickets_agent_price_thb_valid check (
+    agent_price_thb::text not in ('NaN', 'Infinity', '-Infinity') and agent_price_thb >= 0 and agent_price_thb <= 999999999999.99
+  ),
+  cost_thb numeric(14, 2) not null constraint tickets_cost_thb_valid check (
+    cost_thb::text not in ('NaN', 'Infinity', '-Infinity') and cost_thb >= 0 and cost_thb <= 999999999999.99
+  ),
   note text not null default '',
   deleted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint tickets_amount_basis_valid check (amount_basis in ('total','per_person') and (amount_basis <> 'per_person' or (person_count is not null and person_count >= 1))),
+  constraint tickets_manual_profit_thb_valid check (manual_profit_thb is null or (
+    manual_profit_thb::text not in ('NaN', 'Infinity', '-Infinity') and manual_profit_thb >= 0 and manual_profit_thb <= 999999999999.99
+  )),
   constraint tickets_entry_mode_valid check (
     (entry_mode='standard' and manual_profit_thb is null) or
     (entry_mode='profit_only' and manual_profit_thb is not null and manual_profit_thb >= 0 and agent_price_thb=0 and cost_thb=0)
-  )
+  ),
+  constraint tickets_supplier_owner_fkey foreign key (supplier_id, user_id) references public.suppliers(id, user_id)
 );
 
 create index if not exists tickets_user_issue_date_idx on public.tickets (user_id, issue_date desc);
 create index if not exists tickets_user_supplier_idx on public.tickets (user_id, supplier_id);
+create index if not exists tickets_supplier_owner_idx on public.tickets (supplier_id, user_id);
 
 create table if not exists public.projects (
   quantity_unit text not null default 'person' check(quantity_unit in ('person','item')),
@@ -50,29 +60,37 @@ create table if not exists public.projects (
   id uuid primary key,
   entry_mode text not null default 'standard',
   user_id uuid not null references auth.users(id) on delete cascade,
-  supplier_id uuid not null references public.suppliers(id),
+  supplier_id uuid not null,
   supplier_name text not null,
   name text not null,
   normalized_name text not null,
   sub_item_name text not null,
   normalized_sub_item_name text not null,
-  default_cost_thb numeric(14, 2) not null check (default_cost_thb >= 0),
-  default_agent_price_thb numeric(14, 2) not null check (default_agent_price_thb >= 0),
+  default_cost_thb numeric(14, 2) not null constraint projects_default_cost_thb_valid check (
+    default_cost_thb::text not in ('NaN', 'Infinity', '-Infinity') and default_cost_thb >= 0 and default_cost_thb <= 999999999999.99
+  ),
+  default_agent_price_thb numeric(14, 2) not null constraint projects_default_agent_price_thb_valid check (
+    default_agent_price_thb::text not in ('NaN', 'Infinity', '-Infinity') and default_agent_price_thb >= 0 and default_agent_price_thb <= 999999999999.99
+  ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, supplier_id, normalized_name, normalized_sub_item_name),
-  constraint projects_entry_mode_valid check (entry_mode in ('standard','profit_only') and (entry_mode <> 'profit_only' or (default_cost_thb=0 and default_agent_price_thb=0)))
+  constraint projects_entry_mode_valid check (entry_mode in ('standard','profit_only') and (entry_mode <> 'profit_only' or (default_cost_thb=0 and default_agent_price_thb=0))),
+  constraint projects_supplier_owner_fkey foreign key (supplier_id, user_id) references public.suppliers(id, user_id)
 );
 
 create index if not exists projects_user_supplier_idx on public.projects (user_id, supplier_id);
+create index if not exists projects_supplier_owner_idx on public.projects (supplier_id, user_id);
 alter table public.suppliers enable row level security;
 alter table public.projects enable row level security;
 alter table public.tickets enable row level security;
 
 -- Explicit API privileges; row-level policies still restrict each user's rows.
+-- Revoking first avoids retaining default TRUNCATE, TRIGGER or REFERENCES
+-- privileges on an existing installation.
 grant usage on schema public to authenticated;
+revoke all privileges on table public.suppliers, public.projects, public.tickets from public, anon, authenticated;
 grant select, insert, update on table public.suppliers, public.projects, public.tickets to authenticated;
-revoke all privileges on table public.suppliers, public.projects, public.tickets from anon;
 
 create policy "Users manage only their suppliers" on public.suppliers
   for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
@@ -106,6 +124,7 @@ begin
   return new;
 end;
 $$;
+revoke execute on function public.ledger_keep_latest_version() from public, anon, authenticated;
 
 do $$
 declare

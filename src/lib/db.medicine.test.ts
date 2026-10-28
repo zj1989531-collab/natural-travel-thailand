@@ -34,6 +34,12 @@ vi.mock('idb', () => ({
               afterRequest(name, 'get', key)
               return value
             },
+            async getAll() {
+              requireActive()
+              const values = structuredClone([...store.values()])
+              afterRequest(name, 'getAll', '')
+              return values
+            },
             async put(value: Record<string, unknown>, key = String(value.id)) {
               requireActive()
               if (mode !== 'readwrite') throw new Error('ReadOnlyError')
@@ -51,6 +57,13 @@ vi.mock('idb', () => ({
               store.set(key, structuredClone(value))
               afterRequest(name, 'add', key)
               return key
+            },
+            async delete(key: string) {
+              requireActive()
+              if (mode !== 'readwrite') throw new Error('ReadOnlyError')
+              memory.attemptedWrites++
+              store.delete(key)
+              afterRequest(name, 'delete', key)
             },
             index(indexName: string) {
               if (name !== 'ticket_refunds' || indexName !== 'by-ticket-id') throw new Error('Unexpected index')
@@ -109,7 +122,7 @@ const noTicketsOrReceipts = () => {
 
 beforeEach(() => {
   memory.stores.clear()
-  for (const name of ['settings', 'tickets', 'ticket_create_operations', 'ticket_refunds', 'projects', 'suppliers']) memory.stores.set(name, new Map())
+  for (const name of ['settings', 'tickets', 'ticket_create_operations', 'ticket_refunds', 'show79_settlements', 'projects', 'suppliers', 'sync_conflicts', 'sync_bases']) memory.stores.set(name, new Map())
   store('settings').set('app', { localUserId: 'anonymous', lastCloudUserId: userId, activeCloudUserId: userId })
   store('suppliers').set(supplier.id, structuredClone(supplier))
   for (const id of ['project-one', 'project-two']) store('projects').set(id, project(id))
@@ -122,6 +135,23 @@ beforeEach(() => {
 })
 
 describe('real medicine batch DB operation with atomic controlled transactions', () => {
+  it('adopts a legacy local 79 settlement as pending instead of hiding or trusting it as cloud-confirmed', async () => {
+    const legacy = {
+      id: 'legacy-settlement', userId: 'anonymous', month: '2026-10',
+      snapshotProfitThb: 100, snapshotJimmyThb: 40, snapshotPartnersThb: 60,
+      jimmyPaidThb: 40, partnersPaidThb: 60, paymentDate: '2026-10-16', note: '旧本机记录',
+      createdAt: timestamp, updatedAt: timestamp, syncStatus: 'synced'
+    }
+    store('show79_settlements').set(legacy.id, legacy)
+
+    await db.activateAccount('cloud-owner', true, () => true)
+
+    expect(store('show79_settlements').get(legacy.id)).toMatchObject({
+      ...legacy, userId: 'cloud-owner', syncStatus: 'pending'
+    })
+    expect(store('settings').get('app')).toMatchObject({ activeCloudUserId: 'cloud-owner', lastCloudUserId: 'cloud-owner' })
+  })
+
   it('writes no ticket or receipt when the second row catalogue version changed', async () => {
     store('projects').set('project-two', { ...project('project-two'), updatedAt: '2026-10-16T09:01:00Z' })
     await expect(db.putMedicineTicketsOnce(batch(), owner)).rejects.toThrow('药品套餐或供货商已变化')

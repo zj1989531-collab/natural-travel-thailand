@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
   cloud: { suppliers: new Map<string, any>(), projects: new Map<string, any>(), tickets: new Map<string, any>(), ticket_refunds: new Map<string, any>(), show79_settlements: new Map<string, any>() },
   rejectRefundWrite: false,
   loseRefundResponse: false,
+  rejectLegacySettlement: false,
+  settlementRpcCalls: [] as Record<string, unknown>[],
   uploads: [] as { table: string; records: any[] }[],
   duringUpload: null as null | ((table: string) => void),
   settings: { localUserId: 'anonymous', lastCloudUserId: 'user-1' as string | null, activeCloudUserId: null as string | null },
@@ -118,6 +120,7 @@ vi.mock('./db', () => ({ db: {
   getRefunds: async () => [...state.local.ticket_refunds.values()].map(copy),
   getShow79Settlements: async () => [...state.local.show79_settlements.values()].map(copy),
   mergeRemoteShow79Settlements: (records: any[], owner?: LedgerOwnerContext) => mergeRows('show79_settlements', records, owner),
+  putConfirmedShow79Settlement: async (record: any, owner?: LedgerOwnerContext) => { guard(owner, record.userId); state.local.show79_settlements.set(record.id, copy(record)) },
   getRefund: async (id: string) => state.local.ticket_refunds.get(id),
   putRefund: async (record: RefundRecord, owner?: LedgerOwnerContext) => { guard(owner, record.userId); state.local.ticket_refunds.set(record.id, copy(record)) },
   mergeRemoteRefunds: (records: any[], owner?: LedgerOwnerContext) => mergeRows('ticket_refunds', records, owner),
@@ -142,10 +145,12 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
       const filters: Record<string, string> = {}
       let offset = 0
       let end = 499
+      let returning = false
       const builder = {
         eq: (column: string, value: string) => { filters[column] = value; return builder },
         order: () => builder,
         range: (start: number, last: number) => { offset = start; end = last; return builder },
+        select: () => { returning = true; return builder },
         abortSignal: async () => {
           const matches = (row: any) => Object.entries(filters).every(([key, value]) => key === 'updated_at' ? Date.parse(row[key]) === Date.parse(value) : row[key] === value)
           if (write) {
@@ -157,7 +162,7 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
             if (table === 'tickets' && matchedWrite.some(row => state.rejectTicketIds.has(row.id) || (state.cloud.tickets.has(row.id) && [...state.cloud.ticket_refunds.values()].some(refund => refund.ticket_id === row.id && refund.user_id === row.user_id) && ['note', 'agent_price_thb', 'cost_thb', 'deleted_at'].some(key => row[key] !== state.cloud.tickets.get(row.id)?.[key])))) return { data: null, error: { code: 'P0001', message: '原票已有退票，或记录校验失败' } }
             if (mode === 'update') {
               for (const [id, row] of state.cloud[table]) if (matches(row) && Date.parse(write[0].updated_at) > Date.parse(row.updated_at)) state.cloud[table].set(id, { ...row, ...write[0] })
-              return { error: null, data: null }
+              return { error: null, data: returning ? matchedWrite.map(copy) : null }
             }
             for (const row of write) if (table === 'suppliers' || table === 'projects') {
               const duplicate = [...state.cloud[table].values()].some(other => other.id !== row.id && other.user_id === row.user_id && other.normalized_name === row.normalized_name && (table === 'suppliers' || other.supplier_id === row.supplier_id && other.normalized_sub_item_name === row.normalized_sub_item_name))
@@ -182,7 +187,24 @@ vi.mock('./supabase', () => ({ getSupabase: () => ({
       return builder
     }
     return { select: () => query(), upsert: (rows: any[]) => query(rows), insert: (row: any) => query(Array.isArray(row) ? row : [row], 'insert'), update: (row: any) => query([row], 'update') }
-  }
+  },
+  rpc: (name: string, params: Record<string, unknown>) => ({ abortSignal: async () => {
+    state.settlementRpcCalls.push({ name, ...params })
+    if (name !== 'record_show79_settlement') return { data: null, error: { message: 'Unexpected RPC' } }
+    if (state.rejectLegacySettlement) return { data: null, error: { code: '40001', message: '历史分账需要人工核对' } }
+    const id = String(params.p_operation_id)
+    const existing = state.cloud.show79_settlements.get(id)
+    if (existing) return { data: copy(existing), error: null }
+    const row = {
+      id, user_id: user.id, month: params.p_month,
+      snapshot_profit_thb: params.p_expected_profit_thb, snapshot_jimmy_thb: 40, snapshot_partners_thb: 60,
+      jimmy_paid_thb: params.p_jimmy_paid_thb, partners_paid_thb: params.p_partners_paid_thb,
+      payment_date: params.p_payment_date, note: params.p_note,
+      created_at: '2026-10-16T05:00:00.000Z', updated_at: '2026-10-16T05:00:00.000Z'
+    }
+    state.cloud.show79_settlements.set(id, copy(row))
+    return { data: row, error: null }
+  } })
 }) }))
 
 import { ledgerRepository } from './repository'
@@ -292,7 +314,7 @@ describe('confirmed cloud refunds', () => {
 
 beforeEach(async () => {
   vi.stubGlobal('navigator', { onLine: true })
-  for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds'] as const) {
+  for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds', 'show79_settlements'] as const) {
     state.local[table].clear()
     state.cloud[table].clear()
   }
@@ -300,6 +322,8 @@ beforeEach(async () => {
   state.duringUpload = null
   state.rejectRefundWrite = false
   state.loseRefundResponse = false
+  state.rejectLegacySettlement = false
+  state.settlementRpcCalls.length = 0
   state.beforeTicketWrite = null
   state.beforeTicketRead = null
   state.rejectTicketIds.clear()
@@ -343,6 +367,67 @@ describe('cloud synchronization races', () => {
     expect(state.cloud.suppliers.get('unique-s').normalized_name).toBe('另一供货商')
     expect(await ledgerRepository.getSuppliers()).toHaveLength(2)
   })
+  it('inserts new suppliers and projects into their own cloud tables', async () => {
+    const supplier = { ...localSupplier, id: 'fresh-s', name: '新供货商', normalizedName: '新供货商' }
+    const project = { ...localProject(), id: 'fresh-p', supplierId: supplier.id, supplierName: supplier.name, name: '新项目', normalizedName: '新项目', subItemName: '成人票', normalizedSubItemName: '成人票', syncStatus: 'pending' as const }
+    state.local.suppliers.set(supplier.id, supplier)
+    state.local.projects.set(project.id, project)
+
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+
+    expect(state.cloud.suppliers.get(supplier.id)).toMatchObject({ id: supplier.id, user_id: user.id, name: supplier.name })
+    expect(state.cloud.projects.get(project.id)).toMatchObject({ id: project.id, user_id: user.id, supplier_id: supplier.id, name: project.name })
+    expect(state.cloud.tickets.size).toBe(0)
+  })
+  it('does not let a fast-clock supplier overwrite a newer cloud edit after the initial pull', async () => {
+    const initial = { ...remoteSupplier, id: 'shared-s', name: '原供货商', normalized_name: '原供货商' }
+    const local = { id: initial.id, userId: user.id, name: '本机修改', normalizedName: '本机修改', createdAt: initial.created_at, updatedAt: '2099-01-01T00:00:00Z', syncStatus: 'pending' as const }
+    state.local.suppliers.set(local.id, local)
+    state.cloud.suppliers.set(initial.id, initial)
+    state.duringUpload = table => {
+      if (table === 'suppliers') {
+        state.cloud.suppliers.set(initial.id, { ...initial, name: '远端修改', normalized_name: '远端修改', updated_at: '2026-01-01T00:00:03Z' })
+        state.duringUpload = null
+      }
+    }
+
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+
+    expect(state.cloud.suppliers.get(initial.id)).toMatchObject({ name: '远端修改', normalized_name: '远端修改' })
+    expect(state.local.suppliers.get(initial.id)).toMatchObject({ name: '远端修改', syncStatus: 'synced' })
+    expect([...state.conflicts.values()]).toEqual(expect.arrayContaining([expect.objectContaining({ table: 'suppliers', recordId: initial.id })]))
+  })
+  it('does not let a fast-clock project overwrite a newer cloud edit after the initial pull', async () => {
+    const supplier = { id: 'supplier-1', userId: user.id, name: '项目供货商', normalizedName: '项目供货商', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', syncStatus: 'synced' as const }
+    const cloudSupplier = { id: supplier.id, user_id: user.id, name: supplier.name, normalized_name: supplier.normalizedName, created_at: supplier.createdAt, updated_at: supplier.updatedAt }
+    const initial = {
+      id: 'shared-p', user_id: user.id, supplier_id: supplier.id, supplier_name: supplier.name,
+      name: '同一套餐', normalized_name: '同一套餐', sub_item_name: '成人票', normalized_sub_item_name: '成人票',
+      default_cost_thb: 600, default_agent_price_thb: 900,
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+    }
+    const local = {
+      id: initial.id, userId: user.id, supplierId: supplier.id, supplierName: supplier.name,
+      name: initial.name, normalizedName: initial.normalized_name, subItemName: initial.sub_item_name, normalizedSubItemName: initial.normalized_sub_item_name,
+      defaultCostThb: 650, defaultAgentPriceThb: 900, createdAt: initial.created_at, updatedAt: '2099-01-01T00:00:00Z', syncStatus: 'pending' as const
+    }
+    state.local.suppliers.set(supplier.id, supplier)
+    state.cloud.suppliers.set(supplier.id, cloudSupplier)
+    state.local.projects.set(local.id, local)
+    state.cloud.projects.set(initial.id, initial)
+    state.duringUpload = table => {
+      if (table === 'projects') {
+        state.cloud.projects.set(initial.id, { ...initial, default_cost_thb: 700, updated_at: '2026-01-01T00:00:03Z' })
+        state.duringUpload = null
+      }
+    }
+
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+
+    expect(state.cloud.projects.get(initial.id)).toMatchObject({ default_cost_thb: 700 })
+    expect(state.local.projects.get(initial.id)).toMatchObject({ defaultCostThb: 700, syncStatus: 'synced' })
+    expect([...state.conflicts.values()]).toEqual(expect.arrayContaining([expect.objectContaining({ table: 'projects', recordId: initial.id })]))
+  })
   it('does not write unchanged records when realtime requests another pass', async () => {
     state.local.tickets.set('ticket-1', localTicket('2026-10-13T01:00:00.000Z'))
     state.cloud.tickets.set('ticket-1', cloudTicket('2026-10-13T01:00:00+00:00'))
@@ -376,6 +461,43 @@ describe('cloud synchronization races', () => {
     expect(state.cloud.tickets.get('ticket-1')).toMatchObject({ note: 'edited during upload', updated_at: '2026-10-13T01:00:02.000Z' })
     expect(state.local.tickets.get('ticket-1').syncStatus).toBe('synced')
     expect(state.uploads).toHaveLength(2)
+  })
+})
+
+describe('legacy local 79 settlement migration', () => {
+  const legacy = (overrides: Record<string, unknown> = {}) => ({
+    id: 'a5000000-0000-4000-8000-000000000001', userId: user.id, month: '2026-10',
+    snapshotProfitThb: 100, snapshotJimmyThb: 40, snapshotPartnersThb: 60,
+    jimmyPaidThb: 40, partnersPaidThb: 60, paymentDate: '2026-10-16', note: '旧本机分账',
+    createdAt: '2026-10-16T05:00:00.000Z', updatedAt: '2026-10-16T05:00:00.000Z', syncStatus: 'pending' as const,
+    ...overrides
+  })
+
+  it('replays a pending legacy receipt through the guarded RPC before confirming it locally', async () => {
+    const record = legacy()
+    state.local.show79_settlements.set(record.id, record)
+
+    expect(await ledgerRepository.synchronise(user)).toEqual({ synced: true })
+
+    expect(state.settlementRpcCalls).toEqual([expect.objectContaining({
+      name: 'record_show79_settlement', p_operation_id: record.id,
+      p_expected_profit_thb: 100, p_expected_jimmy_paid_thb: 0, p_expected_partners_paid_thb: 0
+    })])
+    expect(state.cloud.show79_settlements.get(record.id)).toMatchObject({ id: record.id, user_id: user.id })
+    expect(state.local.show79_settlements.get(record.id)).toMatchObject({ id: record.id, syncStatus: 'synced' })
+  })
+
+  it('keeps a rejected legacy receipt pending and reports that it was not cloud-confirmed', async () => {
+    const record = legacy()
+    state.local.show79_settlements.set(record.id, record)
+    state.rejectLegacySettlement = true
+
+    const result = await ledgerRepository.synchronise(user)
+
+    expect(result.synced).toBe(false)
+    expect(result.message).toMatch(/历史 79 分账.*未获云端确认/)
+    expect(state.cloud.show79_settlements.size).toBe(0)
+    expect(state.local.show79_settlements.get(record.id)).toMatchObject({ id: record.id, syncStatus: 'pending' })
   })
 })
 

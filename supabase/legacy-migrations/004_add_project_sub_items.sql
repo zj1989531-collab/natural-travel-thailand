@@ -1,3 +1,5 @@
+-- Archived pre-timestamp migration. It predates the reproducible baseline and
+-- is retained only as historical source; Supabase must not replay it.
 -- 仅供已经执行过 003_add_projects_and_agent_pricing.sql 的云端项目使用。
 alter table public.projects add column if not exists sub_item_name text not null default '默认套餐';
 alter table public.projects add column if not exists normalized_sub_item_name text not null default '默认套餐';

@@ -29,4 +29,9 @@
 .show79-settlement-history strong { font-size: 13px; }
 .show79-settlement-history small { color: #687b70; }
 .show79-settlement-success { color: #176a59; }
+.show79-pending-history { margin-top: 16px; }
+.show79-pending-history h3 { margin: 0 0 9px; font-size: 15px; }
+.show79-pending-history ol { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.show79-pending-history li { padding: 10px; border: 1px solid #e7cc91; border-radius: 10px; background: #fffdf6; }
+.show79-pending-history p { margin: 6px 0 0; }
 @media (max-width: 360px) { .show79-settlement-payees, .show79-settlement-amounts { grid-template-columns: minmax(0, 1fr); } }

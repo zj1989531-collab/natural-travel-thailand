@@ -170,14 +170,18 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
 export const db = {
   async activateAccount(userId: string | null, cloud: boolean, isCurrent: () => boolean) {
     const database = await getDb()
-    const tx = database.transaction(['settings', 'tickets', 'suppliers', 'projects', 'ticket_refunds', 'ticket_create_operations', 'sync_conflicts', 'sync_bases'], 'readwrite')
+    const tx = database.transaction(['settings', 'tickets', 'suppliers', 'projects', 'ticket_refunds', 'show79_settlements', 'ticket_create_operations', 'sync_conflicts', 'sync_bases'], 'readwrite')
     try {
       const settings = await tx.objectStore('settings').get('app') ?? { localUserId: createId(), lastCloudUserId: null }
       if (!isCurrent()) throw new AccountChangedError()
       if (cloud && userId) {
         // Adoption happens on authentication, including offline authentication,
         // never while synchronising another account's already-owned cache.
-        for (const table of ['tickets', 'suppliers', 'projects', 'ticket_refunds'] as const) {
+        // A pre-cloud 79 settlement is only a local record.  Move it with the
+        // rest of the local ledger, but deliberately make it pending: the
+        // guarded server RPC must confirm the historical cash movement before
+        // it can be counted as a cloud-confirmed settlement.
+        for (const table of ['tickets', 'suppliers', 'projects', 'ticket_refunds', 'show79_settlements'] as const) {
           for (const record of await tx.objectStore(table).getAll()) if (record.userId === settings.localUserId) {
             await tx.objectStore(table).put({ ...record, userId, syncStatus: 'pending' })
           }
@@ -343,8 +347,8 @@ export const db = {
   },
   async adoptLocalRecords(sourceUserId: string, targetUserId: string, updatedAt: string, settings: AppSettings) {
     const database = await getDb()
-    const transaction = database.transaction(['tickets', 'suppliers', 'projects', 'ticket_refunds', 'settings'], 'readwrite')
-    for (const storeName of ['tickets', 'suppliers', 'projects', 'ticket_refunds'] as const) {
+    const transaction = database.transaction(['tickets', 'suppliers', 'projects', 'ticket_refunds', 'show79_settlements', 'settings'], 'readwrite')
+    for (const storeName of ['tickets', 'suppliers', 'projects', 'ticket_refunds', 'show79_settlements'] as const) {
       const store = transaction.objectStore(storeName)
       for (const record of await store.getAll()) {
         if (record.userId === sourceUserId) {

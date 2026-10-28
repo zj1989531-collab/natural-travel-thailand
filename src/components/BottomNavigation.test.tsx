@@ -16,6 +16,7 @@ describe('bottom add and refund actions', () => {
   it.each(['dashboard', 'records', 'monthly', 'reports'] as const)('retains one selected tab in %s view', (view) => {
     const html = renderToStaticMarkup(<BottomNavigation view={view} onViewChange={() => {}} onAdd={() => {}} onRefund={() => {}} />)
     expect(html.match(/class="active"/g)).toHaveLength(1)
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1)
   })
   it('places the monthly entry between refund and reports', () => {
     const html = renderToStaticMarkup(<BottomNavigation view="dashboard" onViewChange={() => {}} onAdd={() => {}} onRefund={() => {}} />)

@@ -15,7 +15,7 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 
 1. 打开 https://supabase.com/dashboard ，使用自己的账号登录或注册。账号、验证码和数据库密码自己保存，无需发给任何人。
 2. 新建 Free 组织和项目；项目可命名为 natural-travel-thailand，区域选 Singapore（若可用）。保存生成的数据库密码，等待项目创建完成。
-3. 打开项目 SQL Editor，新建查询，依次执行仓库 `supabase/schema.sql`、`supabase/refunds.sql`、`supabase/project-rules.sql`、`supabase/show79.sql`、`supabase/show79-settlements.sql`、`supabase/manual-project-cost.sql`。它们会创建供货商、项目套餐、票务记录、退票明细表、79秀分账表，以及账号行级权限、默认规则和实时同步配置。已有项目先执行需要的升级迁移，本版最后执行 `manual-project-cost.sql` 后再发布新版页面；不回填历史金额。发布后电脑和手机均刷新。
+3. 安装 Supabase CLI 后，在本地或临时环境运行 `supabase init`、`supabase start`、`supabase db reset`，由 `supabase/migrations/` 的时间戳链创建供货商、项目套餐、票务记录、退票明细、79秀分账、RLS、默认规则和实时同步配置。不要在生产项目的 SQL Editor 按根目录脚本手动重建结构；新库和已有库的安全验证、发布流程见 [supabase/MIGRATIONS.md](./supabase/MIGRATIONS.md)。
 4. 在 Authentication → URL Configuration 设置 Site URL 为 https://zj1989531-collab.github.io/natural-travel-thailand/ ，Redirect URLs 添加这个完整地址和 http://localhost:5173/ 。
 5. 保留默认 Magic Link 邮件模板，先用注册 Supabase 时的邮箱登录；默认发信服务只允许组织成员的邮箱。其他邮箱需要配置自定义 SMTP 后才可使用。两台设备登录同一个邮箱。若启用密码登录，在 Authentication → Password Security 开启“Prevent use of leaked passwords”（需 Supabase Pro 或更高套餐）。
 
@@ -32,6 +32,8 @@ https://zj1989531-collab.github.io/natural-travel-thailand/
 - `VITE_SUPABASE_ANON_KEY` = publishable/anon 公钥。
 
 到 Actions → Deploy ticket ledger → Run workflow 重新部署。两个值都是浏览器客户端配置，最终会被打包到网站；票务数据的保护依靠数据库行级权限，不能把管理密钥放在这里。
+
+发布工作流会在构建前验证这两个值都已配置；缺少任意一个会停止发布，避免线上页面意外退化为“仅本机账本”。本地 `pnpm build` 保留无 Supabase 的离线验收能力。
 
 电脑本地项目也需要配置 `.env.local`（此文件不上传），填写相同的两个值，然后重启开发服务。线上与 localhost 是两个不同浏览器存储空间；本地先登录、同步，再在手机线上地址登录同一邮箱，本地已有账本才能传过去。
 

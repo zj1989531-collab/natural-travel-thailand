@@ -464,41 +464,58 @@ async function synchroniseTable<Local extends VersionedRecord, Cloud>(options: {
   if (!pending.length) return
 
   const batches: Local[][] = []
-  const grouped = table === 'tickets' ? pending.filter(row => !remoteMap.has(row.id)) : pending
+  // Existing catalogue rows need the same compare-and-swap protection as an
+  // existing ticket.  A device clock can be ahead, so timestamp ordering alone
+  // is not a safe reason to overwrite a row that changed after our pull.
+  const needsCompareAndSwap = table === 'tickets' || table === 'suppliers' || table === 'projects'
+  const grouped = needsCompareAndSwap ? pending.filter(row => !remoteMap.has(row.id)) : pending
   for (let offset = 0; offset < grouped.length; offset += 100) batches.push(grouped.slice(offset, offset + 100))
-  if (table === 'tickets') batches.push(...pending.filter(row => remoteMap.has(row.id)).map(row => [row]))
+  if (needsCompareAndSwap) batches.push(...pending.filter(row => remoteMap.has(row.id)).map(row => [row]))
   const uploadBatch = async (batch: Local[]) => {
     check()
-    if (table !== 'tickets') return client.from(table).upsert(batch.map(toCloud), { onConflict: 'id' }).abortSignal(signal)
+    if (!needsCompareAndSwap) return client.from(table).upsert(batch.map(toCloud), { onConflict: 'id' }).abortSignal(signal)
     const previous = remoteMap.get(batch[0].id)
     if (previous) {
       // Compare against the cloud version we actually read. A faster phone
       // clock must not overwrite a competing save made after that read.
-      return client.from('tickets').update(toCloud(batch[0])).eq('user_id', userId).eq('id', batch[0].id)
-        .eq('updated_at', previous.updatedAt).abortSignal(signal)
+      return client.from(table).update(toCloud(batch[0])).eq('user_id', userId).eq('id', batch[0].id)
+        .eq('updated_at', previous.updatedAt).select('id').abortSignal(signal)
     }
     // New operation IDs are inserts; an existing UUID can never become an
     // accidental update after a lost response or cold-cache retry.
-    return client.from('tickets').insert(batch.map(toCloud)).abortSignal(signal)
+    return client.from(table).insert(batch.map(toCloud)).abortSignal(signal)
   }
+  const acknowledged: Local[] = []
+  const wasAcknowledged = (batch: Local[], data: unknown) =>
+    !needsCompareAndSwap || !remoteMap.has(batch[0].id) || (Array.isArray(data) && data.length === batch.length)
   for (const batch of batches) {
     check()
-    const { error } = await uploadBatch(batch)
+    const result = await uploadBatch(batch)
     check()
-    if (error) {
+    if (!result.error) {
+      // A zero-row CAS update is a concurrent-write conflict, not an
+      // acknowledgement. The final cloud read below retains/archives the
+      // local snapshot through mergeRemote instead of marking it synced.
+      if (wasAcknowledged(batch, result.data)) acknowledged.push(...batch)
+      continue
+    }
+    if (result.error) {
       // A deterministic row rejection must not hold unrelated new orders hostage.
       // Network/auth errors remain pending for an ordinary retry.
-      if (table !== 'tickets' || !/^(?:22|23|P0001)/.test(error.code ?? '')) throw Object.assign(new Error(error.message), { code: error.code })
+      if (table !== 'tickets' || !/^(?:22|23|P0001)/.test(result.error.code ?? '')) throw Object.assign(new Error(result.error.message), { code: result.error.code })
       for (const row of batch) {
         check()
-        const result = batch.length === 1 ? { error } : await uploadBatch([row])
+        const individual = batch.length === 1 ? result : await uploadBatch([row])
         check()
-        if (!result.error) continue
-        if (!/^(?:22|23|P0001)/.test(result.error.code ?? '')) throw Object.assign(new Error(result.error.message), { code: result.error.code })
+        if (!individual.error) {
+          if (wasAcknowledged([row], individual.data)) acknowledged.push(row)
+          continue
+        }
+        if (!/^(?:22|23|P0001)/.test(individual.error.code ?? '')) throw Object.assign(new Error(individual.error.message), { code: individual.error.code })
         const { data, error: readError } = await client.from('tickets').select('*').eq('user_id', userId).eq('id', row.id).abortSignal(signal)
         check()
         if (readError) throw new Error(readError.message)
-        await db.quarantineTicket(row.id, data?.[0] ? toLocalTicket(data[0] as CloudTicket) : undefined, `此票未能上传：${result.error.message} 本机内容已保留为副本，其他订单继续同步。`, owner)
+        await db.quarantineTicket(row.id, data?.[0] ? toLocalTicket(data[0] as CloudTicket) : undefined, `此票未能上传：${individual.error.message} 本机内容已保留为副本，其他订单继续同步。`, owner)
       }
       // Include a refund created after the first pull, which may be the reason
       // the server rejected a formerly editable original ticket.
@@ -509,7 +526,130 @@ async function synchroniseTable<Local extends VersionedRecord, Cloud>(options: {
   // rejects stale updates; read its actual result instead of acknowledging the
   // originally submitted snapshot. Atomic local merging preserves edits made
   // while this request was in flight.
-  await mergeRemote((await fetchCloudRows<Cloud>(client, table, userId, signal, owner)).map(toLocal), owner, undefined, pending)
+  await mergeRemote((await fetchCloudRows<Cloud>(client, table, userId, signal, owner)).map(toLocal), owner, undefined, acknowledged)
+}
+
+const sameShow79SettlementRequest = (row: Show79SettlementRecord, request: Pick<Show79SettlementRecord, 'userId' | 'month' | 'paymentDate' | 'jimmyPaidThb' | 'partnersPaidThb' | 'note'>) =>
+  row.userId === request.userId && row.month === request.month && row.paymentDate === request.paymentDate &&
+  row.jimmyPaidThb === request.jimmyPaidThb && row.partnersPaidThb === request.partnersPaidThb && row.note === request.note.trim()
+
+const compareShow79SettlementOrder = (left: Show79SettlementRecord, right: Show79SettlementRecord) =>
+  left.month.localeCompare(right.month) || left.paymentDate.localeCompare(right.paymentDate) || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+
+const show79Cents = (amount: number) => {
+  if (!Number.isFinite(amount) || Math.abs(amount) > 999999999999.99 || amount !== Number(amount.toFixed(2))) {
+    throw new Error('分账金额无效或超过允许范围。')
+  }
+  const cents = Math.round(amount * 100)
+  if (!Number.isSafeInteger(cents)) throw new Error('分账金额超过允许范围。')
+  return cents
+}
+
+/**
+ * Older installed clients could keep 79-settlement receipts only in IndexedDB.
+ * They are financial events, so never upload them through a table upsert.  Each
+ * one is replayed through the server's locking/snapshot RPC and becomes synced
+ * only after PostgreSQL returns (or reads back) its authoritative receipt.
+ */
+async function confirmPendingShow79Settlements(
+  client: SupabaseClient,
+  userId: string,
+  remoteRows: Show79SettlementRecord[],
+  signal: AbortSignal,
+  owner: LedgerOwnerContext
+) {
+  const check = () => { signal.throwIfAborted(); assertCurrent(owner) }
+  const localRows = (await db.getShow79Settlements())
+    .filter(row => row.userId === userId && row.syncStatus !== 'synced')
+    .sort(compareShow79SettlementOrder)
+  if (!localRows.length) return remoteRows
+
+  const confirmed = [...remoteRows]
+  for (const local of localRows) {
+    check()
+    const request = {
+      userId,
+      month: local.month,
+      paymentDate: local.paymentDate,
+      jimmyPaidThb: local.jimmyPaidThb,
+      partnersPaidThb: local.partnersPaidThb,
+      note: local.note.trim()
+    }
+    const alreadyRecorded = confirmed.find(row => row.id === local.id)
+    if (alreadyRecorded) {
+      if (!sameShow79SettlementRequest(alreadyRecorded, request)) {
+        throw new Error(`历史 79 分账 ${local.paymentDate} 的提交编号已对应云端不同记录；本机记录已保留，请先人工核对。`)
+      }
+      await db.putConfirmedShow79Settlement(alreadyRecorded, owner)
+      continue
+    }
+
+    const monthHistory = confirmed.filter(row => row.month === local.month)
+    let expectedJimmyPaidThb: number
+    let expectedPartnersPaidThb: number
+    try {
+      expectedJimmyPaidThb = monthHistory.reduce((total, row) => total + show79Cents(row.jimmyPaidThb), 0) / 100
+      expectedPartnersPaidThb = monthHistory.reduce((total, row) => total + show79Cents(row.partnersPaidThb), 0) / 100
+      if (!Number.isSafeInteger(Math.round(expectedJimmyPaidThb * 100)) || !Number.isSafeInteger(Math.round(expectedPartnersPaidThb * 100))) throw new Error('累计分账金额超过允许范围。')
+    } catch (error) {
+      throw new Error(`历史 79 分账 ${local.paymentDate} 无法安全迁移：${error instanceof Error ? error.message : '累计金额无效'} 本机记录已保留。`)
+    }
+    const requestInput: Show79SettlementInput = {
+      operationId: local.id,
+      month: local.month,
+      paymentDate: local.paymentDate,
+      jimmyPaidThb: local.jimmyPaidThb,
+      partnersPaidThb: local.partnersPaidThb,
+      note: request.note,
+      expectedProfitThb: local.snapshotProfitThb,
+      expectedJimmyPaidThb,
+      expectedPartnersPaidThb
+    }
+    try {
+      validateShow79SettlementInput(requestInput)
+    } catch (error) {
+      throw new Error(`历史 79 分账 ${local.paymentDate} 无法安全迁移：${error instanceof Error ? error.message : '记录格式无效'} 本机记录已保留。`)
+    }
+
+    const receipt = async () => {
+      check()
+      const { data, error } = await client.from('show79_settlements').select('*').eq('user_id', userId).eq('id', local.id).abortSignal(signal)
+      check()
+      if (error) throw new Error(error.message)
+      return data?.[0] ? toLocalShow79Settlement(data[0] as CloudShow79Settlement) : undefined
+    }
+    let accepted: Show79SettlementRecord | undefined
+    try {
+      const { data, error } = await client.rpc('record_show79_settlement', {
+        p_expected_user_id: owner.userId,
+        p_operation_id: requestInput.operationId,
+        p_month: requestInput.month,
+        p_payment_date: requestInput.paymentDate,
+        p_jimmy_paid_thb: requestInput.jimmyPaidThb,
+        p_partners_paid_thb: requestInput.partnersPaidThb,
+        p_note: requestInput.note,
+        p_expected_profit_thb: requestInput.expectedProfitThb,
+        p_expected_jimmy_paid_thb: requestInput.expectedJimmyPaidThb,
+        p_expected_partners_paid_thb: requestInput.expectedPartnersPaidThb
+      }).abortSignal(signal)
+      check()
+      const raw = Array.isArray(data) ? data[0] : data
+      accepted = raw ? toLocalShow79Settlement(raw as CloudShow79Settlement) : undefined
+      if (error && !accepted) accepted = await receipt().catch(() => undefined)
+      if (!accepted) throw Object.assign(new Error(error?.message ?? '云端未确认这笔历史分账。'), { code: error?.code })
+    } catch (error) {
+      // A connection can fail after PostgreSQL commits.  Read the idempotent
+      // receipt once before reporting an unresolved record to the user.
+      accepted = await receipt().catch(() => undefined)
+      if (!accepted) throw new Error(`历史 79 分账 ${local.paymentDate} 未获云端确认：${error instanceof Error ? error.message : '请联网后重试'} 本机记录已保留。`)
+    }
+    if (!sameShow79SettlementRequest(accepted, request)) {
+      throw new Error(`历史 79 分账 ${local.paymentDate} 的云端回执与本机记录不一致；本机记录已保留，请先人工核对。`)
+    }
+    await db.putConfirmedShow79Settlement(accepted, owner)
+    confirmed.push(accepted)
+  }
+  return confirmed
 }
 
 export const ledgerRepository = {
@@ -976,8 +1116,8 @@ export const ledgerRepository = {
         assertCurrent(owner)
         await db.reconcileCatalogue(user.id, suppliers, projects, owner)
         try {
-          await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier })
-          await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject })
+          await synchroniseTable({ ...common, table: 'suppliers', getLocal: () => db.getSuppliers(), mergeRemote: db.mergeRemoteSuppliers, toLocal: toLocalSupplier, toCloud: toCloudSupplier, initialRemote: suppliers })
+          await synchroniseTable({ ...common, table: 'projects', getLocal: () => db.getProjects(), mergeRemote: db.mergeRemoteProjects, toLocal: toLocalProject, toCloud: toCloudProject, initialRemote: projects })
           break
         } catch (error) {
           // Another device may create the same catalogue entry after our pull.
@@ -986,8 +1126,10 @@ export const ledgerRepository = {
         }
       }
       await synchroniseTable({ ...common, table: 'tickets', getLocal: () => db.getTickets(), mergeRemote: db.mergeRemoteTickets, toLocal: toLocalTicket, toCloud: toCloudTicket, initialRemote: remoteTickets.map(toLocalTicket), lockedTicketIds })
-      await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund })
-      await db.mergeRemoteShow79Settlements((await fetchCloudRows<CloudShow79Settlement>(client, 'show79_settlements', user.id, controller.signal, owner)).map(toLocalShow79Settlement), owner)
+      await synchroniseTable({ ...common, table: 'ticket_refunds', getLocal: () => db.getRefunds(), mergeRemote: db.mergeRemoteRefunds, toLocal: toLocalRefund, toCloud: toCloudRefund, initialRemote: remoteRefunds.map(toLocalRefund) })
+      const remoteShow79Settlements = (await fetchCloudRows<CloudShow79Settlement>(client, 'show79_settlements', user.id, controller.signal, owner)).map(toLocalShow79Settlement)
+      await db.mergeRemoteShow79Settlements(remoteShow79Settlements, owner)
+      await db.mergeRemoteShow79Settlements(await confirmPendingShow79Settlements(client, user.id, remoteShow79Settlements, controller.signal, owner), owner)
       return { synced: true }
     } catch (error) {
       if (externalSignal?.aborted) throw error

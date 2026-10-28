@@ -478,7 +478,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
         <section className="management-section">
           <h3>1. 添加供货商</h3>
           <form className="supplier-form" onSubmit={addSupplier}>
-            <input autoComplete="off" placeholder="输入供货商名称" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} required />
+            <label>供货商名称<input autoComplete="off" placeholder="输入供货商名称" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} required /></label>
             <button className="primary-button" type="submit" disabled={saving !== null}>{saving === 'supplier' ? '保存中…' : '添加'}</button>
           </form>
         </section>
@@ -489,20 +489,20 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
           <form className="project-form" ref={projectFormRef} onSubmit={event => { event.preventDefault(); void saveProject() }}>
             <fieldset className="form-fields" disabled={saving !== null}>
             <label className="checkbox-label"><input type="checkbox" checked={manualSupplier} onChange={event => setManualSupplier(event.target.checked)} disabled={editingProject !== null} />出票时再选择供货商（不预设）</label>
-            <select value={manualSupplier ? '' : projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required={!manualSupplier} disabled={editingProject !== null || manualSupplier}>
+            <label>默认供货商<select value={manualSupplier ? '' : projectSupplierId} onChange={(event) => setProjectSupplierId(event.target.value)} required={!manualSupplier} disabled={editingProject !== null || manualSupplier}>
               <option value="">选择供货商</option>
               {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
-            </select>
-            <input autoComplete="off" placeholder="项目名称，例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required readOnly={editingProject !== null} />
-            <input autoComplete="off" placeholder="子项/套餐名称（可选，例如：经济舱）" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} readOnly={editingProject !== null} />
+            </select></label>
+            <label>项目名称<input autoComplete="off" placeholder="例如：曼谷往返机票" value={projectName} onChange={(event) => setProjectName(event.target.value)} required readOnly={editingProject !== null} /></label>
+            <label>子项/套餐名称 <span className="muted">（可选）</span><input autoComplete="off" placeholder="例如：经济舱" value={subItemName} onChange={(event) => setSubItemName(event.target.value)} readOnly={editingProject !== null} /></label>
             {!editingProject && <label>记账方式<select value={entryMode} onChange={(event) => setEntryMode(event.target.value as EntryMode)}><option value="standard">售价减成本</option><option value="profit_only">仅录利润（月结返佣）</option></select></label>}
             {entryMode !== 'profit_only' && <><label>数量单位<select value={quantityUnit} onChange={(event) => setQuantityUnit(event.target.value as QuantityUnit)}><option value="person">人数（人）</option><option value="item">商品数量（件）</option></select></label><label className="checkbox-label"><input type="checkbox" checked={manualAgentPrice} onChange={(event) => setManualAgentPrice(event.target.checked)} />每次录入时手动填写售价</label><label className="checkbox-label"><input type="checkbox" checked={manualCostPrice} onChange={event => setManualCostPrice(event.target.checked)} />每次录入时手动填写成本</label></>}
             <label>默认计价<select value={projectRules.defaultAmountBasis} onChange={event => setDefaultAmountBasis(event.target.value as AmountBasis)}><option value="per_person">{entryMode === 'profit_only' ? '按人数计算返佣' : quantityUnit === 'item' ? '按件计算' : '按人数计算'}</option><option value="total">{entryMode === 'profit_only' ? '返佣总额' : '整单总额'}</option></select></label>
             <label>结算方式<select value={projectRules.settlementMode} onChange={event => setSettlementMode(event.target.value as SettlementMode)} disabled={entryMode === 'profit_only'}><option value="daily">日结</option><option value="monthly">月结</option></select></label>
             <p className="sheet-copy">选择套餐时自动带入，可在出票时临时调整计价；{isIndependentLedgerProject(projectName) ? '独立账本不计入主账本日报、月报、年报及排行。' : '月结不计每日概览，计入所属月报与年报。'}</p>
             {entryMode === 'profit_only' ? <p className="sheet-copy">此项目无默认成本和售价。每次记账只填写利润，计入月报。</p> : <div className="form-grid">
-              <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualCostPrice ? '每次手动填写成本' : '供货商成本（THB）'} value={manualCostPrice ? '' : cost} onChange={(event) => setCost(event.target.value)} required={!manualCostPrice} disabled={manualCostPrice} />
-              <input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualAgentPrice ? '每次手动填写售价' : '代理售价（THB）'} value={manualAgentPrice ? '' : agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required={!manualAgentPrice} disabled={manualAgentPrice} />
+              <label>供货商成本（THB）<input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualCostPrice ? '每次手动填写成本' : '输入默认成本'} value={manualCostPrice ? '' : cost} onChange={(event) => setCost(event.target.value)} required={!manualCostPrice} disabled={manualCostPrice} /></label>
+              <label>代理售价（THB）<input inputMode="decimal" min="0" step="0.01" type="number" placeholder={manualAgentPrice ? '每次手动填写售价' : '输入默认售价'} value={manualAgentPrice ? '' : agentPrice} onChange={(event) => setAgentPrice(event.target.value)} required={!manualAgentPrice} disabled={manualAgentPrice} /></label>
             </div>}
             </fieldset>
             {priceWarning && <SaveWarning messages={priceWarning.messages} saving={saving !== null} onBack={() => setPriceWarning(null)} onContinue={() => void saveProject(priceWarning.key)} />}
@@ -616,8 +616,10 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  const [syncRetryNeeded, setSyncRetryNeeded] = useState(false)
   const [toast, setToast] = useState('')
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
+  const [updateReady, setUpdateReady] = useState(() => typeof document !== 'undefined' && document.documentElement.dataset.ticketProfitLedgerUpdateReady === 'true')
   const [dateFilter, setDateFilter] = useState('')
   const [recordDateRange, setRecordDateRange] = useState<TicketDateRange>('all')
   const [supplierFilter, setSupplierFilter] = useState('')
@@ -632,6 +634,7 @@ export default function App() {
   const syncRunnerRef = useRef<() => Promise<void>>(async () => undefined)
   const syncQueueRef = useRef<SyncQueue | null>(null)
   syncQueueRef.current ??= createSyncQueue(() => syncRunnerRef.current())
+  const unsyncedCount = useMemo(() => [...tickets, ...suppliers, ...projects, ...show79Settlements, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length, [tickets, suppliers, projects, show79Settlements])
 
   const refresh = useCallback(async () => {
     const epoch = accountEpochRef.current
@@ -657,9 +660,11 @@ export default function App() {
       const refreshedConflicts = await refresh()
       if (!mountedRef.current || userRef.current?.id !== targetUser.id || controller.signal.aborted) return
       setSyncMessage(result.synced ? refreshedConflicts?.some(row => !row.resolvedAt) ? '正常记录已同步，有异常记录待核对。' : '已同步到云端' : result.message ?? '同步暂未完成，会自动重试。')
+      setSyncRetryNeeded(!result.synced)
     } catch (error) {
       if (mountedRef.current && !controller.signal.aborted && userRef.current?.id === targetUser.id) {
         setSyncMessage(error instanceof Error ? error.message : '同步暂未完成，本机记录已保留。')
+        setSyncRetryNeeded(true)
       }
     } finally {
       if (syncAbortRef.current === controller) syncAbortRef.current = null
@@ -691,6 +696,7 @@ export default function App() {
         syncAbortRef.current?.abort()
         syncQueueRef.current?.clearPending()
         setSyncMessage('')
+        setSyncRetryNeeded(false)
         setSyncing(false)
         setFormOpen(false)
         setRefundOpen(false)
@@ -781,22 +787,32 @@ export default function App() {
     const syncWhenVisible = () => {
       if (document.visibilityState === 'visible') scheduleSync()
     }
-    const retryTimer = window.setInterval(() => {
-      if (navigator.onLine && document.visibilityState === 'visible') scheduleSync()
-    }, 30000)
+    let retryTimer: number | undefined
+    // Realtime handles normal cross-device changes. Polling is deliberately a
+    // bounded fallback only while there is local work to recover or retry.
+    const scheduleRetry = (delay = 30000) => {
+      window.clearTimeout(retryTimer)
+      if (!unsyncedCount && !syncRetryNeeded) return
+      retryTimer = window.setTimeout(() => {
+        if (!alive) return
+        if (navigator.onLine && document.visibilityState === 'visible') scheduleSync()
+        scheduleRetry(Math.min(delay * 2, 300000))
+      }, delay)
+    }
+    scheduleRetry()
     window.addEventListener('online', scheduleSync)
     window.addEventListener('focus', syncWhenVisible)
     document.addEventListener('visibilitychange', syncWhenVisible)
     return () => {
       alive = false
       window.clearTimeout(debounceTimer)
-      window.clearInterval(retryTimer)
+      window.clearTimeout(retryTimer)
       window.removeEventListener('online', scheduleSync)
       window.removeEventListener('focus', syncWhenVisible)
       document.removeEventListener('visibilitychange', syncWhenVisible)
       void client.removeChannel(channel)
     }
-  }, [user?.id, synchronise])
+  }, [user?.id, synchronise, unsyncedCount, syncRetryNeeded])
 
   useEffect(() => {
     const receiveInstallPrompt = (event: Event) => {
@@ -805,6 +821,12 @@ export default function App() {
     }
     window.addEventListener('beforeinstallprompt', receiveInstallPrompt)
     return () => window.removeEventListener('beforeinstallprompt', receiveInstallPrompt)
+  }, [])
+
+  useEffect(() => {
+    const receiveUpdateReady = () => setUpdateReady(true)
+    window.addEventListener('ticket-profit-ledger:update-ready', receiveUpdateReady)
+    return () => window.removeEventListener('ticket-profit-ledger:update-ready', receiveUpdateReady)
   }, [])
 
   useEffect(() => {
@@ -836,7 +858,30 @@ export default function App() {
     if (view === 'carnival') return tickets.filter(ticket => isCarnivalProject(ticket.projectName))
     return mainTickets
   }, [refundTicketId, view, tickets, mainTickets])
-  const unsyncedCount = [...tickets, ...suppliers, ...projects, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length
+  const unresolvedSyncCount = syncConflicts.filter((row) => !row.resolvedAt).length
+  // Any failed replay of a legacy settlement is financially material.  Even a
+  // transient transport failure has an unknown outcome until its cloud receipt
+  // is read back, so never present it as an ordinary background upload.
+  const financialReviewMessage = /历史 79 分账/.test(syncMessage) && /(未获云端确认|人工核对|不同记录|无法安全迁移|不一致|利润已变化|已付金额已变化)/.test(syncMessage) ? syncMessage : ''
+  const syncStatus = !cloudConfigured
+    ? { label: '本机账本', detail: '云端连接尚未配置，资料只保存在当前设备。', tone: 'local' }
+    : offline
+      ? { label: '离线保存中', detail: user ? `${unsyncedCount ? `${unsyncedCount} 条记录待补传；` : ''}恢复网络后会自动同步。` : '恢复网络后可登录并同步电脑与手机。', tone: 'warning' }
+      : !user
+        ? { label: '未登录', detail: '登录同一邮箱后自动同步电脑与手机。', tone: 'warning' }
+        : syncing
+          ? { label: unsyncedCount ? '正在补传' : '正在同步', detail: unsyncedCount ? `${unsyncedCount} 条本机记录正在上传。` : '正在核对云端与本机记录。', tone: 'connected' }
+          : unresolvedSyncCount
+            ? { label: '待核对', detail: `${unresolvedSyncCount} 条记录需要先核对，不会自动覆盖。`, tone: 'warning' }
+            : financialReviewMessage
+              ? { label: '分账待核对', detail: financialReviewMessage, tone: 'warning' }
+              : unsyncedCount
+              ? { label: '正在补传', detail: `${unsyncedCount} 条本机记录等待上传。`, tone: 'connected' }
+              : syncMessage === '已同步到云端'
+                ? { label: '已同步', detail: '本机与云端已完成核对。', tone: 'connected' }
+                : syncMessage
+                  ? { label: '同步待重试', detail: syncMessage, tone: 'warning' }
+                  : { label: '正在连接', detail: '正在核对云端与本机记录。', tone: 'connected' }
 
   const openNewForm = () => {
     setSelectedTicket(undefined)
@@ -1093,6 +1138,7 @@ export default function App() {
     setMonthlyStandardDraft(undefined)
     syncAbortRef.current?.abort()
     syncQueueRef.current?.clearPending()
+    setSyncRetryNeeded(false)
     try {
       await ledgerRepository.activateAccount(null)
       const { error } = await client.auth.signOut()
@@ -1118,11 +1164,12 @@ export default function App() {
             <span>THB · Asia/Bangkok</span>
           </div>
         </div>
-        <button className="header-action" type="button" onClick={() => void synchronise()} disabled={!user || syncing}>
-          {syncing ? '同步中' : user ? syncConflicts.some(row => !row.resolvedAt) ? '待核对' : unsyncedCount ? '待同步' : syncMessage === '已同步到云端' ? '已同步' : '自动同步' : cloudConfigured ? '未登录' : '本机'}
+        <button className={`header-action ${syncStatus.tone}`} type="button" onClick={() => void synchronise()} disabled={!user || syncing || offline} aria-label={`${syncStatus.label}。${syncStatus.detail}`} title={syncStatus.detail}>
+          <span aria-live="polite">{syncStatus.label}</span>
         </button>
       </header>
 
+      {updateReady && <section className="app-update-banner" role="status" aria-live="polite"><div><strong>新版本已准备好</strong><span>请先保存正在编辑的内容，再刷新以应用更新。</span></div><button className="secondary-button" type="button" onClick={() => window.dispatchEvent(new Event('ticket-profit-ledger:apply-update'))}>刷新更新</button></section>}
       {syncConflicts.length > 0 && <section className="sync-conflict-banner" aria-label="同步记录核对"><div><strong>{syncConflicts.some(row => !row.resolvedAt) ? `${syncConflicts.filter(row => !row.resolvedAt).length} 条同步记录待核对` : '同步核对历史'}</strong><p>本机修改副本已保留，可查看差异后处理。</p></div><button type="button" className="secondary-button" onClick={() => setConflictsOpen(true)}>查看记录</button></section>}
 
       <div className="page-content">
@@ -1135,8 +1182,8 @@ export default function App() {
           </section>
 
           {cloudConfigured ? (
-            <section className={`sync-banner ${user ? 'connected' : ''}`}>
-              <div><strong>{user ? '云端自动同步已启用' : '登录后自动同步电脑与手机'}</strong><span>{user ? `${user.email ?? '当前账号'} · ${unsyncedCount ? `${unsyncedCount} 条待同步 · ` : ''}${syncing ? '正在同步…' : syncMessage || '正在连接云端…'}` : '请登录同一邮箱。未登录时不能保存修改，避免资料只留在本机。'}</span></div>
+            <section className={`sync-banner ${syncStatus.tone}`} role="status" aria-live="polite">
+              <div><strong>{syncStatus.label}</strong><span>{user ? `${user.email ?? '当前账号'} · ${syncStatus.detail}` : syncStatus.detail}</span></div>
               {user ? <button type="button" onClick={() => void signOut()}>退出</button> : <button type="button" onClick={() => setLoginOpen(true)}>登录</button>}
             </section>
           ) : (
@@ -1172,7 +1219,7 @@ export default function App() {
         </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
-            : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
+            : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
               : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} />
                 : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} /> : null}
         </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>

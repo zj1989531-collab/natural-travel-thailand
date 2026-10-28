@@ -28,6 +28,19 @@ describe('79 show settlement panel', () => {
     expect(html).toContain('value="-20.00"')
     expect(html).toContain('value="-30.00"')
   })
+  it('does not count unconfirmed legacy history as paid and keeps it visibly separate', () => {
+    const pending = { ...payment, id: 'legacy-local', syncStatus: 'pending' as const }
+    const html = renderToStaticMarkup(<Show79SettlementPanel tickets={[ticket]} records={[pending]} financialReviewMessage="历史 79 分账 2026-10-16 的云端回执与本机记录不一致；请先人工核对。" month="2026-10" onSave={async () => {}} />)
+    expect(html).toContain('本月结算：未结算')
+    expect(html).toContain('待核对的历史分账 · 1 笔')
+    expect(html).toContain('未计入“累计净已付”或本月差额')
+    expect(html).toContain('新的分账登记已暂时锁定')
+    expect(html).toContain('历史分账需要人工核对')
+    expect(html).toContain('value="40.00"')
+    expect(html).toContain('value="60.00"')
+    expect(html).not.toContain('本月结算：已结清')
+    expect(html).not.toContain('登记本次分账')
+  })
   it('disables registration while unavailable and handles an invalid month visibly', () => {
     const html = renderToStaticMarkup(<Show79SettlementPanel tickets={[]} records={[]} month="2026-10" disabled onSave={async () => {}} />)
     expect(html).toContain('<fieldset disabled="">')

@@ -2,7 +2,21 @@ import { useEffect, useRef } from 'react'
 
 export function SaveWarning({ messages, onBack, onContinue, saving }: { messages: string[]; onBack: () => void; onContinue: () => void; saving: boolean }) {
   const ref = useRef<HTMLElement>(null)
-  useEffect(() => { ref.current?.scrollIntoView({ block: 'nearest' }); ref.current?.focus({ preventScroll: true }) }, [messages])
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    return () => {
+      const returnFocus = returnFocusRef.current
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true })
+    }
+  }, [])
+
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'nearest' })
+    ref.current?.focus({ preventScroll: true })
+  }, [messages])
+
   return <section ref={ref} tabIndex={-1} className="save-warning" role="alertdialog" aria-label="保存前请核对" aria-describedby="save-warning-copy">
     <h3>保存前请核对</h3>
     <div id="save-warning-copy">{messages.map(message => <p key={message}>{message}</p>)}</div>

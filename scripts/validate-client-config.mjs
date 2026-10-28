@@ -3,9 +3,13 @@ import { loadEnv } from 'vite'
 const env = loadEnv('production', process.cwd(), 'VITE_')
 const url = env.VITE_SUPABASE_URL?.trim()
 const key = env.VITE_SUPABASE_ANON_KEY?.trim()
+const requireSupabase = process.argv.includes('--require-supabase')
 
 if (Boolean(url) !== Boolean(key)) {
   throw new Error('请同时配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY；或同时留空以使用本机账本。')
+}
+if (requireSupabase && !url) {
+  throw new Error('生产发布必须配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY，不能发布为仅本机账本。')
 }
 if (url && key) {
   const parsed = new URL(url)

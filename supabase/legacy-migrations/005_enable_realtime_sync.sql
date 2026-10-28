@@ -1,3 +1,5 @@
+-- Archived pre-timestamp migration. It predates the reproducible baseline and
+-- is retained only as historical source; Supabase must not replay it.
 -- 已创建数据库执行此迁移；可以重复执行，不会删除或重置任何票务记录。
 -- 为供货商、项目价格与出票记录启用实时通知，并保证较旧修改不能覆盖较新修改。
 -- 显式授予登录账号所需 API 权限；未登录账号不能访问这些应用数据表。

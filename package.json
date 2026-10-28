@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "node scripts/validate-client-config.mjs && tsc -b && vite build && node scripts/stamp-build.mjs",
     "preview": "vite preview",
-    "test": "vitest run && node --test scripts/pwa.test.mjs scripts/supabase-schema.test.mjs",
+    "test": "vitest run && node --test scripts/pwa.test.mjs scripts/supabase-schema.test.mjs scripts/validate-client-config.test.mjs scripts/xlsx-usage.test.mjs",
     "test:watch": "vitest",
     "sync:github": "node scripts/sync-github.mjs",
     "github:login": "node scripts/login-github.mjs",

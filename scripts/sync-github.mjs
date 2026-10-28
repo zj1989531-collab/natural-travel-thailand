@@ -79,7 +79,7 @@ async function synchronise() {
     const snapshot = sourceSnapshot(paths)
     console.log('正在检查修改，检查通过后自动上传…')
     await command(['node_modules/vitest/vitest.mjs', 'run'])
-    await command(['--test', 'scripts/pwa.test.mjs'])
+    await command(['--test', 'scripts/pwa.test.mjs', 'scripts/supabase-schema.test.mjs', 'scripts/validate-client-config.test.mjs', 'scripts/xlsx-usage.test.mjs'])
     await command(['scripts/validate-client-config.mjs'])
     await command(['node_modules/typescript/bin/tsc', '-b', '--pretty', 'false'])
     await command(['node_modules/vite/bin/vite.js', 'build'])

@@ -34,7 +34,7 @@ pnpm dev:sync
 
 ## 启用云端同步
 
-1. 新建一个 Supabase 项目，并在 **SQL Editor** 依次执行 [supabase/schema.sql](./supabase/schema.sql)、[supabase/refunds.sql](./supabase/refunds.sql)、[supabase/project-rules.sql](./supabase/project-rules.sql)、[supabase/show79.sql](./supabase/show79.sql)、[supabase/show79-settlements.sql](./supabase/show79-settlements.sql)、[supabase/manual-project-cost.sql](./supabase/manual-project-cost.sql)。已有数据库发布本版前执行最后一份脚本，支持成本手填及出票时选择供货商，保留原行级权限与历史记录。
+1. 新建一个 Supabase 项目。安装 Supabase CLI 后，在本地或临时环境运行 `supabase init`、`supabase start` 和 `supabase db reset`，由 [supabase/migrations](./supabase/migrations/) 的时间戳链创建完整结构。不要再按根目录 SQL 文件的名称手工猜测执行顺序；已有生产库的安全升级流程见 [supabase/MIGRATIONS.md](./supabase/MIGRATIONS.md)。
 2. 在 Authentication 中启用 Email / Magic Link，并把应用地址加入 Redirect URLs。若启用密码登录，同时在 Authentication → Password Security 开启“Prevent use of leaked passwords”（该能力需要 Supabase Pro 或更高套餐）。
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 与 publishable key 或 anon key。
 4. 重启开发服务；登录邮箱后，本机尚未同步的记录会归属到该账号并自动上传。
@@ -43,9 +43,9 @@ pnpm dev:sync
 
 不配置 Supabase 时，应用仍可离线使用并将数据保存在当前浏览器。清除浏览器网站数据会清除仅本机数据，因此应定期导出 Excel。
 
-线上构建在 GitHub 仓库的 Settings → Secrets and variables → Actions 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`，然后重新运行 Deploy ticket ledger。两端登录同一邮箱，在线修改会自动同步；离线修改会排队，联网后自动上传。页面恢复前台时会重新核对数据，另有定时重试。
+线上构建在 GitHub 仓库的 Settings → Secrets and variables → Actions 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`，然后重新运行 Deploy ticket ledger。两端登录同一邮箱，在线修改会自动同步；离线修改会排队，联网后自动上传。页面恢复前台时会重新核对数据，另有定时重试。GitHub Pages 发布会强制检查这两个值；缺少任意一个会停止发布，避免误发布成仅本机账本。本地 `pnpm build` 仍可不配置 Supabase，用于离线账本开发与验收。
 
-已有数据库先执行当前版本需要的 `supabase/migrations/` 升级脚本及 `supabase/refunds.sql`，最后执行 `supabase/project-rules.sql`，再发布前端。规则升级只新增可空字段，不回填或重写历史金额；兼容触发器防止旧客户端缺少字段时清空已有规则。电脑与手机都应刷新到新版。已有数据库还需执行 [supabase/refund-actual-date.sql](./supabase/refund-actual-date.sql)，允许在未来观看／出行日期之前按实际当天登记退款；79秀月结需先执行 [supabase/show79-settlements.sql](./supabase/show79-settlements.sql)，已有月结库执行 [supabase/show79-account-guard.sql](./supabase/show79-account-guard.sql) 增加付款账号核对。升级只替换校验函数或新增兼容入口，不重写历史业务数据。
+已有数据库使用 `supabase migration list` 先核对历史版本，再按 [supabase/MIGRATIONS.md](./supabase/MIGRATIONS.md) 在临时副本完成 `supabase db push --dry-run` 和回归验证。不得对生产库重跑基线、历史 no-op 标记或根目录兼容脚本；生产库只会接收晚于其已记录版本的新迁移。电脑与手机都应在前端发布后刷新到新版。
 
 现有云端的供货商名称更正已执行 [supabase/canonical-supplier-brand.sql](./supabase/canonical-supplier-brand.sql)，同步更新供货商、套餐及历史票据名称，并兼容旧客户端拼写。该脚本用于已有业务数据，需在退款相关脚本之后执行；详见 [部署说明](./DEPLOYMENT.md#供货商名称更正)。
 
@@ -86,3 +86,5 @@ pnpm dev:sync
 ## 功能边界
 
 第一版不包含真实出票、多币种、客户/乘客资料、应收应付、员工协作或历史数据导入。
+
+Excel 功能仅将账本数据生成下载文件，不读取、导入或解析外部工作簿。任何未来的 Excel 导入功能都必须先完成依赖安全升级与专项安全审查；测试会阻止在当前代码中加入 SheetJS 读取／解析 API。

@@ -1,3 +1,5 @@
+-- Archived pre-timestamp migration. It predates the reproducible baseline and
+-- is retained only as historical source; Supabase must not replay it.
 -- 仅供已运行过早期 schema.sql 的 Supabase 项目使用。
 do $$
 begin
