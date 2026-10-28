@@ -1,5 +1,6 @@
 import type { AmountBasis, Project, TicketInput } from '../types'
-import { getBangkokDate, isValidCalendarDate, isValidIssueTime, isValidPersonCount } from './format'
+import { getBangkokDate, isValidIssueTime, isValidPersonCount } from './format'
+import { commandDateMatches, removeCommandDate } from './command-date'
 import { cleanProjectLabel } from './project-labels'
 import { chooseProjectOption } from './project-selection'
 import { resolveProjectRules } from './project-rules'
@@ -64,12 +65,6 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   let remaining = normalized(text)
   if (!remaining) throw new Error('请先输入或黏贴订单文字。')
   remaining = remaining.replace(/^((?:69|79|89|99)(?:\s*成人)?\s*秀?)(?:\s*出票|\s*记录)?\s*格式\s*[:：]?\s*(?:\r?\n|$)/i, '$1\n')
-  // Dotted dates are accepted only in an explicitly labelled date field, so a
-  // decimal price or quantity can never be silently interpreted as a date.
-  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[.．]\s*(\d{1,2})(?![\d.．])/g, '$1$2月$3日')
-  // Accept the common day-month-year format in labelled date fields without
-  // allowing ordinary hyphenated numbers elsewhere to become dates.
-  remaining = remaining.replace(/((?:观看日期|出行日期|出票日期|日期)\s*[:：]\s*)(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{4})(?!\d)/g, '$1$4-$3-$2')
   const fields: Partial<TicketInput> = {}
   const warnings: string[] = []
   const catalogue = projects.filter((project) => !project.mergedIntoId)
@@ -81,23 +76,11 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   }
   if (/(?:成人\s*\d+[\s\S]*儿童\s*\d+|儿童\s*\d+[\s\S]*成人\s*\d+)/.test(remaining)) throw new Error('成人和儿童等多个套餐请分别填写订单。')
 
-  const dates = [...remaining.matchAll(/\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}日?|(?<!\d)\d{1,2}\s*月\s*\d{1,2}日?|今天|今日|明天|明日|后天/g)]
+  const dates = commandDateMatches(remaining, today)
   if (dates.length > 1) throw new Error('检测到多个日期，请每次填写一个观看日期。')
   if (dates.length) {
-    const value = dates[0][0]
-    if (/^(今天|今日|明天|明日|后天)$/.test(value)) {
-      if (!isValidCalendarDate(today)) throw new Error('当前日期无效，请明确填写日期。')
-      const date = new Date(`${today}T00:00:00Z`)
-      date.setUTCDate(date.getUTCDate() + (/明/.test(value) ? 1 : value === '后天' ? 2 : 0))
-      fields.issueDate = date.toISOString().slice(0, 10)
-    } else {
-      const numbers = value.match(/\d+/g)!
-      if (numbers.length === 2 && !isValidCalendarDate(today)) throw new Error('当前日期无效，请明确填写年份。')
-      const [year, month, day] = numbers.length === 3 ? numbers : [today.slice(0, 4), ...numbers]
-      fields.issueDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-      if (!isValidCalendarDate(fields.issueDate)) throw new Error('观看日期无效，请核对年月日。')
-    }
-    remaining = remaining.replace(value, ' '.repeat(value.length))
+    fields.issueDate = dates[0].date
+    remaining = removeCommandDate(remaining, dates[0])
   } else warnings.push('未识别日期，保留当前日期，请核对。')
 
   const times = [...remaining.matchAll(/\d{1,2}\s*:\s*\d{2}/g)]
@@ -137,7 +120,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
 
   // Bare show numbers in an explicitly labelled quantity belong to that field.
   // Preserve the original string for count parsing after project matching.
-  const quantitySpans = [...remaining.matchAll(/(?:人数|数量)\s*[:：]?\s*[+-]?\s*\d+(?:\.\d+)?\s*(?:人|位|名|张|个|件|瓶|盒)?|(?<![\d.A-Za-z])[+-]?\s*\d+(?:\.\d+)?\s*(?:人|位|名|张|个|件|瓶|盒)(?=$|[\s,，;；、]|(?:69|79|89|99)(?:秀|show)?(?=$|[\s,，;；、]))/g)]
+  const quantitySpans = [...remaining.matchAll(/(?:人数|数量)\s*[:：]?\s*[+-]?\s*\d+(?:\.\d+)?(?!\s*[./]\s*\d)\s*(?:人|位|名|张|个|件|瓶|盒)?|(?<![\d.A-Za-z/])[+-]?\s*\d+(?:\.\d+)?\s*(?:人|位|名|张|个|件|瓶|盒)(?=$|[\s,，;；、]|(?:69|79|89|99)(?:秀|show)?(?=$|[\s,，;；、]))/g)]
     .map(match => ({ start: match.index!, end: match.index! + match[0].length }))
   const projectMatches = catalogue.flatMap((project) => projectAliases(project).flatMap((alias) => occurrences(remaining, alias)
     .filter(match => !/^\d+$/.test(alias) || !quantitySpans.some(span => span.start <= match.start && span.end >= match.end))
@@ -155,7 +138,7 @@ export const parseTicketCommand = (text: string, projects: Project[], today = ge
   remaining = remove(remaining, longest)
   if (/(?:总售价|销售价|代理价|售价|卖价|总价|总成本|成本|进价|利润|返佣)\s*[:：]?\s*\S/.test(remaining)) throw new Error('未识别金额，请在金额标签后填写完整有效数字。')
 
-  const counts = [...remaining.matchAll(/(?:人数|数量)\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)(?![\d.A-Za-z])\s*(人|位|名|张|个|件|瓶|盒)?|(?<![\d.A-Za-z])([+-]?\s*\d+(?:\.\d+)?)\s*(人|位|名|张|个|件|瓶|盒)/g)]
+  const counts = [...remaining.matchAll(/(?:人数|数量)\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)(?![\d.A-Za-z]|\s*[./]\s*\d)\s*(人|位|名|张|个|件|瓶|盒)?|(?<![\d.A-Za-z/])([+-]?\s*\d+(?:\.\d+)?)\s*(人|位|名|张|个|件|瓶|盒)/g)]
   if (counts.length > 1) throw new Error('检测到多个人数或数量，请每次只填写一个套餐的数量。')
   if (counts.length) {
     const count = Number((counts[0][1] ?? counts[0][3]).replace(/\s/g, ''))

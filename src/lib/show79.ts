@@ -1,5 +1,6 @@
 import type { TicketRecord } from '../types'
 import { getBangkokDate, isValidCalendarDate, isValidPersonCount } from './format'
+import { commandDateMatches, removeCommandDate } from './command-date'
 import { getRefundState } from './refunds'
 import { getTicketAmounts } from './ticket-amounts'
 import { isShow69Project } from './show69'
@@ -57,31 +58,23 @@ export const voucherDate = (date: string) => {
 // Parsing only prepares a preview; saving an order is always a separate action.
 export function parseShow79Command(text: string, today = getBangkokDate()): Show79VoucherInput {
   const normalized = text.normalize('NFKC').trim()
-  const dates = [...normalized.matchAll(/\d{4}\s*[-/年]\s*\d{1,2}\s*[-/月]\s*\d{1,2}日?|今天|今日|明天|明日|后天/g)]
+  const dates = commandDateMatches(normalized, today)
   if (dates.length !== 1) throw new Error('请填写一个观看日期，例如“今天”“明天”或“2026/10/20”。')
-  const dateToken = dates[0][0]
-  let date: string
-  const explicit = dateToken.match(/^(\d{4})\s*[-/年]\s*(\d{1,2})\s*[-/月]\s*(\d{1,2})日?$/)
-  if (explicit) date = `${explicit[1]}-${explicit[2].padStart(2, '0')}-${explicit[3].padStart(2, '0')}`
-  else {
-    if (!isValidCalendarDate(today)) throw new Error('当前日期无效，请直接填写观看日期。')
-    const days = /^(明天|明日)$/.test(dateToken) ? 1 : dateToken === '后天' ? 2 : 0
-    const next = new Date(`${today}T00:00:00Z`)
-    next.setUTCDate(next.getUTCDate() + days)
-    date = next.toISOString().slice(0, 10)
-  }
+  const date = dates[0].date
   // Strip standalone product labels before counts: in “79 张三 2人”, the
   // product must not be mistaken for “79张” merely because 张 is a surname.
   const productLabel = /(^|[\s,，;；、])(?:79(?:\s*成人)?\s*秀?|(?:imagine\s*)?79\s*show)(?=$|[\s,，;；、])/gi
-  const withoutDate = normalized.replace(dateToken, ' ').replace(productLabel, ' ')
-  const counts = [...withoutDate.matchAll(/([+-]?\d+(?:\.\d+)?)\s*(?:人|个|位|名|张)/g)]
+  const withoutDate = removeCommandDate(normalized, dates[0]).replace(productLabel, ' ')
+  const counts = [...withoutDate.matchAll(/(?:人数|数量)\s*[:：]?\s*([+-]?\s*\d+(?:\.\d+)?)(?![\d.A-Za-z]|\s*[./]\s*\d)\s*(?:人|个|位|名|张)?|(?<![\d.A-Za-z/])([+-]?\s*\d+(?:\.\d+)?)\s*(?:人|个|位|名|张)/g)]
   if (counts.length !== 1) throw new Error('请填写一个人数，例如“2人”“2个”或“2位”；不要同时填写多个数量。')
   // Replacing the whole count creates a separator in compact phrases like
   // “今天2个79”, so the product can appear before or after the guest names.
   const guestName = withoutDate.replace(counts[0][0], ' ')
     .replace(productLabel, ' ')
+    .replace(/^(?:79(?:\s*成人)?\s*秀?)(?:\s*出票|\s*记录)?\s*格式\s*[:：]?/i, ' ')
+    .replace(/(?:观看日期|出行日期|出票日期|日期|项目名称|项目|客户姓名|姓名|名字|客户|人数|数量)\s*(?:[（(]\s*所有人\s*[）)])?\s*[:：]?/g, ' ')
     .replace(/^[\s,，;；、]+|[\s,，;；、]+$/g, '').replace(/\s+/g, ' ').trim()
-  const input = { guestName, date, people: Number(counts[0][1]) }
+  const input = { guestName, date, people: Number((counts[0][1] ?? counts[0][2]).replace(/\s/g, '')) }
   validateShow79Voucher(input)
   return input
 }

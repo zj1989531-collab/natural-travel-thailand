@@ -102,6 +102,28 @@ describe('catalogue ticket command parsing', () => {
     expect(parse(`79 Jimmy ${input} 1人`).fields.issueDate).toBe(expected)
   })
 
+  it.each([
+    ['10.18', '2026-10-18'], ['10/18', '2026-10-18'], ['今天', '2026-10-15'],
+    ['明天', '2026-10-16'], ['10月18', '2026-10-18'], ['10月18日', '2026-10-18']
+  ])('recognizes common yearless date input %s', (input, expected) => {
+    expect(parse(`79 Jimmy ${input} 1人`).fields.issueDate).toBe(expected)
+  })
+
+  it('does not mistake a monetary decimal for a dotted date', () => {
+    const withoutDate = parse('79 Jimmy 1人 售价10.18 成本5.50')
+    expect(withoutDate.fields).toMatchObject({ agentPriceThb: 10.18, costThb: 5.5 })
+    expect(withoutDate.fields.issueDate).toBeUndefined()
+    expect(withoutDate.warnings.join(' ')).toContain('未识别日期')
+
+    const labelledDate = parse('79 Jimmy 日期：10.18 1人 售价10.18 成本5.50')
+    expect(labelledDate.fields).toMatchObject({ issueDate: '2026-10-18', agentPriceThb: 10.18, costThb: 5.5 })
+  })
+
+  it('does not mistake a decimal quantity for a dotted date', () => {
+    expect(() => parse('79 Jimmy 今天 数量10.18')).toThrow('人数／数量必须是大于 0 的整数')
+    expect(() => parse('79 Jimmy 今天 人数10/18')).toThrow('人数／数量必须是大于 0 的整数')
+  })
+
   it('uses the supplied Bangkok date across month/year boundaries and parses explicit time', () => {
     expect(parse('79 Jimmy 明天 1人 9:05', catalogue, '2026-12-31').fields).toMatchObject({ issueDate: '2027-01-01', issueTime: '09:05' })
     expect(parse('79 Jimmy 后天 1人', catalogue, '2024-02-28').fields.issueDate).toBe('2024-03-01')
@@ -193,6 +215,8 @@ describe('catalogue ticket command parsing', () => {
   it.each([
     ['79 Jimmy 今天 明天 2人', '多个日期'],
     ['79 Jimmy 2026/02/30 2人', '日期无效'],
+    ['79 Jimmy 2.30 2人', '日期无效'],
+    ['79 Jimmy 13/01 2人', '日期无效'],
     ['79 Jimmy 今天 2人 25:00', '时间无效'],
     ['79 Jimmy 今天 2人 10:00 11:00', '多个时间'],
     ['79 泰拳 Jimmy 今天 2人', '多个项目'],

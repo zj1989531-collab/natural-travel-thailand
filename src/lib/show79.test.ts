@@ -103,6 +103,24 @@ describe('79 voucher input', () => {
     expect(parseShow79Command('李湘光 龙粉萍 2026年10月20日 2个79', '2026-10-15')).toEqual({ guestName: '李湘光 龙粉萍', people: 2, date: '2026-10-20' })
     expect(parseShow79Command('79 张三 后天 1位', '2026-12-31').date).toBe('2027-01-02')
   })
+  it.each([
+    ['10.18', '2026-10-18'],
+    ['10/18', '2026-10-18'],
+    ['今天', '2026-10-15'],
+    ['明天', '2026-10-16'],
+    ['10月18', '2026-10-18'],
+    ['10月18日', '2026-10-18']
+  ])('accepts common date input %s', (dateText, expected) => {
+    expect(parseShow79Command(`79 Jimmy ${dateText} 2人`, '2026-10-15')).toEqual({ guestName: 'Jimmy', people: 2, date: expected })
+  })
+  it('accepts a labelled template with a slash date', () => {
+    expect(parseShow79Command('79出票格式\n日期：10/18\n名字（所有人）：Jimmy\n人数：2', '2026-10-15'))
+      .toEqual({ guestName: 'Jimmy', people: 2, date: '2026-10-18' })
+  })
+  it('uses the supplied current year for yearless dotted and slash dates', () => {
+    expect(parseShow79Command('79 Jimmy 10.18 2人', '2027-01-01').date).toBe('2027-10-18')
+    expect(parseShow79Command('79 Jimmy 10/18 2人', '2027-01-01').date).toBe('2027-10-18')
+  })
   it.each(['79 张三 今天 明天 2人', '79 张三 今天 2人 3人', '79 张三 今天 2.5个', '79 张三 今天 -2个', '79 张三 今天 0个'])('rejects ambiguous or invalid fields rather than guessing: %s', text => {
     expect(() => parseShow79Command(text, '2026-10-15')).toThrow()
   })
@@ -114,7 +132,7 @@ describe('79 voucher input', () => {
     expect(parseShow79Command('79 Jimmy Smith 2人 明天', '2026-12-31')).toEqual({ guestName: 'Jimmy Smith', people: 2, date: '2027-01-01' })
     expect(voucherDate('2026-10-15')).toBe('2026/10/15')
   })
-  it.each(['79 2人 今天', '79 jimmy 0人 今天', '79 jimmy 2人 2026/2/30', '79 jimmy 今天', '79 jimmy 2人'])('rejects incomplete input %s', text => {
+  it.each(['79 2人 今天', '79 jimmy 0人 今天', '79 jimmy 2人 2026/2/30', '79 jimmy 2人 2.30', '79 jimmy 2人 13/01', '79 jimmy 今天', '79 jimmy 2人'])('rejects incomplete input %s', text => {
     expect(() => parseShow79Command(text, '2026-10-15')).toThrow()
   })
 })

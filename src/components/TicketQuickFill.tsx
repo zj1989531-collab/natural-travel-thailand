@@ -99,7 +99,7 @@ export function TicketQuickFill({ projects, current, disabled, onFill, onBusyCha
   }
 
   return <section className="ticket-quick-fill" aria-label="订单自动填写">
-    <label>一句话填写<textarea ref={inputRef} disabled={disabled} rows={3} value={command} placeholder="例如：79秀 Jimmy 今天 2人；也可写套餐、供货商、售价和成本" onChange={event => { cancelRead(); setCommand(event.target.value); clearFeedback() }} onPaste={event => {
+    <label>一句话填写<textarea ref={inputRef} disabled={disabled} rows={3} value={command} placeholder="例如：79秀 Jimmy 10.18 2人；日期也可写 10/18、今天、明天或10月18日" onChange={event => { cancelRead(); setCommand(event.target.value); clearFeedback() }} onPaste={event => {
       if (disabled) return
       const text = event.clipboardData.getData('text/plain')
       if (!text.trim()) return

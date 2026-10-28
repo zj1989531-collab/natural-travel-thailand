@@ -206,7 +206,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
           if (!text.trim()) return
           event.preventDefault(); setCommand(text); fill(text)
         }} /></label>
-        <p className="sheet-copy" id={commandHelpId}>粘贴整段信息即可自动填入；未写年份时使用曼谷当前年份。{requiresPackage ? '请写明一个套餐。' : ''}核对下方信息后保存。</p>
+        <p className="sheet-copy" id={commandHelpId}>日期可写 10.18、10/18、今天、明天或10月18日；未写年份时使用曼谷当前年份。{requiresPackage ? '请写明一个套餐。' : ''}核对下方信息后保存。</p>
         <button type="button" className="secondary-button" disabled={busy || pasting || Boolean(pendingSave)} aria-busy={pasting} onClick={() => void pasteAndFill()}>{pasting ? '正在粘贴…' : '粘贴 / 自动填入'}</button>
         {command.trim() && <button type="button" className="text-action" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => fill(command)}>识别当前文字</button>}
         {commandError && <p className="form-error" role="alert">{commandError}</p>}

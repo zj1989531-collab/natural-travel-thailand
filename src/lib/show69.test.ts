@@ -37,12 +37,26 @@ describe('69 independent records', () => {
   ])('fills natural and labelled input %s', (text, date, guestName, people) => {
     expect(parseShow69Command(text, '2026-10-23')).toEqual({ date, guestName, people })
   })
+  it.each([
+    ['10.18', '2026-10-18'],
+    ['10/18', '2026-10-18'],
+    ['今天', '2026-10-15'],
+    ['明天', '2026-10-16'],
+    ['10月18', '2026-10-18'],
+    ['10月18日', '2026-10-18']
+  ])('accepts the common date form %s', (dateText, expected) => {
+    expect(parseShow69Command(`69 张三 ${dateText} 2人`, '2026-10-15')).toEqual({ date: expected, guestName: '张三', people: 2 })
+  })
+  it('uses the supplied current year for a yearless dotted or slash date', () => {
+    expect(parseShow69Command('69 张三 10.18 2人', '2027-01-01').date).toBe('2027-10-18')
+    expect(parseShow69Command('69 张三 10/18 2人', '2027-01-01').date).toBe('2027-10-18')
+  })
   it('uses relative dates over leap days and year boundaries', () => {
     expect(parseShow69Command('69 张三 后天 1人', '2026-12-31').date).toBe('2027-01-02')
     expect(parseShow69Command('69 张三 明天 1人', '2024-02-28').date).toBe('2024-02-29')
   })
   it.each([
-    '', '69 张三 今天 明天 2人', '69 张三 今天 2人 3人', '69 张三 2月30 2人', '69 张三 2026/02/29 2人',
+    '', '69 张三 今天 明天 2人', '69 张三 今天 2人 3人', '69 张三 2月30 2人', '69 张三 2.30 2人', '69 张三 13/01 2人', '69 张三 2026/02/29 2人',
     '69 张三 今天 0人', '69 张三 今天 -2人', '69 张三 今天 2.5人', '69 张三 今天 .5人',
     '69 张三 今天 人数2e1', '79 张三 今天 2人', '89秀 张三 今天 2人', '99秀 张三 今天 2人',
     '69 今天 2人', '69 张三 2人', '69 张三 今天', '69 张三 今天 2人 售价100', '69 张三 今天 2人 备注：生日'

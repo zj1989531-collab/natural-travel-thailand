@@ -248,7 +248,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
     <section className="show79-entry"><h2>{editing ? '编辑79秀订单' : '生成确认单 / 新增订单'}</h2><p className="sheet-copy" role="status">{editing ? '正在编辑已记账订单；修改保存前，手填预览不代表修改已记账。' : '当前填写内容未记账；预览图片不会保存订单。'}</p>
       {!editing && <div className="show79-command">
         <label>一句话填写<textarea ref={commandRef} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandError ? 'show79-command-help show79-command-error' : 'show79-command-help'} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => { if (busy || pendingSave) return; const text = event.clipboardData.getData('text/plain'); if (!text.trim()) return; event.preventDefault(); setCommand(text); fillCommand(text) }} placeholder="李湘光 龙粉萍 今天 2个79" /></label>
-        <p className="sheet-copy" id="show79-command-help">先复制订单文字，再点“黏贴/自动填入”；也可长按输入框黏贴。例如：李湘光 龙粉萍 今天 2个79。</p>
+        <p className="sheet-copy" id="show79-command-help">日期可写 10.18、10/18、今天、明天或10月18日；未写年份时使用曼谷当前年份。再点“黏贴/自动填入”，或长按输入框黏贴。</p>
         <button type="button" className="secondary-button" disabled={busy || pasting || Boolean(pendingSave)} aria-busy={pasting} onClick={() => void pasteAndFill()}>{pasting ? '正在黏贴…' : '黏贴/自动填入'}</button>
         {command.trim() && <button type="button" className="text-action" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => fillCommand(command)}>识别当前文字</button>}
         {commandError && <p className="form-error" id="show79-command-error" role="alert">{commandError}</p>}
