@@ -634,6 +634,7 @@ export default function App() {
   const syncAbortRef = useRef<AbortController | null>(null)
   const syncRunnerRef = useRef<() => Promise<void>>(async () => undefined)
   const syncQueueRef = useRef<SyncQueue | null>(null)
+  const postSaveReloadRef = useRef<number | undefined>(undefined)
   syncQueueRef.current ??= createSyncQueue(() => syncRunnerRef.current())
   const unsyncedCount = useMemo(() => [...tickets, ...suppliers, ...projects, ...show79Settlements, ...tickets.flatMap((ticket) => ticket.refunds ?? [])].filter((record) => record.syncStatus !== 'synced').length, [tickets, suppliers, projects, show79Settlements])
 
@@ -674,6 +675,16 @@ export default function App() {
   }
 
   const synchronise = useCallback(() => syncQueueRef.current!.request(), [])
+
+  // A successful write is already durable in IndexedDB.  Start its cloud
+  // replay, then reload so every form and report is rebuilt from that saved
+  // state.  This intentionally also applies while offline: the pending row
+  // remains queued and the next app start will resume synchronization.
+  const reloadAfterRecordSave = useCallback(() => {
+    void synchronise()
+    window.clearTimeout(postSaveReloadRef.current)
+    postSaveReloadRef.current = window.setTimeout(() => window.location.reload(), 350)
+  }, [synchronise])
 
   useEffect(() => {
     let alive = true
@@ -958,7 +969,7 @@ export default function App() {
       ? `退票已确认，已更新${originalTicket.projectName}独立账本中原出票日期 ${originalDate ?? ''} 的记录与利润。`
       : `退票已确认，已回算原出票日期 ${originalDate ?? ''} 的统计和月报。`
     setToast(saved.cancelledAt ? '已核对：原退票已撤销，未新增退票。' : refreshed ? refundUpdateMessage : '退票已确认；页面刷新未完成，请同步核对，无需再次登记。')
-    void synchronise()
+    reloadAfterRecordSave()
   }
   const cancelRefund = async (id: string) => {
     if (requestLoginForWrite()) return
@@ -988,7 +999,7 @@ export default function App() {
     setToast(!refreshed ? '订单已保存；页面刷新未完成，请同步核对，无需再次保存。' : isIndependentLedgerProject(saved.projectName) ? `${saved.projectName}订单已保存，独立计算，不计入主账本报表。` : ticketSettlementMode(saved) === 'monthly'
       ? '月结记录已保存，计入所属月报、年报，不计入每日统计。'
       : selectedTicket ? '记录已更新，统计已重新计算。' : '出票记录已保存，统计已更新。')
-    void synchronise()
+    reloadAfterRecordSave()
   }
 
   const saveMedicine = async (entries: MedicineTicketEntry[]) => {
@@ -1003,7 +1014,7 @@ export default function App() {
     if (epoch !== accountEpochRef.current) return
     setFormOpen(false)
     setToast(refreshed ? `${saved.length} 项药品明细已保存，数量和利润已分别统计。` : '药品明细已全部保存；页面刷新未完成，请同步核对，无需再次保存。')
-    void synchronise()
+    reloadAfterRecordSave()
   }
 
   const saveShow79 = async (input: TicketInput, existing?: TicketRecord, operationId?: string): Promise<TicketRecord> => {
@@ -1015,7 +1026,7 @@ export default function App() {
     try { await refresh() }
     catch { if (epoch === accountEpochRef.current) setToast('79秀订单已保存；页面刷新未完成，请同步核对，无需再次保存。') }
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
-    void synchronise()
+    reloadAfterRecordSave()
     return saved
   }
 
@@ -1028,7 +1039,7 @@ export default function App() {
     try { await refresh() }
     catch { if (epoch === accountEpochRef.current) setToast(`${kind === 'show69' ? '69秀' : '泰拳'}记录已保存；页面刷新未完成，请同步核对，无需再次保存。`) }
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
-    void synchronise()
+    reloadAfterRecordSave()
     return saved
   }
   const saveShow69 = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string) => saveIndependentRecord('show69', input, existing, operationId)
@@ -1051,7 +1062,7 @@ export default function App() {
     try { await refresh() }
     catch { if (epoch === accountEpochRef.current) setToast(`${kind === 'kohlarn' ? '格兰岛一日游' : '东方嘉年华'}月结记录已保存；页面刷新未完成，请同步核对，无需再次保存。`) }
     if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
-    void synchronise()
+    reloadAfterRecordSave()
     return saved
   }
   const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveIndependentMonthlyRecord('kohlarn', input, existing, operationId, snapshot)
@@ -1070,7 +1081,7 @@ export default function App() {
     try { await refresh() } catch { refreshed = false }
     if (epoch !== accountEpochRef.current) return
     setToast(refreshed ? '分账登记已保存；此操作只记录已发生的付款，不会转账。' : '分账已确认登记；页面刷新未完成，请同步核对，无需再次登记或付款。')
-    void synchronise()
+    reloadAfterRecordSave()
   }
 
   const addSupplier = async (name: string) => {
