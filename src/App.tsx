@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { createLedgerBackup, downloadLedgerBackup, exportTicketsToXlsx } from './lib/export'
 import { createId, formatDate, formatNumber, formatThb, getBangkokDate, getBangkokTime, isValidIssueTime, isValidPersonCount } from './lib/format'
@@ -7,18 +7,14 @@ import { PersonCountField } from './components/PersonCountField'
 import { MedicineItemsField } from './components/MedicineItemsField'
 import { buildMedicineTicketInputs, createMedicineLine, type MedicineLine } from './lib/medicine-selection'
 import { isMedicineProject, type MedicineTicketEntry } from './lib/medicine-batch'
-import { ReportView } from './components/ReportView'
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
 import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
-import { Show79View } from './components/Show79View'
-import { Show69View } from './components/Show69View'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
 import { isBoxingProject } from './lib/boxing'
-import { MonthlyTicketsView } from './components/MonthlyTicketsView'
 import { boxingCategoryForTicket, resolveMonthlyPricing } from './lib/monthly-pricing'
 import { createMonthlyTicketSnapshot } from './lib/monthly-ticket-snapshot'
 import { SyncConflictPanel } from './components/SyncConflictPanel'
@@ -48,6 +44,12 @@ import { activeTickets, bySupplier, getProfit, monthDateRange, summarise, ticket
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, RefundInput, SettlementMode, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records' | 'reports' | 'monthly' | 'show69' | 'show79' | 'boxing' | 'kohlarn' | 'carnival'
+
+const ReportView = lazy(() => import('./components/ReportView').then(({ ReportView }) => ({ default: ReportView })))
+const MonthlyTicketsView = lazy(() => import('./components/MonthlyTicketsView').then(({ MonthlyTicketsView }) => ({ default: MonthlyTicketsView })))
+const Show69View = lazy(() => import('./components/Show69View').then(({ Show69View }) => ({ default: Show69View })))
+const Show79View = lazy(() => import('./components/Show79View').then(({ Show79View }) => ({ default: Show79View })))
+const DeferredPage = ({ label }: { label: string }) => <div className="loading-screen" role="status" aria-live="polite"><span className="loading-mark">◌</span><span>正在加载{label}…</span></div>
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>
@@ -1238,13 +1240,13 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : monthlyView ? <MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
+        </> : monthlyView ? <Suspense fallback={<DeferredPage label="月结账本" />}><MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
             : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSaved={reloadAfterRecordSave} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
               : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
                 : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
-        </MonthlyTicketsView> : view === 'reports' ? <ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /> : <>
+        </MonthlyTicketsView></Suspense> : view === 'reports' ? <Suspense fallback={<DeferredPage label="报表" />}><ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /></Suspense> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
