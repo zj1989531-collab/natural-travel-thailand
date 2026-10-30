@@ -21,6 +21,7 @@ interface Props {
   settlements?: Show79SettlementRecord[]
   settlementReviewMessage?: string
   onSaveSettlement?: (input: Show79SettlementInput) => Promise<void>
+  onSaved?: () => void
   onSave: (input: TicketInput, existing?: TicketRecord, operationId?: string) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
   onRefund: (id: string) => void
@@ -31,7 +32,7 @@ interface Props {
 type Preview = { url: string; blob: Blob; input: Show79VoucherInput; source: Show79PreviewSource }
 type SaveOperation = { draft: TicketInput; existing?: TicketRecord; operationId?: string; generate: boolean }
 
-export function Show79View({ accountId, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+export function Show79View({ accountId, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSaved, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
   const [date, setDate] = useState(getBangkokDate)
   const [month, setMonth] = useState(getBangkokMonth)
   const [dayOnly, setDayOnly] = useState(false)
@@ -112,7 +113,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
     setCost(selected ? String(selected.defaultCostThb) : ''); setCommission('')
     if (selected) setBasis(resolveProjectRules(selected).defaultAmountBasis)
   }
-  const showPreview = async (value: Show79VoucherInput, source: Show79PreviewSource = show79DraftSource(value, editing)) => {
+  const showPreview = async (value: Show79VoucherInput, source: Show79PreviewSource = show79DraftSource(value, editing)): Promise<boolean> => {
     const request = guardRef.current.begin()
     generationSource.current = source
     closePreview(); setError(''); setGenerating(true)
@@ -120,19 +121,20 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
       validateShow79Voucher(value)
       if (!sourceIsCurrent(source)) throw new Error('订单信息已变化，请重新打开订单后核对。')
       const blob = await guardRef.current.render(request, () => createShow79Voucher(value), () => sourceIsCurrent(source))
-      if (!blob || !mountedRef.current) return
+      if (!blob || !mountedRef.current) return false
       closePreview(); const url = URL.createObjectURL(blob); urlRef.current = url
       setPreview({ url, blob, input: { ...value }, source })
-    } catch (e) { if (guardRef.current.isLatest(request) && mountedRef.current) setError((source.kind === 'saved' ? '订单已记账，图片生成失败；请仅重新生成，不要重复保存。' : '未记账，图片生成失败。') + (e instanceof Error ? e.message : '请重试。')) }
+      return true
+    } catch (e) { if (guardRef.current.isLatest(request) && mountedRef.current) setError((source.kind === 'saved' ? '订单已记账，图片生成失败；请仅重新生成，不要重复保存。' : '未记账，图片生成失败。') + (e instanceof Error ? e.message : '请重试。')); return false }
     finally { if (guardRef.current.isLatest(request) && mountedRef.current) setGenerating(false) }
   }
-  const previewSaved = async (ticket: TicketRecord) => {
+  const previewSaved = async (ticket: TicketRecord): Promise<boolean> => {
     try {
       const current = currentTickets().find(row => row.id === ticket.id && row.userId === ticket.userId)
       if (!current) throw new Error('订单已更新或删除，请刷新核对。')
       const next = savedShow79Preview(current)
-      await showPreview(next.input, next.source)
-    } catch (e) { setError(e instanceof Error ? e.message : '订单状态已变化，请重新核对。') }
+      return await showPreview(next.input, next.source)
+    } catch (e) { setError(e instanceof Error ? e.message : '订单状态已变化，请重新核对。'); return false }
   }
   const fillCommand = (text: string) => {
     if (busy || pendingSave) return
@@ -184,7 +186,8 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
     } catch (e) {
       if (mountedRef.current) { setPendingSave(operation); setError((e instanceof Error ? e.message : '订单保存结果尚未确认。') + ' 请重试本次保存；沿用同一编号，不会重复新增。') }
     } finally { saveLock.current = false; if (mountedRef.current) setSaving(false) }
-    if (generateSaved && mountedRef.current) await previewSaved(generateSaved)
+    const previewReady = generateSaved && mountedRef.current ? await previewSaved(generateSaved) : !operation.generate
+    if (previewReady && mountedRef.current) onSaved?.()
   }
   const save = async (generate = false, acknowledgedKey?: string) => {
     if (saveLock.current || pasteLock.current || generating) return

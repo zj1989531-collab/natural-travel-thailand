@@ -46,6 +46,30 @@ export const downloadLedgerBackup = (backup: ReturnType<typeof createLedgerBacku
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+type XlsxRow = Record<string, string | number>
+type XlsxSheet = { data: XlsxRow[]; name: string; headers?: string[]; moneyColumns?: string[] }
+
+const downloadXlsx = async (sheets: XlsxSheet[], filename: string) => {
+  const { default: writeExcelFile } = await import('write-excel-file/browser')
+  const workbook = sheets.map(({ data, name, headers, moneyColumns = [] }) => {
+    const columns = headers ?? Object.keys(data[0] ?? {})
+    return {
+      sheet: name,
+      columns: columns.map((key) => ({ width: key === '备注' || key === '日报说明' || key === '单数口径' || key === '结算说明' ? 52 : key === '项目' || key === '子项 / 套餐' || key === '客户姓名' || key.includes('时间') ? 28 : Math.max(18, key.length * 2) })),
+      data: [columns, ...data.map((row) => columns.map((key) => moneyColumns.includes(key) && typeof row[key] === 'number' ? { value: row[key], format: '#,##0.00;[Red]-#,##0.00' } : row[key] ?? null))]
+    }
+  })
+  const blob = await writeExcelFile(workbook).toBlob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 export const buildTicketExportRows = (tickets: TicketRecord[]) => tickets
     .filter((ticket) => !ticket.deletedAt)
     .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt))
@@ -149,20 +173,12 @@ export const buildReportExportRows = (report: LedgerReport, supplierName: string
 }
 
 export const exportReportToXlsx = async (report: LedgerReport, supplierName: string) => {
-  const XLSX = await import('xlsx')
-  const workbook = XLSX.utils.book_new()
   const rows = buildReportExportRows(report, supplierName)
-  const append = (data: Record<string, string | number>[], name: string, headers?: string[]) => {
-    const worksheet = XLSX.utils.json_to_sheet(data, headers ? { header: headers } : undefined)
-    worksheet['!cols'] = Object.keys(data[0] ?? Object.fromEntries((headers ?? []).map((header) => [header, '']))).map((key) => ({
-      wch: key === '备注' || key === '日报说明' || key === '单数口径' ? 52 : key === '项目' || key === '子项 / 套餐' || key === '客户姓名' ? 28 : Math.max(18, key.length * 2)
-    }))
-    XLSX.utils.book_append_sheet(workbook, worksheet, name)
-  }
-  append(rows.summary, '报表汇总')
-  append(rows.records, '记录明细', reportDetailHeaders)
-  if (rows.monthlyRecords.length) append(rows.monthlyRecords, '当日月结另列', reportDetailHeaders)
-  XLSX.writeFile(workbook, `票务盈利报表_${report.start}_${report.end}.xlsx`)
+  await downloadXlsx([
+    { data: rows.summary, name: '报表汇总' },
+    { data: rows.records, name: '记录明细', headers: reportDetailHeaders },
+    ...(rows.monthlyRecords.length ? [{ data: rows.monthlyRecords, name: '当日月结另列', headers: reportDetailHeaders }] : [])
+  ], `票务盈利报表_${report.start}_${report.end}.xlsx`)
 }
 
 export const buildRefundExportRows = (tickets: TicketRecord[]) => {
@@ -187,15 +203,12 @@ export const buildRefundExportRows = (tickets: TicketRecord[]) => {
 
 export const exportTicketsToXlsx = async (source: TicketRecord[]) => {
   const tickets = mainLedgerTickets(source)
-  const XLSX = await import('xlsx')
   const rows = buildTicketExportRows(tickets)
-  const workbook = XLSX.utils.book_new()
-  const worksheet = XLSX.utils.json_to_sheet(rows)
-  worksheet['!cols'] = Object.keys(rows[0] ?? {}).map((key) => ({ wch: key === '备注' ? 32 : key === '项目' ? 30 : 22 }))
-  XLSX.utils.book_append_sheet(workbook, worksheet, '出票记录')
   const refundRows = buildRefundExportRows(tickets)
-  if (refundRows.length) XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(refundRows), '退票明细')
-  XLSX.writeFile(workbook, `票务盈利簿_${getBangkokDate()}.xlsx`)
+  await downloadXlsx([
+    { data: rows, name: '出票记录' },
+    ...(refundRows.length ? [{ data: refundRows, name: '退票明细' }] : [])
+  ], `票务盈利簿_${getBangkokDate()}.xlsx`)
 }
 
 const show79SettlementHeaders = ['结算月份', '实际付款日期', 'jimmy 本次支付 / 收回 (THB)', '大狗二狗本次支付 / 收回 (THB)', '登记时月利润 (THB)', '登记时 jimmy 40% (THB)', '登记时大狗二狗 60% (THB)', '备注', '登记时间（曼谷）']
@@ -237,27 +250,11 @@ export const buildShow79ExportRows = (tickets: TicketRecord[], date: string, mon
 
 export const exportShow79ToXlsx = async (tickets: TicketRecord[], date: string, month: string, settlements: Show79SettlementRecord[] = []) => {
   const rows = buildShow79ExportRows(tickets, date, month, settlements)
-  const XLSX = await import('xlsx')
-  const workbook = XLSX.utils.book_new()
-  const append = (data: Record<string, string | number>[], name: string, headers?: string[]) => {
-    const worksheet = XLSX.utils.json_to_sheet(data, headers ? { header: headers } : undefined)
-    const keys = Object.keys(data[0] ?? Object.fromEntries((headers ?? []).map(header => [header, ''])))
-    worksheet['!cols'] = keys.map(key => ({ wch: key === '备注' || key === '结算说明' ? 52 : key.includes('时间') || key === '客户姓名' ? 28 : Math.max(18, key.length * 2) }))
-    if (worksheet['!ref']) {
-      const range = XLSX.utils.decode_range(worksheet['!ref'])
-      for (let column = 0; column < keys.length; column++) {
-        if (!keys[column].includes('(THB)')) continue
-        for (let row = 1; row <= range.e.r; row++) {
-          const cell = worksheet[XLSX.utils.encode_cell({ r: row, c: column })]
-          if (cell?.t === 'n') cell.z = '#,##0.00;[Red]-#,##0.00'
-        }
-      }
-    }
-    XLSX.utils.book_append_sheet(workbook, worksheet, name)
-  }
-  append(rows.summary, '月度分账')
-  append(rows.records, '79秀订单')
-  if (rows.refundRecords.length) append(rows.refundRecords, '79秀退票明细')
-  append(rows.settlementRecords, '分账登记明细', show79SettlementHeaders)
-  XLSX.writeFile(workbook, `79秀独立报表_${month}.xlsx`)
+  const moneyColumns = Object.keys(rows.summary[0] ?? {}).filter((key) => key.includes('(THB)'))
+  await downloadXlsx([
+    { data: rows.summary, name: '月度分账', moneyColumns },
+    { data: rows.records, name: '79秀订单', moneyColumns: Object.keys(rows.records[0] ?? {}).filter((key) => key.includes('(THB)')) },
+    ...(rows.refundRecords.length ? [{ data: rows.refundRecords, name: '79秀退票明细', moneyColumns: Object.keys(rows.refundRecords[0] ?? {}).filter((key) => key.includes('(THB)')) }] : []),
+    { data: rows.settlementRecords, name: '分账登记明细', headers: show79SettlementHeaders, moneyColumns: show79SettlementHeaders.filter((key) => key.includes('(THB)')) }
+  ], `79秀独立报表_${month}.xlsx`)
 }

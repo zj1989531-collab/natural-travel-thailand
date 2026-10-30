@@ -15,18 +15,14 @@ const sourceFiles = async (directory) => {
   return files.flat()
 }
 
-test('XLSX integration stays export-only', async () => {
+test('Excel integration stays export-only and avoids the vulnerable xlsx package', async () => {
   const files = await sourceFiles(sourceRoot.pathname)
   const sources = await Promise.all(files.map(async (path) => ({ path, source: await readFile(path, 'utf8') })))
-  const xlsxUsers = sources.filter(({ source }) => /(?:from\s+['"]xlsx['"]|import\(\s*['"]xlsx['"]\s*\)|require\(\s*['"]xlsx['"]\s*\))/.test(source))
+  const xlsxUsers = sources.filter(({ source }) => /(?:from\s+['"]write-excel-file\/browser['"]|import\(\s*['"]write-excel-file\/browser['"]\s*\)|require\(\s*['"]write-excel-file\/browser['"]\s*\))/.test(source))
 
   assert.deepEqual(xlsxUsers.map(({ path }) => path.replace(sourceRoot.pathname, '')).sort(), ['lib/export.ts'])
 
   const [{ source }] = xlsxUsers
-  assert.match(source, /XLSX\.utils\.book_new\(/)
-  assert.match(source, /XLSX\.utils\.json_to_sheet\(/)
-  assert.match(source, /XLSX\.utils\.book_append_sheet\(/)
-  assert.match(source, /XLSX\.writeFile\(/)
-  assert.doesNotMatch(source, /\bXLSX\s*\.\s*(?:read|readFile|readFileSync|stream)\b/i)
-  assert.doesNotMatch(source, /\bXLSX\s*\.\s*utils\s*\.\s*(?:sheet_to_json|table_to_sheet|html_to_sheet|csv_to_sheet)\b/i)
+  assert.match(source, /writeExcelFile\(workbook\)\.toBlob\(\)/)
+  assert.doesNotMatch(source, /(?:from\s+['"]xlsx['"]|import\(\s*['"]xlsx['"]\s*\)|require\(\s*['"]xlsx['"]\s*\))/)
 })
