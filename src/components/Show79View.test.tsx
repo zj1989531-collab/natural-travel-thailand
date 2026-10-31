@@ -14,7 +14,7 @@ describe('79 show reporting screen', () => {
     expect(html).not.toContain('<b>jimmy</b>')
     expect(html).toContain('不会向供应商下单')
     expect(html).toContain('当前填写内容未记账')
-    expect(html).toContain('保存并生成确认单')
+    expect(html).toContain('保存并打开确认单')
     expect(html).toContain('预览图片不会保存订单')
   })
 })

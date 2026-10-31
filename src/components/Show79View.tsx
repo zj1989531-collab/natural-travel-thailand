@@ -21,7 +21,6 @@ interface Props {
   settlements?: Show79SettlementRecord[]
   settlementReviewMessage?: string
   onSaveSettlement?: (input: Show79SettlementInput) => Promise<void>
-  onSaved?: () => void
   onSave: (input: TicketInput, existing?: TicketRecord, operationId?: string) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
   onRefund: (id: string) => void
@@ -32,7 +31,7 @@ interface Props {
 type Preview = { url: string; blob: Blob; input: Show79VoucherInput; source: Show79PreviewSource }
 type SaveOperation = { draft: TicketInput; existing?: TicketRecord; operationId?: string; generate: boolean }
 
-export function Show79View({ accountId, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSaved, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+export function Show79View({ accountId, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
   const [date, setDate] = useState(getBangkokDate)
   const [month, setMonth] = useState(getBangkokMonth)
   const [dayOnly, setDayOnly] = useState(false)
@@ -186,8 +185,10 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
     } catch (e) {
       if (mountedRef.current) { setPendingSave(operation); setError((e instanceof Error ? e.message : '订单保存结果尚未确认。') + ' 请重试本次保存；沿用同一编号，不会重复新增。') }
     } finally { saveLock.current = false; if (mountedRef.current) setSaving(false) }
-    const previewReady = generateSaved && mountedRef.current ? await previewSaved(generateSaved) : !operation.generate
-    if (previewReady && mountedRef.current) onSaved?.()
+    // Keep the saved order open: its next required step is reviewing and
+    // sharing the confirmation sheet. The parent has already queued cloud
+    // synchronisation, so a reload here would discard the generated image.
+    if (generateSaved && mountedRef.current) await previewSaved(generateSaved)
   }
   const save = async (generate = false, acknowledgedKey?: string) => {
     if (saveLock.current || pasteLock.current || generating) return
@@ -257,7 +258,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
         {commandError && <p className="form-error" id="show79-command-error" role="alert">{commandError}</p>}
         {commandMessage && <p className="sheet-copy" role="status">{commandMessage}</p>}
       </div>}
-      <form onSubmit={(event: FormEvent) => { event.preventDefault(); void save() }} ref={formRef} className="ticket-form"><fieldset className="form-fields" disabled={busy || Boolean(pendingSave)}>
+      <form onSubmit={(event: FormEvent) => { event.preventDefault(); void save(true) }} ref={formRef} className="ticket-form"><fieldset className="form-fields" disabled={busy || Boolean(pendingSave)}>
         <label>客户姓名<input value={input.guestName} maxLength={100} disabled={busy} onChange={event => update('guestName', event.target.value)} required /></label>
         <div className="form-grid"><label>观看日期<input type="date" disabled={busy} value={input.date} onChange={event => update('date', event.target.value)} required /></label><label>人数<input type="number" disabled={busy} min="1" step="1" value={Number.isFinite(input.people) ? input.people : ''} onChange={event => update('people', event.target.value === '' ? Number.NaN : Number(event.target.value))} required /></label></div>
         <p className="sheet-copy">时间：18:30–21:30【循环表演】 · 预订单号留空</p>
@@ -269,7 +270,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
           {project?.entryMode === 'profit_only' ? <label>{basis === 'per_person' ? '每人实际利润' : '整单实际利润'}（THB）<input type="number" min="0" step="0.01" value={commission} onChange={event => changeFinancial(() => setCommission(event.target.value))} /></label> : <div className="form-grid"><label>{basis === 'per_person' ? '每人售价' : '整单售价'}（THB）<input type="number" min="0" step="0.01" value={price} onChange={event => changeFinancial(() => setPrice(event.target.value))} /></label><label>{basis === 'per_person' ? '每人成本' : '整单成本'}（THB）<input type="number" min="0" step="0.01" value={cost} onChange={event => changeFinancial(() => setCost(event.target.value))} /></label></div>}
           <label>内部备注<textarea value={note} maxLength={300} onChange={event => changeFinancial(() => setNote(event.target.value))} /></label>
           <p className="sheet-copy">按观看日期归入日/月统计；只生成确认单不会新增账本记录，也不会向供应商下单。</p>
-          {!warning && <><button type="submit" className="secondary-button" disabled={busy || pasting}>{saving ? '保存中…' : editing ? '保存订单修改' : '保存79秀订单'}</button><button type="button" className="primary-button" disabled={busy || pasting} onClick={() => void save(true)}>{saving ? '保存中…' : '保存并生成确认单'}</button></>}
+          {!warning && <button type="submit" className="primary-button" disabled={busy || pasting}>{saving ? '保存中…' : editing ? '保存修改并打开确认单' : '保存并打开确认单'}</button>}
         </details></fieldset>
         {warning && <SaveWarning messages={warning.messages} saving={busy || pasting} onBack={() => setWarning(null)} onContinue={() => void save(warning.generate, warning.key)} />}
         {pendingSave && <div className="show79-save-retry"><p className="sheet-copy">上次保存结果尚待核对。重试将使用原内容与原编号；开始新订单前，请先在下方核对是否已记账。</p><button type="button" className="primary-button" disabled={busy || pasting} onClick={() => void runSave(pendingSave)}>重试本次保存</button><button type="button" className="text-action" disabled={busy} onClick={() => { invalidatePreview(); clearEntry(); setMessage('已开始新订单；此操作不会撤回上次已提交的记录。') }}>核对后开始新订单</button></div>}
