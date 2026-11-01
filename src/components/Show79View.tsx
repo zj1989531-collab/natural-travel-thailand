@@ -5,6 +5,7 @@ import { createId, formatThb, getBangkokDate, getBangkokMonth, getBangkokTime } 
 import { createShow79Voucher, downloadVoucher, printVoucher, voucherFilename } from '../lib/show79-voucher'
 import { createShow79PreviewGuard, isShow79PreviewCurrent, savedShow79Preview, show79DraftSource, show79PreviewTickets, type Show79PreviewSource } from '../lib/show79-preview'
 import { getTicketAmounts } from '../lib/ticket-amounts'
+import type { Show69RecordInput } from '../lib/show69'
 import { getRefundState } from '../lib/refunds'
 import { exportShow79ToXlsx } from '../lib/export'
 import { RefundHistory } from './RefundSheet'
@@ -16,6 +17,7 @@ import type { Show79SettlementInput, Show79SettlementRecord } from '../lib/show7
 
 interface Props {
   accountId?: string
+  initialInput?: Show69RecordInput
   tickets: TicketRecord[]
   projects: Project[]
   settlements?: Show79SettlementRecord[]
@@ -31,18 +33,18 @@ interface Props {
 type Preview = { url: string; blob: Blob; input: Show79VoucherInput; source: Show79PreviewSource }
 type SaveOperation = { draft: TicketInput; existing?: TicketRecord; operationId?: string; generate: boolean }
 
-export function Show79View({ accountId, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
-  const [date, setDate] = useState(getBangkokDate)
-  const [month, setMonth] = useState(getBangkokMonth)
+export function Show79View({ accountId, initialInput, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+  const [date, setDate] = useState(() => initialInput?.date ?? getBangkokDate())
+  const [month, setMonth] = useState(() => initialInput?.date?.slice(0, 7) ?? getBangkokMonth())
   const [dayOnly, setDayOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [command, setCommand] = useState('')
   const [commandError, setCommandError] = useState('')
   const [commandMessage, setCommandMessage] = useState('')
   const [pasting, setPasting] = useState(false)
-  const [input, setInput] = useState<Show79VoucherInput>(() => ({ guestName: '', date: getBangkokDate(), people: 1 }))
+  const [input, setInput] = useState<Show79VoucherInput>(() => ({ guestName: initialInput?.guestName ?? '', date: initialInput?.date ?? getBangkokDate(), people: initialInput?.people ?? 1 }))
   const showProjects = useMemo(() => projects.filter(project => isShow79Project(project.name) && project.quantityUnit !== 'item'), [projects])
-  const [projectId, setProjectId] = useState('')
+  const [projectId, setProjectId] = useState(() => initialInput?.projectId ?? '')
   const [basis, setBasis] = useState<AmountBasis>('per_person')
   const [price, setPrice] = useState('')
   const [cost, setCost] = useState('')

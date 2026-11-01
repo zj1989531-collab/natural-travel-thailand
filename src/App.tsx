@@ -68,6 +68,7 @@ interface TicketFormProps {
   onSave: (input: TicketInput, operationId?: string) => Promise<void>
   onSaveMedicine?: (entries: MedicineTicketEntry[]) => Promise<void>
   onShow69?: (input: Show69RecordInput) => void
+  onShow79?: (input: Show69RecordInput) => void
   onBoxing?: (input: Show69RecordInput) => void
   onKohLarn?: (input: Show69RecordInput) => void
   onCarnival?: (input: Show69RecordInput) => void
@@ -91,7 +92,7 @@ const emptyForm = (): TicketInput => ({
   note: ''
 })
 
-export function TicketForm({ ticket, projects, projectOptions, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onBoxing, onKohLarn, onCarnival }: TicketFormProps) {
+export function TicketForm({ ticket, projects, projectOptions, suppliers = [], knownTickets = [], cloudLoginRequired, onCancel, onManageSuppliers, onSave, onSaveMedicine, onShow69, onShow79, onBoxing, onKohLarn, onCarnival }: TicketFormProps) {
   const [form, setForm] = useState<TicketInput>(() => ticket ? {
     guestName: ticket.guestName ?? '',
     quantityUnit: ticket.quantityUnit ?? 'person',
@@ -129,6 +130,10 @@ export function TicketForm({ ticket, projects, projectOptions, suppliers = [], k
 
   const applyFilledForm = (next: TicketInput) => {
     if (saveLock.current || pendingMedicineSave) return
+    if (!ticket && isShow79Project(next.projectName) && onShow79) {
+      onShow79({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined })
+      return
+    }
     if (!ticket && isShow69Project(next.projectName) && onShow69) {
       onShow69({ date: next.issueDate, guestName: next.guestName ?? '', people: next.personCount ?? 1, projectId: next.projectId || undefined })
       return
@@ -603,6 +608,7 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [view, setView] = useState<View>('dashboard')
   const [show69Draft, setShow69Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
+  const [show79Draft, setShow79Draft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   const [boxingDraft, setBoxingDraft] = useState<{ id: string; accountId: string; input?: Show69RecordInput }>()
   const [monthlyStandardDraft, setMonthlyStandardDraft] = useState<{ id: string; accountId: string; kind: 'kohlarn' | 'carnival'; input?: Show69RecordInput }>()
   const monthlyChannel = view === 'show69' || view === 'show79' || view === 'boxing' || view === 'kohlarn' || view === 'carnival' ? view : undefined
@@ -718,6 +724,7 @@ export default function App() {
         setConflictsOpen(false)
         setSelectedTicket(undefined)
         setShow69Draft(undefined)
+        setShow79Draft(undefined)
         setBoxingDraft(undefined)
         setMonthlyStandardDraft(undefined)
         setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
@@ -933,6 +940,12 @@ export default function App() {
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView('show69')
+  }
+  const openShow79 = (input?: Show69RecordInput) => {
+    setShow79Draft({ id: createId(), accountId: financialAccountId, input })
+    setFormOpen(false)
+    setSelectedTicket(undefined)
+    setView('show79')
   }
   const openBoxing = (input?: Show69RecordInput) => {
     setBoxingDraft({ id: createId(), accountId: financialAccountId, input })
@@ -1158,6 +1171,7 @@ export default function App() {
     setFormOpen(false); setRefundOpen(false); setSupplierSheetOpen(false); setConflictsOpen(false)
     setSelectedTicket(undefined)
     setShow69Draft(undefined)
+    setShow79Draft(undefined)
     setBoxingDraft(undefined)
     setMonthlyStandardDraft(undefined)
     syncAbortRef.current?.abort()
@@ -1240,10 +1254,10 @@ export default function App() {
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
-        </> : monthlyView ? <Suspense fallback={<DeferredPage label="月结账本" />}><MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
+        </> : monthlyView ? <Suspense fallback={<DeferredPage label="月结账本" />}><MonthlyTicketsView selected={monthlyChannel} onSelect={channel => { setShow69Draft(undefined); setShow79Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(channel) }} onBack={() => setView('dashboard')}>
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
-            : view === 'show79' ? <Show79View key={user?.id ?? 'local'} accountId={financialAccountId} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
+            : view === 'show79' ? <Show79View key={`show79:${financialAccountId}:${show79Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show79Draft?.accountId === financialAccountId ? show79Draft.input : undefined} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
               : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} />
                 : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onRefund={openRefund} onCancelRefund={id => void cancelRefund(id)} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
         </MonthlyTicketsView></Suspense> : view === 'reports' ? <Suspense fallback={<DeferredPage label="报表" />}><ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /></Suspense> : <>
@@ -1282,9 +1296,9 @@ export default function App() {
         </>}
       </div>
 
-      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' ? openMonthlyStandard('kohlarn') : view === 'carnival' ? openMonthlyStandard('carnival') : openNewForm()} onRefund={() => openRefund()} />
+      <BottomNavigation view={monthlyView ? 'monthly' : view === 'records' || view === 'reports' ? view : 'dashboard'} onViewChange={next => { setShow69Draft(undefined); setShow79Draft(undefined); setBoxingDraft(undefined); setMonthlyStandardDraft(undefined); setView(next) }} onAdd={() => view === 'show69' ? openShow69() : view === 'boxing' ? openBoxing() : view === 'kohlarn' ? openMonthlyStandard('kohlarn') : view === 'carnival' ? openMonthlyStandard('carnival') : openNewForm()} onRefund={() => openRefund()} />
 
-      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onBoxing={openBoxing} onKohLarn={input => openMonthlyStandard('kohlarn', input)} onCarnival={input => openMonthlyStandard('carnival', input)} />}
+      {formOpen && <TicketForm ticket={selectedTicket} projects={projects} projectOptions={monthlyFormProjects} suppliers={suppliers} knownTickets={tickets} cloudLoginRequired={cloudConfigured && !user} onCancel={() => setFormOpen(false)} onManageSuppliers={() => { setFormOpen(false); setSupplierSheetOpen(true) }} onSave={saveTicket} onSaveMedicine={saveMedicine} onShow69={openShow69} onShow79={openShow79} onBoxing={openBoxing} onKohLarn={input => openMonthlyStandard('kohlarn', input)} onCarnival={input => openMonthlyStandard('carnival', input)} />}
       {refundOpen && <RefundSheet key={financialAccountId} accountId={financialAccountId} tickets={refundScopeTickets} initialTicketId={refundTicketId} onClose={() => setRefundOpen(false)} onSave={saveRefund} />}
       {supplierSheetOpen && <SupplierSheet suppliers={suppliers} projects={projects} onAddSupplier={addSupplier} onAddProject={addProject} onUpdateProject={updateProject} onBackup={backupAllData} onClose={() => setSupplierSheetOpen(false)} />}
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
