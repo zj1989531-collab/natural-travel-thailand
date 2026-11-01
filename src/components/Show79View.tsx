@@ -62,6 +62,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
   const [message, setMessage] = useState('')
   const [preview, setPreview] = useState<Preview>()
   const urlRef = useRef<string | undefined>(undefined)
+  const voucherRef = useRef<HTMLDivElement>(null)
   const guardRef = useRef(createShow79PreviewGuard())
   const generationSource = useRef<Show79PreviewSource | undefined>(undefined)
   const latest = useRef({ tickets, input })
@@ -96,6 +97,14 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
   }
   const invalidatePreview = () => { guardRef.current.invalidate(); generationSource.current = undefined; setGenerating(false); closePreview() }
   const visiblePreview = preview && sourceIsCurrent(preview.source) ? preview : undefined
+  // Saving a 79 order generates its confirmation lower on the same page.
+  // Move it into view after React has mounted the image so the successful
+  // save has a visible, unambiguous next screen on mobile as well.
+  useEffect(() => {
+    if (!visiblePreview) return
+    const frame = window.requestAnimationFrame(() => voucherRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [visiblePreview?.url])
   useEffect(() => {
     const source = generationSource.current ?? preview?.source
     if (source && !sourceIsCurrent(source)) {
@@ -278,7 +287,7 @@ export function Show79View({ accountId, tickets, projects, settlements = [], set
       </form>
       {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="sheet-copy" role="status">{message}</p>}
       {savedOrder && <div className="show79-saved-order"><p className="sheet-copy" role="status">已记账：{savedOrder.guestName} · {voucherDate(savedOrder.issueDate)}。重新生成只读取订单，不会再次保存。</p><button type="button" className="secondary-button" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => void previewSaved(savedOrder)}>重新生成已保存订单确认单</button></div>}
-      {visiblePreview && <div className="show79-voucher"><p role="status">{visiblePreview.source.kind === 'saved' ? '已记账订单确认单' : '未记账确认单预览'} · {visiblePreview.input.guestName} · {visiblePreview.input.people}人 · {voucherDate(visiblePreview.input.date)}</p><img src={visiblePreview.url} alt={`${visiblePreview.input.guestName}的79秀确认单，${voucherDate(visiblePreview.input.date)}，${visiblePreview.input.people}人`} /><div className="show79-share"><button type="button" className="primary-button" onClick={() => void copyImage()}>复制图片（无需保存）</button><button type="button" className="secondary-button" onClick={() => void share()}>分享图片（可选择微信）</button><button type="button" className="secondary-button" onClick={() => { const current = currentPreview(); if (current) downloadVoucher(current.url, voucherFilename(current.input)) }}>下载图片</button><button type="button" className="secondary-button" onClick={() => { try { const current = currentPreview(); if (current) printVoucher(current.url) } catch (e) { setError(e instanceof Error ? e.message : "打印失败。") } }}>打印 / 保存 PDF</button></div><p className="sheet-copy">复制图片后可切换微信，长按聊天输入框尝试粘贴，无需保存到相册。能否粘贴成图片取决于手机和微信的支持。</p></div>}
+      {visiblePreview && <div ref={voucherRef} className="show79-voucher" tabIndex={-1}><p role="status">{visiblePreview.source.kind === 'saved' ? '已记账订单确认单' : '未记账确认单预览'} · {visiblePreview.input.guestName} · {visiblePreview.input.people}人 · {voucherDate(visiblePreview.input.date)}</p><img src={visiblePreview.url} alt={`${visiblePreview.input.guestName}的79秀确认单，${voucherDate(visiblePreview.input.date)}，${visiblePreview.input.people}人`} /><div className="show79-share"><button type="button" className="primary-button" onClick={() => void copyImage()}>复制图片（无需保存）</button><button type="button" className="secondary-button" onClick={() => void share()}>分享图片（可选择微信）</button><button type="button" className="secondary-button" onClick={() => { const current = currentPreview(); if (current) downloadVoucher(current.url, voucherFilename(current.input)) }}>下载图片</button><button type="button" className="secondary-button" onClick={() => { try { const current = currentPreview(); if (current) printVoucher(current.url) } catch (e) { setError(e instanceof Error ? e.message : "打印失败。") } }}>打印 / 保存 PDF</button></div><p className="sheet-copy">复制图片后可切换微信，长按聊天输入框尝试粘贴，无需保存到相册。能否粘贴成图片取决于手机和微信的支持。</p></div>}
     </section>
     <section className="show79-orders"><h2>79秀订单</h2><div className="show79-filters"><label>订单范围<select value={dayOnly ? 'day' : 'month'} onChange={event => setDayOnly(event.target.value === 'day')}><option value="month">所选月份</option><option value="day">所选日期</option></select></label><label>搜索客户 / 备注<input value={search} onChange={event => setSearch(event.target.value)} /></label></div>
       {!records.length && <p className="empty-card">当前范围没有79秀订单。</p>}
