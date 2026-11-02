@@ -274,15 +274,15 @@ export function Show79View({ accountId, initialInput, tickets, projects, settlem
         <div className="form-grid"><label>观看日期<input type="date" disabled={busy} value={input.date} onChange={event => update('date', event.target.value)} required /></label><label>人数<input type="number" disabled={busy} min="1" step="1" value={Number.isFinite(input.people) ? input.people : ''} onChange={event => update('people', event.target.value === '' ? Number.NaN : Number(event.target.value))} required /></label></div>
         <p className="sheet-copy">时间：18:30–21:30【循环表演】 · 预订单号留空</p>
         <button type="button" className="secondary-button" disabled={busy || pasting} onClick={() => void showPreview(input)}>{busy ? '处理中…' : '预览确认单图片'}</button>
-        <details open={Boolean(editing)}><summary>保存到独立账本 · 填写实际金额</summary>
-          <label>供货商套餐<select value={projectId} onChange={event => selectProject(event.target.value)}><option value="">请选择79秀套餐</option>{showProjects.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name} · {project.subItemName || '不分套餐'}</option>)}</select></label>
-          {!showProjects.length && <button type="button" className="text-action" onClick={onManageProjects}>先录入79秀项目及供货商价格</button>}
+        <label>供货商套餐<select value={projectId} onChange={event => selectProject(event.target.value)}><option value="">请选择79秀套餐</option>{showProjects.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name} · {project.subItemName || '不分套餐'}</option>)}</select></label>
+        {!showProjects.length && <button type="button" className="text-action" onClick={onManageProjects}>先录入79秀项目及供货商价格</button>}
+        <details open={Boolean(editing)}><summary>修改实际金额（默认使用套餐价格）</summary>
           <label>金额单位<select value={basis} onChange={event => changeFinancial(() => setBasis(event.target.value as AmountBasis))}><option value="per_person">每人金额 × 人数</option><option value="total">整单总额</option></select></label>
           {project?.entryMode === 'profit_only' ? <label>{basis === 'per_person' ? '每人实际利润' : '整单实际利润'}（THB）<input type="number" min="0" step="0.01" value={commission} onChange={event => changeFinancial(() => setCommission(event.target.value))} /></label> : <div className="form-grid"><label>{basis === 'per_person' ? '每人售价' : '整单售价'}（THB）<input type="number" min="0" step="0.01" value={price} onChange={event => changeFinancial(() => setPrice(event.target.value))} /></label><label>{basis === 'per_person' ? '每人成本' : '整单成本'}（THB）<input type="number" min="0" step="0.01" value={cost} onChange={event => changeFinancial(() => setCost(event.target.value))} /></label></div>}
           <label>内部备注<textarea value={note} maxLength={300} onChange={event => changeFinancial(() => setNote(event.target.value))} /></label>
-          <p className="sheet-copy">按观看日期归入日/月统计；只生成确认单不会新增账本记录，也不会向供应商下单。</p>
-          {!warning && <button type="submit" className="primary-button" disabled={busy || pasting}>{saving ? '保存中…' : editing ? '保存修改并打开确认单' : '保存并打开确认单'}</button>}
         </details></fieldset>
+        <p className="sheet-copy">按观看日期归入日/月统计；只生成确认单不会新增账本记录，也不会向供应商下单。</p>
+        {!warning && <button type="submit" className="primary-button" disabled={busy || pasting}>{saving ? '保存中…' : editing ? '保存修改并打开确认单' : '保存并打开确认单'}</button>}
         {warning && <SaveWarning messages={warning.messages} saving={busy || pasting} onBack={() => setWarning(null)} onContinue={() => void save(warning.generate, warning.key)} />}
         {pendingSave && <div className="show79-save-retry"><p className="sheet-copy">上次保存结果尚待核对。重试将使用原内容与原编号；开始新订单前，请先在下方核对是否已记账。</p><button type="button" className="primary-button" disabled={busy || pasting} onClick={() => void runSave(pendingSave)}>重试本次保存</button><button type="button" className="text-action" disabled={busy} onClick={() => { invalidatePreview(); clearEntry(); setMessage('已开始新订单；此操作不会撤回上次已提交的记录。') }}>核对后开始新订单</button></div>}
         {editing && !pendingSave && <button type="button" className="text-action" disabled={busy} onClick={() => { invalidatePreview(); clearEntry(); setSavedOrder(undefined) }}>取消编辑</button>}
