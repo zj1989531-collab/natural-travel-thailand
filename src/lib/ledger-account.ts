@@ -4,6 +4,9 @@ export type LedgerSettings = AppSettings & { activeCloudUserId?: string | null }
 
 export interface LedgerOwnerContext {
   userId: string
+  /** The signed-in user. This differs from userId for a read-only shareholder. */
+  authUserId?: string | null
+  canWrite?: boolean
   cloud: boolean
   isCurrent: () => boolean
 }

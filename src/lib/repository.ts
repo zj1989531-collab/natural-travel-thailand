@@ -21,13 +21,34 @@ import { boxingCategoryForTicket, resolveMonthlyPricing } from './monthly-pricin
 
 const LOCAL_USER_ID_KEY = 'localUserId'
 let accountUserId: string | null | undefined
+let ledgerUserId: string | null | undefined
+let accountCanWrite = true
 let accountEpoch = 0
 let accountReady: Promise<Awaited<ReturnType<typeof db.activateAccount>>> | undefined
 
+export type LedgerAccess = { ledgerUserId: string; canWrite: boolean }
+
+async function resolveLedgerAccess(userId: string | null): Promise<LedgerAccess | null> {
+  if (!userId) return null
+  const client = getSupabase()
+  // Keeping this guard makes repository unit tests independent from the
+  // optional sharing table; production clients always implement .from().
+  if (!client || typeof client.from !== 'function') return { ledgerUserId: userId, canWrite: true }
+  const query = client.from('ledger_members').select('ledger_owner_id, role').eq('member_user_id', userId).eq('status', 'active')
+  // Test doubles and legacy clients without maybeSingle do not implement the
+  // sharing endpoint. They retain the normal owner-only behavior.
+  if (typeof (query as { maybeSingle?: unknown }).maybeSingle !== 'function') return { ledgerUserId: userId, canWrite: true }
+  const { data, error } = await query.maybeSingle()
+  if (error) throw new Error(`无法读取账本权限：${error.message}`)
+  if (!data) return { ledgerUserId: userId, canWrite: true }
+  if (data.role !== 'viewer' || typeof data.ledger_owner_id !== 'string') throw new Error('账本权限配置无效。')
+  return { ledgerUserId: data.ledger_owner_id, canWrite: false }
+}
+
 async function activateAccount(userId: string | null) {
   const cloud = Boolean(getSupabase())
-  const target = cloud ? userId : null
-  if (accountUserId === target && accountReady) {
+  const authTarget = cloud ? userId : null
+  if (accountUserId === authTarget && accountReady) {
     const pending = accountReady
     const epoch = accountEpoch
     let succeeded = false
@@ -38,13 +59,17 @@ async function activateAccount(userId: string | null) {
       if (error instanceof AccountChangedError) throw error
     }
     if (succeeded) {
-      if (accountEpoch !== epoch || accountUserId !== target) throw new AccountChangedError()
+      if (accountEpoch !== epoch || accountUserId !== authTarget) throw new AccountChangedError()
       return
     }
   }
   const epoch = ++accountEpoch
-  accountUserId = target
-  accountReady = db.activateAccount(target, cloud, () => accountEpoch === epoch && accountUserId === target)
+  accountUserId = authTarget
+  const access = cloud ? await resolveLedgerAccess(authTarget) : null
+  if (accountEpoch !== epoch || accountUserId !== authTarget) throw new AccountChangedError()
+  ledgerUserId = cloud ? access?.ledgerUserId ?? null : null
+  accountCanWrite = access?.canWrite ?? true
+  accountReady = db.activateAccount(ledgerUserId, cloud, () => accountEpoch === epoch && accountUserId === authTarget, accountCanWrite)
   await accountReady
   if (accountEpoch !== epoch) throw new AccountChangedError()
 }
@@ -62,9 +87,10 @@ async function ownerContext(write = false): Promise<LedgerOwnerContext | null> {
   await pending
   if (accountEpoch !== epoch || accountUserId !== target) throw new AccountChangedError()
   const settings = await getSettings()
-  const userId = cloud ? target : settings.localUserId
+  const userId = cloud ? ledgerUserId : settings.localUserId
   if (!userId) { if (write) throw new AccountChangedError(); return null }
-  const owner = { userId, cloud, isCurrent: () => accountEpoch === epoch && accountUserId === target }
+  if (write && !accountCanWrite) throw new Error('当前账号仅可查看股东账本，不能新增、修改或删除记录。')
+  const owner = { userId, authUserId: target, canWrite: accountCanWrite, cloud, isCurrent: () => accountEpoch === epoch && accountUserId === target }
   assertLedgerOwner(settings, owner)
   return owner
 }
@@ -1087,7 +1113,7 @@ export const ledgerRepository = {
     const client = getSupabase()
     if (!client) return { synced: false, message: '尚未配置云端同步' }
     const owner = await ownerContext()
-    if (!owner || owner.userId !== user.id) return { synced: false, message: '账号正在切换，请重新打开当前账号账本。' }
+    if (!owner || owner.authUserId !== user.id) return { synced: false, message: '账号正在切换，请重新打开当前账号账本。' }
     if (!navigator.onLine) return { synced: false, message: '当前离线，记录会保存在本机并在联网后同步' }
 
     const controller = new AbortController()
@@ -1109,6 +1135,16 @@ export const ledgerRepository = {
       await db.mergeRemoteRefunds(remoteRefunds.map(toLocalRefund), owner)
       const lockedTicketIds = new Set(remoteRefunds.map(refund => refund.ticket_id))
       await db.mergeRemoteTickets(remoteTickets.map(toLocalTicket), owner, lockedTicketIds)
+      if (!owner.canWrite) {
+        const [suppliers, projects, settlements] = await Promise.all([
+          fetchCloudRows<CloudSupplier>(client, 'suppliers', owner.userId, controller.signal, owner),
+          fetchCloudRows<CloudProject>(client, 'projects', owner.userId, controller.signal, owner),
+          fetchCloudRows<CloudShow79Settlement>(client, 'show79_settlements', owner.userId, controller.signal, owner)
+        ])
+        await db.reconcileCatalogue(owner.userId, suppliers.map(toLocalSupplier), projects.map(toLocalProject), owner)
+        await db.mergeRemoteShow79Settlements(settlements.map(toLocalShow79Settlement), owner)
+        return { synced: true }
+      }
       for (let attempt = 0; ; attempt++) {
         const suppliers = (await fetchCloudRows<CloudSupplier>(client, 'suppliers', user.id, controller.signal, owner)).map(toLocalSupplier)
         const projects = (await fetchCloudRows<CloudProject>(client, 'projects', user.id, controller.signal, owner)).map(toLocalProject)
@@ -1143,6 +1179,11 @@ export const ledgerRepository = {
   async markSyncError(message: string) {
     // Pending versions are retained unchanged for the next retry.
     return message
+  },
+
+  async getAccess(): Promise<LedgerAccess | null> {
+    const owner = await ownerContext()
+    return owner ? { ledgerUserId: owner.userId, canWrite: owner.canWrite !== false } : null
   },
 
   localUserIdKey: LOCAL_USER_ID_KEY

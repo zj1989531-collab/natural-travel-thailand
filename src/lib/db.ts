@@ -79,6 +79,12 @@ const getDb = () => {
   return database
 }
 
+async function activeLedgerUserId(database?: IDBPDatabase<LedgerDb>) {
+  const connection = database ?? await getDb()
+  const settings = await connection.get('settings', 'app')
+  return settings?.activeCloudUserId ?? settings?.localUserId
+}
+
 type SyncedStore = 'tickets' | 'suppliers' | 'projects' | 'ticket_refunds' | 'show79_settlements'
 const checkEpoch = (owner?: LedgerOwnerContext, transaction?: { abort: () => void }) => {
   if (owner && !owner.isCurrent()) {
@@ -168,13 +174,13 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
 }
 
 export const db = {
-  async activateAccount(userId: string | null, cloud: boolean, isCurrent: () => boolean) {
+  async activateAccount(userId: string | null, cloud: boolean, isCurrent: () => boolean, adoptLocal = true) {
     const database = await getDb()
     const tx = database.transaction(['settings', 'tickets', 'suppliers', 'projects', 'ticket_refunds', 'show79_settlements', 'ticket_create_operations', 'sync_conflicts', 'sync_bases'], 'readwrite')
     try {
       const settings = await tx.objectStore('settings').get('app') ?? { localUserId: createId(), lastCloudUserId: null }
       if (!isCurrent()) throw new AccountChangedError()
-      if (cloud && userId) {
+      if (cloud && userId && adoptLocal) {
         // Adoption happens on authentication, including offline authentication,
         // never while synchronising another account's already-owned cache.
         // A pre-cloud 79 settlement is only a local record.  Move it with the
@@ -364,7 +370,10 @@ export const db = {
   mergeRemoteProjects: (projects: Project[], owner?: LedgerOwnerContext, lockedTicketIds?: Set<string>, acknowledged?: Project[]) => mergeRemoteRows('projects', projects, owner, lockedTicketIds, acknowledged),
   mergeRemoteRefunds: (refunds: RefundRecord[], owner?: LedgerOwnerContext, lockedTicketIds?: Set<string>, acknowledged?: RefundRecord[]) => mergeRemoteRows('ticket_refunds', refunds, owner, lockedTicketIds, acknowledged),
   mergeRemoteShow79Settlements: (records: Show79SettlementRecord[], owner?: LedgerOwnerContext) => mergeRemoteRows('show79_settlements', records, owner),
-  async getShow79Settlements() { return (await getDb()).getAll('show79_settlements') },
+  async getShow79Settlements() {
+    const database = await getDb(); const userId = await activeLedgerUserId(database)
+    return (await database.getAll('show79_settlements')).filter(row => row.userId === userId)
+  },
   async getShow79Settlement(id: string) { return (await getDb()).get('show79_settlements', id) },
   async putConfirmedShow79Settlement(record: Show79SettlementRecord, owner?: LedgerOwnerContext) {
     const database = await getDb()
@@ -398,7 +407,10 @@ export const db = {
       return accepted
     } catch (error) { try { tx.abort() } catch { /* Already completed. */ } await tx.done.catch(() => undefined); throw error }
   },
-  async getRefunds() { return (await getDb()).getAll('ticket_refunds') },
+  async getRefunds() {
+    const database = await getDb(); const userId = await activeLedgerUserId(database)
+    return (await database.getAll('ticket_refunds')).filter(row => row.userId === userId)
+  },
   async getRefund(id: string) { return (await getDb()).get('ticket_refunds', id) },
   async putRefund(refund: RefundRecord, owner?: LedgerOwnerContext) { return putLocalRecord('ticket_refunds', refund, owner) },
   async addLocalRefund(refund: RefundRecord, owner?: LedgerOwnerContext) {
@@ -424,7 +436,8 @@ export const db = {
   },
   async getTickets() {
     const database = await getDb()
-    const tickets = await database.getAll('tickets')
+    const userId = await activeLedgerUserId(database)
+    const tickets = (await database.getAll('tickets')).filter(ticket => ticket.userId === userId)
     const migrated = tickets.map((ticket) => {
       const legacyTicket = ticket as TicketRecord & { revenueThb?: number }
       if (typeof legacyTicket.agentPriceThb === 'number' && typeof legacyTicket.projectName === 'string' && typeof legacyTicket.subItemName === 'string') return ticket
@@ -449,7 +462,8 @@ export const db = {
     await Promise.all([...tickets.map((ticket) => transaction.store.put(ticket)), transaction.done])
   },
   async getSuppliers() {
-    return (await (await getDb()).getAll('suppliers')).filter(row => !row.mergedIntoId)
+    const database = await getDb(); const userId = await activeLedgerUserId(database)
+    return (await database.getAll('suppliers')).filter(row => row.userId === userId && !row.mergedIntoId)
   },
   async putSupplier(supplier: Supplier, owner?: LedgerOwnerContext) {
     return putLocalRecord('suppliers', supplier, owner)
@@ -461,7 +475,8 @@ export const db = {
   },
   async getProjects() {
     const database = await getDb()
-    const projects = (await database.getAll('projects')).filter(row => !row.mergedIntoId)
+    const userId = await activeLedgerUserId(database)
+    const projects = (await database.getAll('projects')).filter(row => row.userId === userId && !row.mergedIntoId)
     const migrated = projects.map((project) => {
       const legacyProject = project as Project
       if (typeof legacyProject.subItemName === 'string') return project

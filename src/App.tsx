@@ -621,6 +621,7 @@ export default function App() {
   const [supplierSheetOpen, setSupplierSheetOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [user, setUser] = useState<User | null>(null)
+  const [ledgerAccess, setLedgerAccess] = useState<{ ledgerUserId: string; canWrite: boolean } | null>(null)
   const [localUserId, setLocalUserId] = useState('')
   const [ready, setReady] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -727,13 +728,14 @@ export default function App() {
         setShow79Draft(undefined)
         setBoxingDraft(undefined)
         setMonthlyStandardDraft(undefined)
-        setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([])
+        setTickets([]); setSuppliers([]); setProjects([]); setShow79Settlements([]); setSyncConflicts([]); setLedgerAccess(null)
         setQuery(''); setSupplierFilter(''); setToast('')
       }
       userRef.current = nextUser
       setUser(nextUser)
       activationTask = ledgerRepository.activateAccount(nextId).then(async () => {
         if (!alive || epoch !== accountEpochRef.current) return false
+        setLedgerAccess(await ledgerRepository.getAccess())
         accountReadyRef.current = true
         await refresh()
         return alive && epoch === accountEpochRef.current
@@ -796,9 +798,10 @@ export default function App() {
       window.clearTimeout(debounceTimer)
       debounceTimer = window.setTimeout(() => { if (alive) void synchronise() }, 180)
     }
-    let channel = client.channel(`ledger:${user.id}`)
+    const ledgerUserId = ledgerAccess?.ledgerUserId ?? user.id
+    let channel = client.channel(`ledger:${ledgerUserId}`)
     for (const table of ['suppliers', 'projects', 'tickets', 'ticket_refunds', 'show79_settlements']) {
-      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${user.id}` }, scheduleSync)
+      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${ledgerUserId}` }, scheduleSync)
     }
     channel.subscribe((status) => {
       // Pull again on initial subscription and reconnect so events missed while
@@ -833,7 +836,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', syncWhenVisible)
       void client.removeChannel(channel)
     }
-  }, [user?.id, synchronise, unsyncedCount, syncRetryNeeded])
+  }, [user?.id, ledgerAccess?.ledgerUserId, synchronise, unsyncedCount, syncRetryNeeded])
 
   useEffect(() => {
     const receiveInstallPrompt = (event: Event) => {
@@ -915,6 +918,7 @@ export default function App() {
                   : { label: '正在连接', detail: '正在核对云端与本机记录。', tone: 'connected' }
 
   const openNewForm = () => {
+    if (user && ledgerAccess && !ledgerAccess.canWrite) { setToast('当前为股东只读账本，仅可查看数据与报表。'); return }
     setSelectedTicket(undefined)
     setFormOpen(true)
   }
@@ -922,6 +926,10 @@ export default function App() {
   const requestLoginForWrite = () => {
     if (!accountReadyRef.current) {
       setToast('正在切换账号账本，请稍后再操作。')
+      return true
+    }
+    if (userRef.current && ledgerAccess && !ledgerAccess.canWrite) {
+      setToast('当前为股东只读账本，仅可查看数据与报表。')
       return true
     }
     if (canWriteLedger(cloudConfigured, userRef.current?.id)) return false
@@ -936,24 +944,28 @@ export default function App() {
 
   const financialAccountId = user?.id ?? (cloudConfigured ? '' : localUserId)
   const openShow69 = (input?: Show69RecordInput) => {
+    if (requestLoginForWrite()) return
     setShow69Draft({ id: createId(), accountId: financialAccountId, input })
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView('show69')
   }
   const openShow79 = (input?: Show69RecordInput) => {
+    if (requestLoginForWrite()) return
     setShow79Draft({ id: createId(), accountId: financialAccountId, input })
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView('show79')
   }
   const openBoxing = (input?: Show69RecordInput) => {
+    if (requestLoginForWrite()) return
     setBoxingDraft({ id: createId(), accountId: financialAccountId, input })
     setFormOpen(false)
     setSelectedTicket(undefined)
     setView('boxing')
   }
   const openMonthlyStandard = (kind: 'kohlarn' | 'carnival', input?: Show69RecordInput) => {
+    if (requestLoginForWrite()) return
     setMonthlyStandardDraft({ id: createId(), accountId: financialAccountId, kind, input })
     setFormOpen(false)
     setSelectedTicket(undefined)
