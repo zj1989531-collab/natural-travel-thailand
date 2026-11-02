@@ -10,7 +10,6 @@ import { isMedicineProject, type MedicineTicketEntry } from './lib/medicine-batc
 import { RefundHistory, RefundSheet } from './components/RefundSheet'
 import { DashboardLogo } from './components/DashboardLogo'
 import { SummaryPanel } from './components/SummaryPanel'
-import { ProfitTrendPanel } from './components/ProfitTrendPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
@@ -1244,7 +1243,6 @@ export default function App() {
 
           <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录及其他月结返佣项目。" />
           <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录。" />
-          <ProfitTrendPanel tickets={mainTickets} today={today} pendingCount={unsyncedCount} offline={offline} />
           <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录，退票回算原记录年份。" />
 
           <section className="ranking-section">
