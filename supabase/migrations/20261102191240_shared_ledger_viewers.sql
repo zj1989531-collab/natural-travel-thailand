@@ -73,9 +73,6 @@ using (exists (
     and m.role = 'viewer' and m.status = 'active'
 ));
 
-insert into public.ledger_members (ledger_owner_id, member_user_id, role, status)
-values
-  ('fdf2f080-4949-40de-9658-aeb8d05b05f9', '17cbdc1e-a41e-4102-8c54-fc4d01fe452e', 'viewer', 'active'),
-  ('fdf2f080-4949-40de-9658-aeb8d05b05f9', 'cf4ffad4-2697-4c28-92c1-f98dfda81f8a', 'viewer', 'active')
-on conflict (ledger_owner_id, member_user_id) do update
-set role = excluded.role, status = excluded.status;
+-- Memberships are deliberately provisioned outside schema migrations. This
+-- keeps project-specific account identifiers out of source control and lets a
+-- fresh staging database apply this schema before any users have signed in.

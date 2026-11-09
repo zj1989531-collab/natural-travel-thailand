@@ -32,5 +32,6 @@
 - 不在 GitHub Pages 构建期间执行数据库迁移；页面发布和数据库变更必须分别验证。
 - 若线上结构曾通过 Dashboard 或 SQL Editor 临时改动，先用 `supabase db pull` 固化为新迁移，再发布依赖该结构的前端版本。
 - 不提交生产数据、用户资料、数据库密码或服务端密钥。
+- `ledger_members` 仅保存架构与权限规则；股东成员关系须在用户完成登录后，通过受控的生产管理操作单独创建或撤销，绝不写入迁移文件。
 
 参考：<https://supabase.com/docs/guides/local-development/cli-workflows>
