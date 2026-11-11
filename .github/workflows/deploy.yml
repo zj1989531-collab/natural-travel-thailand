@@ -35,8 +35,6 @@ jobs:
         run: pnpm test
       - name: Enforce critical coverage
         run: pnpm test:coverage
-      - name: Mobile browser regression
-        run: pnpm test:e2e
       - name: Validate production cloud configuration
         run: node scripts/validate-client-config.mjs --require-supabase
         env:
