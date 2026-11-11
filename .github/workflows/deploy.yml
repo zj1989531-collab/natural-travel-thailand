@@ -33,6 +33,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test
+      - name: Enforce critical coverage
+        run: pnpm test:coverage
+      - name: Install Chromium for mobile regression
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Mobile browser regression
+        run: pnpm test:e2e
       - name: Validate production cloud configuration
         run: node scripts/validate-client-config.mjs --require-supabase
         env:
