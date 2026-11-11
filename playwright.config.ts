@@ -9,7 +9,9 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry'
   },
-  projects: [{ name: 'mobile-chromium', use: { ...devices['iPhone 13'] } }],
+  // GitHub-hosted runners already include Chrome. Using that channel avoids a
+  // second browser download during every production release.
+  projects: [{ name: 'mobile-chrome', use: { ...devices['iPhone 13'], channel: 'chrome' } }],
   webServer: {
     command: 'pnpm build && pnpm preview --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173',
