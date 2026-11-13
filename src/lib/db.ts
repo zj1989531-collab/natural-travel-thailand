@@ -158,8 +158,8 @@ async function putLocalRecord<K extends SyncedStore>(storeName: K, record: Ledge
     const history = await transaction.objectStore('ticket_refunds').index('by-ticket-id').getAll(record.id)
     const oldFields = current as unknown as Record<string, unknown> | undefined
     const newFields = next as unknown as Record<string, unknown>
-    if (oldFields && history.some((row) => row.userId === current!.userId) && Object.keys({ ...oldFields, ...newFields }).some((key) => !['updatedAt', 'syncStatus', 'refunds'].includes(key) && oldFields[key] !== newFields[key])) {
-      throw new Error('已有退票明细的原票不可编辑或删除，请保留完整记录。')
+    if (oldFields && history.some((row) => row.userId === current!.userId) && Object.keys({ ...oldFields, ...newFields }).some((key) => !['updatedAt', 'deletedAt', 'syncStatus', 'refunds'].includes(key) && oldFields[key] !== newFields[key])) {
+      throw new Error('已有退票明细的原票不可编辑；如需移除请直接删除订单。')
     }
   }
   // Upgrade compatibility: editing an already cached synced row establishes

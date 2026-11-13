@@ -1097,7 +1097,6 @@ export const ledgerRepository = {
     const owner = (await ownerContext(true))!
     const currentTicket = await db.getTicket(ticket.id)
     if ((currentTicket ?? ticket).userId !== owner.userId) throw new Error('当前账号无法删除这条记录。')
-    if ((await db.getRefunds()).some((row) => row.ticketId === ticket.id && row.userId === ticket.userId)) throw new Error('已有退票明细的原票不可删除，请保留完整记录。')
     const deletedAt = nextModifiedAt(ticket.updatedAt, currentTicket?.updatedAt)
     const deleted = {
       ...(currentTicket ?? ticket),

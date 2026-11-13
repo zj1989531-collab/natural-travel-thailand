@@ -9,7 +9,6 @@ import { isCarnivalProject, isKohLarnDayTripProject } from '../lib/project-rules
 import { createMonthlyTicketSnapshot } from '../lib/monthly-ticket-snapshot'
 import { getTicketAmounts, getOriginalTicketAmounts } from '../lib/ticket-amounts'
 import { getRefundState } from '../lib/refunds'
-import { RefundHistory } from './RefundSheet'
 import './Show69View.css'
 
 interface Props {
@@ -20,15 +19,13 @@ interface Props {
   tickets: TicketRecord[]
   onSave: (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
-  onRefund?: (ticketId: string) => void
-  onCancelRefund?: (refundId: string) => void
   onManageProjects?: () => void
 }
 
 type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string; snapshot?: TicketInput }
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
-export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onManageProjects }: Props) {
   const title = kind === 'boxing' ? '泰拳' : kind === 'kohlarn' ? '格兰岛一日游' : kind === 'carnival' ? '东方嘉年华' : '69秀'
   const requiresPackage = kind === 'kohlarn' || kind === 'carnival'
   const needsFrozenMonthlySnapshot = requiresPackage
@@ -176,7 +173,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   const remove = async (ticket: TicketRecord) => {
-    if (mutationLock.current || operationRef.current || pasteLock.current || ticket.refunds?.length) return
+    if (mutationLock.current || operationRef.current || pasteLock.current) return
     const epoch = accountEpochRef.current
     const owner = latest.current.accountId
     mutationLock.current = true; setDeleting(true); setError(''); setMessage('')
@@ -208,7 +205,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     <p className="sheet-copy">{title}的订单、人数和利润独立统计，不计入主账本日报、月报、年报及排行。</p>
     <div className="show79-filters"><label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>报表月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label></div>
     {report.error && <p role="alert" className="form-error">{report.error}</p>}
-    {!report.error && <div className="show79-metrics" aria-label={`${title}统计`}><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replace('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数（含退票记录）</span><strong>{report.records.length} 单</strong></div></div>}
+    {!report.error && <div className="show79-metrics" aria-label={`${title}统计`}><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replaceAll('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数</span><strong>{report.records.length} 单</strong></div></div>}
     <section className="show79-entry"><h2>{editing ? `编辑${title}订单` : `新增${title}订单`}</h2>
       {!editing && <div className="show79-command">
         <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3${kind === 'boxing' ? '\n票种：亚洲人' : requiresPackage ? '\n套餐：C' : ''}`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {
@@ -253,15 +250,12 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
       {!records.length && <p className="empty-card">当前范围没有{title}订单。</p>}
       <div className="records-list">{records.map(ticket => {
         const amounts = getTicketAmounts(ticket)
-        const refund = getRefundState(ticket)
         return <article className="ticket-card" key={ticket.id}>
         <div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')}</p><strong className="show69-names">{ticket.guestName?.trim() || '姓名未记录'}</strong></div><strong>{ticket.personCount ?? '未填'} 人</strong></div>
         {kind === 'boxing' && <p className="sheet-copy">票种：{categoryLabel(boxingCategoryForTicket(ticket))}</p>}
         <div className="show69-record-amounts"><span>净售价 {formatThb(amounts.agentPriceThb)}</span><span>净成本 {formatThb(amounts.costThb)}</span><strong>净利润 {formatThb(amounts.profitThb)}</strong></div>
         {ticket.syncStatus !== 'synced' && <p className="sheet-copy">等待同步</p>}
-        {Boolean(ticket.refunds?.length) && <p className="sheet-copy">此记录已有退票明细，保留原记录。</p>}
-        <RefundHistory ticket={ticket} onCancel={onCancelRefund} />
-        <div className="ticket-actions">{onRefund && ticket.entryMode !== 'profit_only' && !refund.full && <button type="button" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => onRefund(ticket.id)}>退票</button>}<button type="button" disabled={busy || pasting || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" className="danger-action" disabled={busy || pasting || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => void remove(ticket)}>删除</button></div>
+        <div className="ticket-actions"><button type="button" disabled={busy || pasting || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" className="danger-action" disabled={busy || pasting || Boolean(pendingSave)} onClick={() => void remove(ticket)}>删除</button></div>
       </article>})}</div>
     </section>
   </section>

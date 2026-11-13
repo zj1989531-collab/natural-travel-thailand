@@ -10,7 +10,7 @@ describe('79 show reporting screen', () => {
   it('shows standalone headcounts, real profit and the two agreed payees', () => {
     const date = getBangkokDate()
     const row = savedRow(date)
-    const html = renderToStaticMarkup(<Show79View tickets={[row]} projects={[]} onSave={async () => row} onDelete={async () => {}} onRefund={() => {}} onCancelRefund={() => {}} onManageProjects={() => {}} />)
+    const html = renderToStaticMarkup(<Show79View tickets={[row]} projects={[]} onSave={async () => row} onDelete={async () => {}} onManageProjects={() => {}} />)
     for (const text of ['当日人数', '月人数', '月实际利润', 'jimmy · 40%', '大狗二狗合计 · 60%', '฿100.00', '฿40.00', '฿60.00', '预订单号留空', '一句话填写']) expect(html).toContain(text)
     expect(html).toContain('&lt;b&gt;jimmy&lt;/b&gt;')
     expect(html).not.toContain('<b>jimmy</b>')
@@ -21,7 +21,7 @@ describe('79 show reporting screen', () => {
   })
 
   it('keeps homepage quick-entry details when it redirects into 79 show', () => {
-    const html = renderToStaticMarkup(<Show79View initialInput={{ guestName: '向绍平', date: '2026-11-01', people: 2, projectId: 'project' }} tickets={[]} projects={[]} onSave={async () => savedRow('2026-11-01')} onDelete={async () => {}} onRefund={() => {}} onCancelRefund={() => {}} onManageProjects={() => {}} />)
+    const html = renderToStaticMarkup(<Show79View initialInput={{ guestName: '向绍平', date: '2026-11-01', people: 2, projectId: 'project' }} tickets={[]} projects={[]} onSave={async () => savedRow('2026-11-01')} onDelete={async () => {}} onManageProjects={() => {}} />)
     expect(html).toContain('value="向绍平"')
     expect(html).toContain('value="2026-11-01"')
     expect(html).toContain('value="2"')

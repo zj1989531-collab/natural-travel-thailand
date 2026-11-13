@@ -6,9 +6,7 @@ import { createShow79Voucher, downloadVoucher, printVoucher, voucherFilename } f
 import { createShow79PreviewGuard, isShow79PreviewCurrent, savedShow79Preview, show79DraftSource, show79PreviewTickets, type Show79PreviewSource } from '../lib/show79-preview'
 import { getTicketAmounts } from '../lib/ticket-amounts'
 import type { Show69RecordInput } from '../lib/show69'
-import { getRefundState } from '../lib/refunds'
 import { exportShow79ToXlsx } from '../lib/export'
-import { RefundHistory } from './RefundSheet'
 import { SaveWarning } from './SaveWarning'
 import { ticketWarnings, validateDraftAmounts } from '../lib/entry-warnings'
 import { resolveProjectRules } from '../lib/project-rules'
@@ -25,15 +23,13 @@ interface Props {
   onSaveSettlement?: (input: Show79SettlementInput) => Promise<void>
   onSave: (input: TicketInput, existing?: TicketRecord, operationId?: string) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
-  onRefund: (id: string) => void
-  onCancelRefund: (id: string) => void
   onManageProjects: () => void
 }
 
 type Preview = { url: string; blob: Blob; input: Show79VoucherInput; source: Show79PreviewSource }
 type SaveOperation = { draft: TicketInput; existing?: TicketRecord; operationId?: string; generate: boolean }
 
-export function Show79View({ accountId, initialInput, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onRefund, onCancelRefund, onManageProjects }: Props) {
+export function Show79View({ accountId, initialInput, tickets, projects, settlements = [], settlementReviewMessage, onSaveSettlement, onSave, onDelete, onManageProjects }: Props) {
   const [date, setDate] = useState(() => initialInput?.date ?? getBangkokDate())
   const [month, setMonth] = useState(() => initialInput?.date?.slice(0, 7) ?? getBangkokMonth())
   const [dayOnly, setDayOnly] = useState(false)
@@ -256,7 +252,7 @@ export function Show79View({ accountId, initialInput, tickets, projects, settlem
     <div className="show79-filters"><label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>报表月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label></div>
     {result.error && <p role="alert" className="form-error">{result.error}</p>}
     {report && <>
-      <div className="show79-metrics"><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replace('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数（含退票记录）</span><strong>{report.records.length} 单</strong></div></div>
+      <div className="show79-metrics"><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replace('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数</span><strong>{report.records.length} 单</strong></div></div>
       <section className="show79-split"><h2>月度分账</h2><p>{month} · 按实际利润分成</p><div><span>jimmy · 40%</span><strong>{formatThb(report.jimmyThb)}</strong></div><div><span>大狗二狗合计 · 60%</span><strong>{formatThb(report.partnersThb)}</strong></div><small>按当月净利润统一计算，保留两位小数；退票回算原记录月份。此处为分账计算，不会自动转账。</small><button type="button" className="secondary-button" onClick={() => void exportShow79ToXlsx(tickets, date, month, settlements).catch(() => setError('导出失败，请重试。'))}>导出当月订单及分账 Excel</button></section>
       {onSaveSettlement && <Show79SettlementPanel key={month} accountId={accountId} tickets={tickets} records={settlements} financialReviewMessage={settlementReviewMessage} month={month} onSave={onSaveSettlement} />}
     </>}
@@ -294,8 +290,7 @@ export function Show79View({ accountId, initialInput, tickets, projects, settlem
     <section className="show79-orders"><h2>79秀订单</h2><div className="show79-filters"><label>订单范围<select value={dayOnly ? 'day' : 'month'} onChange={event => setDayOnly(event.target.value === 'day')}><option value="month">所选月份</option><option value="day">所选日期</option></select></label><label>搜索客户 / 备注<input value={search} onChange={event => setSearch(event.target.value)} /></label></div>
       {!records.length && <p className="empty-card">当前范围没有79秀订单。</p>}
       <div className="records-list">{records.map(ticket => {
-        const refund = getRefundState(ticket)
-        return <article className="ticket-card" key={ticket.id}><div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')} · {ticket.supplierName}</p><strong>{ticket.guestName || '旧记录 · 姓名未填'}</strong></div><strong className={getTicketAmounts(ticket).profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(getTicketAmounts(ticket).profitThb)}</strong></div><div className="ticket-meta"><span>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数' : `有效人数：${refund.remainingPeople ?? '未填'}`}</span><span>{refund.full ? '已全部退票' : refund.active.length ? '部分退票' : '未退票'}</span>{ticket.syncStatus !== 'synced' && <span>等待同步</span>}</div>{ticket.note && <p className="ticket-note">{ticket.note}</p>}<RefundHistory ticket={ticket} onCancel={id => { invalidatePreview(); onCancelRefund(id) }} /><div className="ticket-actions"><button type="button" disabled={busy || pasting || !ticket.guestName || !refund.remainingPeople || ticket.entryMode === 'profit_only'} onClick={() => void previewSaved(ticket).then(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))}>确认单</button>{ticket.entryMode !== 'profit_only' && !refund.full && <button type="button" onClick={() => { invalidatePreview(); onRefund(ticket.id) }}>退票</button>}<button type="button" disabled={busy || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" disabled={busy || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} className="danger-action" onClick={() => { invalidatePreview(); void onDelete(ticket) }}>删除</button></div></article>
+        return <article className="ticket-card" key={ticket.id}><div className="ticket-card-main"><div><p>{ticket.issueDate.replaceAll('-', '/')} · {ticket.supplierName}</p><strong>{ticket.guestName || '旧记录 · 姓名未填'}</strong></div><strong className={getTicketAmounts(ticket).profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(getTicketAmounts(ticket).profitThb)}</strong></div><div className="ticket-meta"><span>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数' : `人数：${ticket.personCount ?? '未填'}`}</span>{ticket.syncStatus !== 'synced' && <span>等待同步</span>}</div>{ticket.note && <p className="ticket-note">{ticket.note}</p>}<div className="ticket-actions"><button type="button" disabled={busy || pasting || !ticket.guestName || !ticket.personCount || ticket.entryMode === 'profit_only'} onClick={() => void previewSaved(ticket).then(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))}>确认单</button><button type="button" disabled={busy || Boolean(pendingSave) || Boolean(ticket.refunds?.length)} onClick={() => edit(ticket)}>编辑</button><button type="button" disabled={busy || Boolean(pendingSave)} className="danger-action" onClick={() => { invalidatePreview(); void onDelete(ticket) }}>删除</button></div></article>
       })}</div>
     </section>
   </section>

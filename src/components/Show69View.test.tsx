@@ -14,7 +14,7 @@ const render = (tickets: TicketRecord[], kind: 'show69' | 'boxing' = 'show69') =
 describe('69秀独立记录页面', () => {
   it('provides record fields and automatic read-only prices without ticket generation or settlement', () => {
     const html = render([record()])
-    for (const value of ['69秀', '一键填写信息', '日期', '名字（所有人）', '人数', '保存记录', '不计入主账本日报', '韩廷富,邵建华,江华兴', '3 人', '当日人数', '月人数', '月实际利润', '月订单数（含退票记录）']) expect(html).toContain(value)
+    for (const value of ['69秀', '一键填写信息', '日期', '名字（所有人）', '人数', '保存记录', '不计入主账本日报', '韩廷富,邵建华,江华兴', '3 人', '当日人数', '月人数', '月实际利润', '月订单数']) expect(html).toContain(value)
     for (const value of ['确认单', '生成图片', '打印', '月度分账', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
     expect(html).toContain('自动匹配价格')
     expect(html).toContain('净售价 ' + formatThb(9999))
@@ -35,7 +35,7 @@ describe('69秀独立记录页面', () => {
     expect(html).toContain('&lt;b&gt;张三&lt;/b&gt;,李四')
     expect(html).not.toContain('<b>张三</b>')
     for (const value of ['其他项目姓名', '泰拳客户姓名', '已删除姓名', '其他月份姓名']) expect(html).not.toContain(value)
-    expect(html).toContain('月订单数（含退票记录）')
+    expect(html).toContain('月订单数')
   })
 
   it('summarises independent orders and remaining people after refunds', () => {
@@ -44,25 +44,24 @@ describe('69秀独立记录页面', () => {
       record({ id: 'active', personCount: 2 })
     ])
     expect(html).toContain('aria-label="69秀统计"')
-    expect(html).toContain('月订单数（含退票记录）')
+    expect(html).toContain('月订单数')
     expect(html).toContain('2 单')
     expect(html).toContain('月人数 ·')
     expect(html).toContain('4 人')
   })
 
-  it('keeps legacy records with refund history read-only', () => {
+  it('allows a legacy refunded record to be deleted while preserving its edit lock', () => {
     const html = render([record({ refunds: [{ id: 'refund', userId: 'user', ticketId: '69', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] })])
-    expect(html).toContain('此记录已有退票明细，保留原记录。')
     expect(html).toContain('disabled="">编辑</button>')
-    expect(html).toContain('disabled="">删除</button>')
+    expect(html).toContain('class="danger-action">删除</button>')
   })
 
-  it('keeps refund and cancellation actions inside an independent Koh Larn ledger', () => {
+  it('does not expose refund or cancellation actions in an independent Koh Larn ledger', () => {
     const ticket = record({ id: 'koh-larn', projectName: '格兰岛跟团一日游', refunds: [{ id: 'refund', userId: 'user', ticketId: 'koh-larn', personCount: 1, isFull: false, refundRevenueThb: 1, returnedCostThb: 1, refundDate: getBangkokDate(), refundTime: '12:00', note: '', cancelledAt: null, createdAt: '', updatedAt: '', syncStatus: 'synced' }] })
-    const html = renderToStaticMarkup(<Show69View kind="kohlarn" tickets={[ticket]} onSave={async () => ticket} onDelete={async () => {}} onRefund={() => {}} onCancelRefund={() => {}} />)
-    expect(html).toContain('退票</button>')
-    expect(html).toContain('退票明细')
-    expect(html).toContain('撤销此退票')
+    const html = renderToStaticMarkup(<Show69View kind="kohlarn" tickets={[ticket]} onSave={async () => ticket} onDelete={async () => {}} />)
+    expect(html).not.toContain('退票</button>')
+    expect(html).not.toContain('退票明细')
+    expect(html).not.toContain('撤销此退票')
   })
 
   it('prefills all three fields when the main entry routes recognized 69秀 information here', () => {
@@ -83,7 +82,7 @@ describe('泰拳独立记录页面', () => {
       record({ id: 'deleted', projectName: '泰拳', guestName: '已删除泰拳客户', deletedAt: '2026-01-01T00:00:00Z' }),
       record({ id: 'old', projectName: '泰拳', issueDate: '2020-01-01', guestName: '其他月份泰拳客户' })
     ], 'boxing')
-    for (const value of ['<h1>泰拳</h1>', '新增泰拳订单', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '月订单数（含退票记录）', '不计入主账本日报']) expect(html).toContain(value)
+    for (const value of ['<h1>泰拳</h1>', '新增泰拳订单', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '月订单数', '不计入主账本日报']) expect(html).toContain(value)
     for (const value of ['69秀', '79秀', '六九客户', '七九客户', '已删除泰拳客户', '其他月份泰拳客户', '确认单', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
     expect(html).toContain('aria-describedby="boxing-command-help"')
   })
@@ -108,7 +107,7 @@ describe('独立月结项目页面', () => {
   ])('uses the same paste-first monthly form and package safeguards for independent $title ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
     const monthlyProject = project({ id: kind, name, normalizedName: name, subItemName, normalizedSubItemName: subItemName, defaultAgentPriceThb: agentPriceThb, defaultCostThb: costThb })
     const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
-    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数（含退票记录）']) expect(html).toContain(value)
+    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数']) expect(html).toContain(value)
     expect(html).not.toContain('计入所属月报和年报')
   })
 })
