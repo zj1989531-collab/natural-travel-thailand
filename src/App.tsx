@@ -28,7 +28,6 @@ import { projectPriceWarnings, ticketWarnings, validateDraftAmounts } from './li
 import { isCarnivalProject, isKohLarnDayTripProject, resolveProjectRules, ticketSettlementMode } from './lib/project-rules'
 import { filterProjects } from './lib/project-search'
 import { matchesTicketSearch, type TicketDateRange } from './lib/ticket-search'
-import { quantityParts, summariseQuantities } from './lib/effective-quantities'
 import { quantityLabels } from './lib/quantity'
 import { ticketDisplay } from './lib/project-labels'
 import { getEffectivePersonCount, getRefundState } from './lib/refunds'
@@ -37,7 +36,7 @@ import { ledgerRepository } from './lib/repository'
 import { cloudConfigured, getSupabase } from './lib/supabase'
 import { canWriteLedger, createSyncQueue, type SyncQueue } from './lib/sync'
 import { chooseProject, chooseProjectOption } from './lib/project-selection'
-import { activeTickets, bySupplier, getProfit, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth, ticketsInYear, yearDateRange } from './lib/stats'
+import { activeTickets, getProfit, monthDateRange, summarise, ticketsForDailyStats, ticketsInMonth } from './lib/stats'
 import type { AmountBasis, EntryMode, Project, ProjectInput, ProjectPricesInput, QuantityUnit, SettlementMode, Supplier, TicketInput, TicketRecord } from './types'
 
 type View = 'dashboard' | 'records' | 'reports' | 'monthly' | 'show69' | 'show79' | 'boxing' | 'kohlarn' | 'carnival'
@@ -868,8 +867,6 @@ export default function App() {
 
   const month = today.slice(0, 7)
   const monthRange = monthDateRange(month)
-  const year = today.slice(0, 4)
-  const yearRange = yearDateRange(year)
   const visibleTickets = useMemo(() => activeTickets(mainLedgerTickets(tickets)).filter(ticket => matchesTicketSearch(ticket, {
     query, supplierId: supplierFilter, date: dateFilter, range: recordDateRange, today
   })).sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.createdAt.localeCompare(a.createdAt)), [tickets, dateFilter, recordDateRange, supplierFilter, query, today])
@@ -879,7 +876,6 @@ export default function App() {
   const carnivalProjects = useMemo(() => projects.filter(project => isCarnivalProject(project.name)), [projects])
   const monthlyFormProjects = view === 'kohlarn' ? kohLarnProjects : view === 'carnival' ? carnivalProjects : undefined
 
-  const monthlySupplierStats = useMemo(() => bySupplier(ticketsInMonth(tickets, month)), [tickets, month])
   const unresolvedSyncCount = syncConflicts.filter((row) => !row.resolvedAt).length
   // Any failed replay of a legacy settlement is financially material.  Even a
   // transient transport failure has an unknown outcome until its cloud receipt
@@ -1191,24 +1187,8 @@ export default function App() {
 
           <SummaryPanel title="今日概览" subtitle="TODAY" tickets={ticketsForDailyStats(tickets, today)} note="按记录保存的结算方式统计；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录及其他月结返佣项目。" />
           <SummaryPanel title="本月月报" subtitle={`${monthRange.start} — ${monthRange.end}`} tickets={ticketsInMonth(tickets, month)} note="按出票日期统计每月1日至月底，包含其他月结返佣；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录。" />
-          <SummaryPanel title="年度年报" subtitle={`${yearRange.start} — ${yearRange.end}`} tickets={ticketsInYear(tickets, year)} note="按曼谷自然年统计，包含其他月结返佣及商品利润；不含69秀、79秀、泰拳、格兰岛一日游、东方嘉年华独立记录，退票回算原记录年份。" />
-
-          <section className="ranking-section">
-            <div className="section-heading">
-              <div><p className="eyebrow">{month}</p><h2>供应商盈利排行</h2></div>
-              <button className="text-action" type="button" onClick={() => setSupplierSheetOpen(true)}>管理供货商</button>
-            </div>
-            {monthlySupplierStats.length === 0 ? <div className="empty-card">本月还没有出票记录。<button type="button" onClick={openNewForm}>现在记第一张票</button></div> : (
-              <div className="rank-list">
-                {monthlySupplierStats.map((supplier, index) => (
-                  <div className="rank-row" key={supplier.supplierId}>
-                    <span className={`rank-number rank-${index + 1}`}>{index + 1}</span>
-                    <div className="rank-name"><strong>{supplier.supplierName}</strong><span>{quantityParts(summariseQuantities(ticketsInMonth(tickets, month).filter(ticket => ticket.supplierId === supplier.supplierId))).join(' · ')}</span></div>
-                    <strong className={supplier.profitThb >= 0 ? 'profit-value' : 'loss-value'}>{formatThb(supplier.profitThb)}</strong>
-                  </div>
-                ))}
-              </div>
-            )}
+          <section className="dashboard-actions" aria-label="首页快捷操作">
+            <button className="secondary-button full-width" type="button" onClick={() => setView('reports')}>查看完整报表、年度统计与导出</button>
           </section>
 
           {installPrompt && <button className="install-banner" type="button" onClick={() => void install()}><span>⇩</span> 添加到手机桌面，像 App 一样使用</button>}
@@ -1218,7 +1198,7 @@ export default function App() {
             : view === 'show79' ? <Show79View key={`show79:${financialAccountId}:${show79Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show79Draft?.accountId === financialAccountId ? show79Draft.input : undefined} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
               : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
                 : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
-        </MonthlyTicketsView></Suspense> : view === 'reports' ? <Suspense fallback={<DeferredPage label="报表" />}><ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} /></Suspense> : <>
+        </MonthlyTicketsView></Suspense> : view === 'reports' ? <Suspense fallback={<DeferredPage label="报表" />}><ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} onExportLedger={() => void exportTicketsToXlsx(mainTickets)} ledgerCount={activeTickets(mainTickets).length} /></Suspense> : <>
           <section className="records-heading">
             <div><p className="eyebrow">全部有效记录</p><h1>出票记录</h1></div>
             <div className="heading-actions"><button className="secondary-button small" type="button" onClick={() => setSupplierSheetOpen(true)}>供货商</button><button className="primary-button small" type="button" onClick={openNewForm}>＋ 新增</button></div>
@@ -1260,7 +1240,6 @@ export default function App() {
       {loginOpen && <LoginSheet onClose={() => setLoginOpen(false)} onSent={setToast} />}
       {conflictsOpen && <SyncConflictPanel records={syncConflicts} onClose={() => setConflictsOpen(false)} onResolve={resolveSyncConflict} />}
       {toast && <div className="toast" role="status">{toast}</div>}
-      {!monthlyView && view !== 'reports' && <button className="export-button" onClick={() => void exportTicketsToXlsx(mainTickets)} type="button" title="导出全部有效记录到 Excel">导出 Excel · {formatNumber(activeTickets(mainTickets).length)}</button>}
     </main>
   )
 }

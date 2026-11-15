@@ -103,7 +103,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
   </article>
 }
 
-export function ReportView({ tickets, suppliers, projects = [] }: { tickets: TicketRecord[]; suppliers: Supplier[]; projects?: Project[] }) {
+export function ReportView({ tickets, suppliers, projects = [], onExportLedger, ledgerCount }: { tickets: TicketRecord[]; suppliers: Supplier[]; projects?: Project[]; onExportLedger?: () => void; ledgerCount?: number }) {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
   const [query, setQuery] = useState<ReportQuery>(() => {
@@ -135,7 +135,7 @@ export function ReportView({ tickets, suppliers, projects = [] }: { tickets: Tic
   }
 
   return <>
-    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含独立账本</p><h1>格式化报表</h1></div><div className="heading-actions report-export-actions"><button className="secondary-button small" type="button" disabled={!result.report || exporting} onClick={() => void exportCurrentReport()}>{exporting ? '正在导出…' : '导出当前报表 Excel'}</button><button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></div></section>
+    <section className="records-heading report-screen-heading"><div><p className="eyebrow">在线预览 · 不含独立账本</p><h1>格式化报表</h1></div><div className="heading-actions report-export-actions"><button className="secondary-button small" type="button" disabled={!result.report || exporting} onClick={() => void exportCurrentReport()}>{exporting ? '正在导出…' : '导出当前报表 Excel'}</button>{onExportLedger && <button className="secondary-button small" type="button" onClick={onExportLedger}>导出主账本 Excel · {ledgerCount ?? 0}</button>}<button className="secondary-button small" type="button" disabled={!result.report} onClick={() => window.print()}>打印 / 保存 PDF</button></div></section>
     {exportError && <p className="form-error" role="alert">{exportError}</p>}
     <div className="report-quick-periods" role="group" aria-label="快捷报表日期"><button type="button" className="secondary-button small" aria-pressed={query.mode === 'day' && query.date === today} onClick={() => applyShortcut('today')}>今天</button><button type="button" className="secondary-button small" aria-pressed={query.mode === 'month' && query.month === currentMonth} onClick={() => applyShortcut('this-month')}>本月</button><button type="button" className="secondary-button small" aria-pressed={query.mode === 'month' && query.month === lastMonth} onClick={() => applyShortcut('last-month')}>上月</button></div>
     <section className="report-controls" aria-label="报表筛选">
