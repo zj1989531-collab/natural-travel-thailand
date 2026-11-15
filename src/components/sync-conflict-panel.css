@@ -37,7 +37,7 @@
 .sync-conflict-copy-fallback { margin: 16px 0; }
 .sync-conflict-copy-fallback label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; }
 .sync-conflict-copy-fallback textarea { box-sizing: border-box; width: 100%; min-height: 240px; border: 1px solid #b9cfc3; border-radius: 10px; padding: 12px; color: #203e31; background: #fff; font: inherit; font-size: 16px; line-height: 1.6; resize: vertical; }
-.sync-conflict-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 18px; padding: 14px 16px; border: 1px solid #ead9ad; border-radius: 14px; background: #fff8e7; color: #705a25; }
+.sync-conflict-banner { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(calc(100% - 32px), 760px); margin: 0 auto 18px; padding: 14px 16px; border: 1px solid #ead9ad; border-radius: 14px; background: #fff8e7; color: #705a25; }
 .sync-conflict-banner > div { min-width: 0; }
 .sync-conflict-banner strong { display: block; font-size: 14px; line-height: 1.5; }
 .sync-conflict-banner p { margin: 5px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
