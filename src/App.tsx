@@ -646,12 +646,15 @@ export default function App() {
     const epoch = accountEpochRef.current
     const [nextTickets, nextSuppliers, nextProjects, nextSettlements, nextConflicts] = await Promise.all([ledgerRepository.getTickets(), ledgerRepository.getSuppliers(), ledgerRepository.getProjects(), ledgerRepository.getShow79Settlements(), ledgerRepository.getSyncConflicts(true)])
     if (!mountedRef.current || epoch !== accountEpochRef.current) return
+    const unresolvedConflicts = nextConflicts.filter((row) => !row.resolvedAt)
+    if (unresolvedConflicts.length !== nextConflicts.length) await ledgerRepository.clearResolvedSyncConflicts()
+    if (!mountedRef.current || epoch !== accountEpochRef.current) return
     setTickets(nextTickets.map(ticketDisplay))
     setSuppliers(nextSuppliers)
     setProjects(nextProjects)
     setShow79Settlements(nextSettlements)
-    setSyncConflicts(nextConflicts)
-    return nextConflicts
+    setSyncConflicts(unresolvedConflicts)
+    return unresolvedConflicts
   }, [])
 
   syncRunnerRef.current = async () => {

@@ -691,6 +691,12 @@ export const ledgerRepository = {
     const owner = (await ownerContext(true))!
     await db.resolveSyncConflict(id, owner)
   },
+  async clearResolvedSyncConflicts() {
+    const owner = await ownerContext()
+    if (!owner) return
+    await db.clearResolvedSyncConflicts(owner)
+    assertCurrent(owner)
+  },
   async getCatalogueAliases() {
     const owner = await ownerContext()
     if (!owner) return { suppliers: [], projects: [] }

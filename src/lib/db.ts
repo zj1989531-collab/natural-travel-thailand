@@ -295,6 +295,16 @@ export const db = {
     } catch (error) { try { tx.abort() } catch { /* Already aborted. */ } await tx.done.catch(() => undefined); throw error }
   },
   async getSyncConflicts() { return (await getDb()).getAll('sync_conflicts') },
+  async clearResolvedSyncConflicts(owner: LedgerOwnerContext) {
+    const database = await getDb()
+    const tx = database.transaction(['settings', 'sync_conflicts'], 'readwrite')
+    try {
+      assertLedgerOwner(await tx.objectStore('settings').get('app'), owner)
+      const conflicts = await tx.objectStore('sync_conflicts').getAll()
+      for (const conflict of conflicts) if (conflict.userId === owner.userId && conflict.resolvedAt) await tx.objectStore('sync_conflicts').delete(conflict.id)
+      checkEpoch(owner, tx); await tx.done; checkEpoch(owner)
+    } catch (error) { try { tx.abort() } catch { /* Already aborted. */ } await tx.done.catch(() => undefined); throw error }
+  },
   async resolveSyncConflict(id: string, owner: LedgerOwnerContext) {
     const database = await getDb()
     const tx = database.transaction(['settings', 'sync_conflicts', 'tickets', 'ticket_refunds'], 'readwrite')
