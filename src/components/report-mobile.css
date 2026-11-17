@@ -37,7 +37,7 @@
   .report-quantity-table th:nth-child(2), .report-quantity-table td:nth-child(2), .report-quantity-table th:nth-child(3), .report-quantity-table td:nth-child(3) { width: 14%; }
   .report-quantity-table th:last-child, .report-quantity-table td:last-child { width: 47%; white-space: normal; }
   .report-quantity-table .report-number { white-space: normal; text-align: center; }
-  .report-quantity-table td.report-project-cell { padding-left: 10px; text-align: left; line-height: 1.5; }
+  .report-quantity-table td.report-project-cell { text-align: center; line-height: 1.5; }
   .report-count-metrics > div { padding: 11px 7px; }
   .report-count-metrics strong { font-size: 17px; }
 }
