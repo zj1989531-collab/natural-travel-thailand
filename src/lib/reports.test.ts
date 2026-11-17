@@ -53,7 +53,7 @@ describe('formatted ledger reports', () => {
   it('queries monthly-settlement project ticket quantities daily, monthly and cumulatively', () => {
     const daily = buildReport(records, query({ mode: 'day', projectName: '普通月结项目' }))
     expect(daily.quantity).toMatchObject({ recordCount: 1, peopleCount: 2, unknownCount: 0 })
-    expect(daily.quantity.days).toEqual([{ date: '2026-10-13', recordCount: 1, peopleCount: 2, unknownCount: 0 }])
+    expect(daily.quantity.days).toEqual([{ date: '2026-10-13', recordCount: 1, peopleCount: 2, unknownCount: 0, projects: ['普通月结项目'] }])
     expect(daily.summary.profitThb).toBe(0)
     expect(daily.monthlySummary.profitThb).toBe(100)
     expect(buildReport(records, query({ projectName: '普通月结项目' })).summary.profitThb).toBe(100)

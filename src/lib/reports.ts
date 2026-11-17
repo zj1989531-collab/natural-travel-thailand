@@ -77,10 +77,12 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
     itemDays.set(ticket.issueDate, row)
   }
   const itemQuantityDays = [...itemDays.values()]
-  const dailyQuantities = new Map<string, { date: string; recordCount: number; peopleCount: number; unknownCount: number }>()
+  const dailyQuantities = new Map<string, { date: string; recordCount: number; peopleCount: number; unknownCount: number; projects: string[] }>()
   for (const ticket of quantityRecords) {
-    const row = dailyQuantities.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, peopleCount: 0, unknownCount: 0 }
+    const row = dailyQuantities.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, peopleCount: 0, unknownCount: 0, projects: [] }
     row.recordCount++
+    const projectName = ticket.projectName?.trim() || '未分类项目'
+    if (!row.projects.includes(projectName)) row.projects.push(projectName)
     const people = getEffectivePersonCount(ticket)
     if (Number.isInteger(people) && (people ?? 0) > 0) row.peopleCount += people!
     else row.unknownCount++
