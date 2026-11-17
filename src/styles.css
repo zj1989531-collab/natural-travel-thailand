@@ -82,6 +82,21 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
 .report-table tbody tr:nth-child(even) { background: #fafcf9; }.report-table tr:last-child > * { border-bottom: 0; }
 .report-table .report-number, .report-table .report-money { text-align: right; white-space: nowrap; }
 .report-quantity-table th, .report-quantity-table td, .report-quantity-table .report-number { text-align: center; }
+@media (min-width: 700px) {
+  /* Desktop reports use one alignment system: every heading and its value
+     share a centered column, so browser zoom cannot make them look unrelated. */
+  .report-paper, .report-paper-heading, .report-totals > div, .report-count-metrics > div,
+  .report-quantity, .report-section, .report-paper .report-note, .report-paper .report-notice,
+  .report-paper .report-counts, .report-paper .report-empty, .report-footer { text-align: center; }
+  .report-meta { justify-content: center; }
+  .report-table th, .report-table td, .report-table .report-number, .report-table .report-money { text-align: center; vertical-align: middle; }
+  .report-table small { text-align: center; }
+  .report-record-table td:nth-child(3), .report-record-table .report-guest-name { text-align: center; }
+  .report-quantity-table { width: 100%; min-width: 0; table-layout: fixed; }
+  .report-quantity-table th:first-child, .report-quantity-table td:first-child { width: 32%; }
+  .report-quantity-table th:not(:first-child), .report-quantity-table td:not(:first-child) { width: 22.66%; }
+  .report-quantity-table th, .report-quantity-table td { vertical-align: middle; white-space: nowrap; }
+}
 .report-table .profit-value, .report-table .loss-value { font-size: inherit; }
 .report-table small { display: block; margin-top: 4px; color: #7c8780; font-size: 10px; line-height: 1.5; }
 .report-record-table td:nth-child(3) { min-width: 180px; max-width: 260px; overflow-wrap: anywhere; }.report-record-table td:first-child { white-space: nowrap; }
