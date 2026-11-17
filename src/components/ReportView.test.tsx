@@ -13,10 +13,10 @@ const query: ReportQuery = { mode: 'month', month: '2026-10', date: '2026-10-13'
 const render = (records: TicketRecord[], filter = query) => renderToStaticMarkup(<ReportPreview report={buildReport(records, filter)} supplierName="全部供货商" pendingCount={1} generatedAt="2026-10-13 22:00" />)
 
 describe('online formatted report preview', () => {
-  it('shows remaining ticket quantity and net profit after refund without leaking sales or costs', () => {
+  it('shows net ticket quantity and profit without exposing legacy refund details', () => {
     const html = render([{ ...record, refunds: [{ id: 'refund-test', userId: record.userId, ticketId: record.id, personCount: 1, isFull: false, refundRevenueThb: 650, returnedCostThb: 550, refundDate: '2026-10-14', refundTime: '10:00', note: '', cancelledAt: null, createdAt: record.createdAt, updatedAt: record.updatedAt, syncStatus: 'synced' }] }])
-    for (const text of ['门票 2 张', '已退1人', '฿50.00', '原出票日期']) expect(html).toContain(text)
-    for (const text of ['฿1,300.00', '฿1,250.00', '总成本', '总销售额']) expect(html).not.toContain(text)
+    for (const text of ['门票 2 张', '฿50.00']) expect(html).toContain(text)
+    for (const text of ['已退1人', '฿1,300.00', '฿1,250.00', '总成本', '总销售额']) expect(html).not.toContain(text)
   })
   it('renders a named report, period, supplier summary, details, totals and sync warning', () => {
     const html = render([record])
@@ -93,7 +93,7 @@ describe('online formatted report preview', () => {
 
   it('provides mobile record and supplier cards alongside print tables with the same accounting counts', () => {
     const html = render([record, { ...record, id: 'commission', entryMode: 'profit_only', manualProfitThb: 20, amountBasis: 'total' }])
-    for (const text of ['report-record-desktop', 'report-record-cards', 'report-supplier-desktop', 'report-supplier-cards', '报表订单口径', '账务记录数 2 · 有效订单数 1 · 退票单数 0', '仅录利润，不计人数／数量', '退票状态', '未退票', '备注：测试备注']) expect(html).toContain(text)
+    for (const text of ['report-record-desktop', 'report-record-cards', 'report-supplier-desktop', 'report-supplier-cards', '报表订单口径', '账务记录数 2 · 有效订单数 1', '仅录利润，不计人数／数量', '备注：测试备注']) expect(html).toContain(text)
     expect(html).not.toContain('总成本')
     expect(html).not.toContain('总代理售价')
   })

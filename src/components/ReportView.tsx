@@ -4,7 +4,7 @@ import { formatNumber, formatThb, getBangkokDate, getBangkokMonth, getBangkokTim
 import { buildReport, reportShortcutQuery, type LedgerReport, type ReportMode, type ReportQuery, type ReportShortcut } from '../lib/reports'
 import { activeTickets, getProfit, monthDateRange } from '../lib/stats'
 import { projectNames } from '../lib/project-selection'
-import { getEffectivePersonCount, getRefundState } from '../lib/refunds'
+import { getEffectivePersonCount } from '../lib/refunds'
 import { isItemQuantity, quantityLabels } from '../lib/quantity'
 import { quantityParts } from '../lib/effective-quantities'
 import { isIndependentLedgerProject } from '../lib/show79'
@@ -12,8 +12,8 @@ import { exportReportToXlsx } from '../lib/export'
 import { buildReportCounts } from '../lib/report-counts'
 import './report-mobile.css'
 
-const countDefinition = '账务记录数包含未退、已退订单及仅录利润记录；有效订单数包含未全部退票的门票、整单及商品订单，不含仅录利润；退票单数为当前存在有效退票的订单数，部分退票与全部退票均计，已撤销的退票不计。'
-const countsText = (counts: ReturnType<typeof buildReportCounts>) => `账务记录数 ${counts.accountingRecordCount} · 有效订单数 ${counts.effectiveOrderCount} · 退票单数 ${counts.refundedOrderCount}`
+const countDefinition = '账务记录数包含已录订单及仅录利润记录；有效订单数包含门票、整单及商品订单，不含仅录利润。'
+const countsText = (counts: ReturnType<typeof buildReportCounts>) => `账务记录数 ${counts.accountingRecordCount} · 有效订单数 ${counts.effectiveOrderCount}`
 
 function RecordTable({ records, caption }: { records: TicketRecord[]; caption: string }) {
   const totalProfit = records.reduce((sum, ticket) => sum + getProfit(ticket), 0)
@@ -24,12 +24,11 @@ function RecordTable({ records, caption }: { records: TicketRecord[]; caption: s
       <thead><tr><th scope="col">日期 / 时间</th><th scope="col">客户姓名</th><th scope="col">项目 / 供货商</th><th scope="col">人数 / 数量</th><th scope="col">利润</th></tr></thead>
       <tbody>{records.map((ticket) => {
         const profit = getProfit(ticket)
-        const refund = getRefundState(ticket)
         const people = getEffectivePersonCount(ticket)
         return <tr key={ticket.id}>
           <td>{ticket.issueDate}<small>{ticket.issueTime ? `${ticket.issueTime} 曼谷` : '时间未记录'}</small></td>
           <td className="report-guest-name">{ticket.guestName?.trim() || <span className="muted">未填写</span>}</td>
-          <td><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><small>{ticket.supplierName} · {ticket.entryMode === 'profit_only' ? '仅录利润' : ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计价` : '整单总额'}</small>{refund.active.length > 0 && <small>{refund.full ? '已全部退票' : `已退${refund.refundedPeople}${quantityLabels(ticket).unit}`} · 利润回算原出票日期</small>}{ticket.note && <small className="report-record-note">备注：{ticket.note}</small>}</td>
+          <td><strong>{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</strong><small>{ticket.supplierName} · {ticket.entryMode === 'profit_only' ? '仅录利润' : ticket.amountBasis === 'per_person' ? `按${quantityLabels(ticket).label}计价` : '整单总额'}</small>{ticket.note && <small className="report-record-note">备注：{ticket.note}</small>}</td>
           <td className="report-number">{ticket.entryMode === 'profit_only' || people == null ? '—' : `${formatNumber(people)}${isItemQuantity(ticket) ? ' 件' : ' 人'}`}</td>
           <td className={`report-money ${profit < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(profit)}</td>
         </tr>
@@ -38,15 +37,13 @@ function RecordTable({ records, caption }: { records: TicketRecord[]; caption: s
     </table>
   </div><div className="report-record-cards" role="list" aria-label={caption}>
     {records.map((ticket) => {
-      const refund = getRefundState(ticket)
       const people = getEffectivePersonCount(ticket)
       const profit = getProfit(ticket)
       return <article className="report-record-card" role="listitem" key={ticket.id}>
         <div className="report-card-date"><span>{ticket.issueDate}</span><span>{ticket.issueTime ? `${ticket.issueTime} 曼谷` : '时间未记录'}</span></div>
         <div className="report-card-heading"><h4>{ticket.guestName?.trim() || <span className="muted">客户姓名未填写</span>}</h4><div><span>利润</span><strong className={profit < 0 ? 'loss-value' : 'profit-value'}>{formatThb(profit)}</strong></div></div>
         <p className="report-card-project">{ticket.projectName || '未分类项目'}{ticket.subItemName ? ` · ${ticket.subItemName}` : ''}</p>
-        <dl><div><dt>供货商</dt><dd>{ticket.supplierName}</dd></div><div><dt>{isItemQuantity(ticket) ? '有效数量' : '有效人数'}</dt><dd>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数／数量' : people == null ? '未填写' : `${formatNumber(people)} ${isItemQuantity(ticket) ? '件' : '人'}`}</dd></div><div><dt>退票状态</dt><dd>{refund.full ? '已全部退票' : refund.active.length ? `部分退票 · 已退${refund.refundedPeople}${quantityLabels(ticket).unit}` : '未退票'}</dd></div></dl>
-        {refund.active.length > 0 && <p className="report-card-note">利润回算原出票日期</p>}
+        <dl><div><dt>供货商</dt><dd>{ticket.supplierName}</dd></div><div><dt>{isItemQuantity(ticket) ? '有效数量' : '有效人数'}</dt><dd>{ticket.entryMode === 'profit_only' ? '仅录利润，不计人数／数量' : people == null ? '未填写' : `${formatNumber(people)} ${isItemQuantity(ticket) ? '件' : '人'}`}</dd></div></dl>
         {ticket.note && <p className="report-card-note">备注：{ticket.note}</p>}
       </article>
     })}
@@ -68,7 +65,7 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     <div className="report-totals">
       <div className={report.summary.profitThb < 0 ? 'report-loss' : 'report-profit'}><span>总利润</span><strong>{formatThb(report.summary.profitThb)}</strong></div>
     </div>
-    <div className="report-count-metrics" aria-label="报表订单口径"><div><span>账务记录数</span><strong>{report.counts.accountingRecordCount} 条</strong></div><div><span>有效订单数</span><strong>{report.counts.effectiveOrderCount} 单</strong></div><div><span>退票单数</span><strong>{report.counts.refundedOrderCount} 单</strong></div></div>
+    <div className="report-count-metrics" aria-label="报表订单口径"><div><span>账务记录数</span><strong>{report.counts.accountingRecordCount} 条</strong></div><div><span>有效订单数</span><strong>{report.counts.effectiveOrderCount} 单</strong></div></div>
     <p className="report-note report-count-definition">{countDefinition}{report.mode === 'day' ? '本组数字不含下方另列的月结记录。' : ''}</p>
     {!itemsOnly && <section className="report-quantity" aria-label="项目出票数量查询">
       <h3>项目出票数量查询</h3>
@@ -91,15 +88,15 @@ export function ReportPreview({ report, supplierName, pendingCount = 0, generate
     <section className="report-section"><h3>供货商汇总 · 按利润排序</h3>
       {report.supplierStats.length === 0 ? <p className="report-empty">当前范围没有计入本报表的记录。</p> : <><div className="report-table-scroll report-supplier-desktop" role="region" aria-label="供货商汇总" tabIndex={0}>
         <table className="report-table report-supplier-table"><caption>供货商汇总</caption>
-          <thead><tr><th scope="col">供货商</th><th scope="col">账务记录数</th><th scope="col">有效订单数</th><th scope="col">退票单数</th><th scope="col">利润</th></tr></thead>
-          <tbody>{report.supplierStats.map((supplier) => <tr key={supplier.supplierId}><th scope="row">{supplier.supplierName}</th><td className="report-number">{supplier.accountingRecordCount}</td><td className="report-number">{supplier.effectiveOrderCount}</td><td className="report-number">{supplier.refundedOrderCount}</td><td className={`report-money ${supplier.profitThb < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(supplier.profitThb)}</td></tr>)}</tbody>
-          <tfoot><tr><th scope="row">合计</th><td className="report-number">{report.counts.accountingRecordCount}</td><td className="report-number">{report.counts.effectiveOrderCount}</td><td className="report-number">{report.counts.refundedOrderCount}</td><td className="report-money">{formatThb(report.summary.profitThb)}</td></tr></tfoot>
+          <thead><tr><th scope="col">供货商</th><th scope="col">账务记录数</th><th scope="col">有效订单数</th><th scope="col">利润</th></tr></thead>
+          <tbody>{report.supplierStats.map((supplier) => <tr key={supplier.supplierId}><th scope="row">{supplier.supplierName}</th><td className="report-number">{supplier.accountingRecordCount}</td><td className="report-number">{supplier.effectiveOrderCount}</td><td className={`report-money ${supplier.profitThb < 0 ? 'loss-value' : 'profit-value'}`}>{formatThb(supplier.profitThb)}</td></tr>)}</tbody>
+          <tfoot><tr><th scope="row">合计</th><td className="report-number">{report.counts.accountingRecordCount}</td><td className="report-number">{report.counts.effectiveOrderCount}</td><td className="report-money">{formatThb(report.summary.profitThb)}</td></tr></tfoot>
         </table>
-      </div><div className="report-supplier-cards" role="list" aria-label="供货商汇总">{report.supplierStats.map((supplier) => <article className="report-supplier-card" role="listitem" key={supplier.supplierId}><div><strong>{supplier.supplierName}</strong><strong className={supplier.profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(supplier.profitThb)}</strong></div><dl><div><dt>账务记录数</dt><dd>{supplier.accountingRecordCount} 条</dd></div><div><dt>有效订单数</dt><dd>{supplier.effectiveOrderCount} 单</dd></div><div><dt>退票单数</dt><dd>{supplier.refundedOrderCount} 单</dd></div></dl></article>)}<div className="report-card-total"><span>{countsText(report.counts)}</span><strong>利润合计 {formatThb(report.summary.profitThb)}</strong></div></div></>}
+      </div><div className="report-supplier-cards" role="list" aria-label="供货商汇总">{report.supplierStats.map((supplier) => <article className="report-supplier-card" role="listitem" key={supplier.supplierId}><div><strong>{supplier.supplierName}</strong><strong className={supplier.profitThb < 0 ? 'loss-value' : 'profit-value'}>{formatThb(supplier.profitThb)}</strong></div><dl><div><dt>账务记录数</dt><dd>{supplier.accountingRecordCount} 条</dd></div><div><dt>有效订单数</dt><dd>{supplier.effectiveOrderCount} 单</dd></div></dl></article>)}<div className="report-card-total"><span>{countsText(report.counts)}</span><strong>利润合计 {formatThb(report.summary.profitThb)}</strong></div></div></>}
     </section>
     <section className="report-section"><h3>记录明细</h3>{unnamedCount > 0 && <p className="report-note">有 {unnamedCount} 条记录未填写客户姓名。</p>}{report.records.length > 0 ? <RecordTable records={report.records} caption="报表记录明细" /> : <p className="report-empty">没有符合当前报表条件的记录。</p>}</section>
     {report.mode === 'day' && report.monthlyRecords.length > 0 && <section className="report-section report-monthly-section"><h3>月结项目另列 · 不计入日报合计</h3><p className="report-note">{countsText(report.monthlyCounts)} · 利润 {formatThb(report.monthlySummary.profitThb)}，包含在对应月报中。</p><RecordTable records={report.monthlyRecords} caption="当日月结记录（不计入日报合计）" /></section>}
-    <footer className="report-footer">按原出票日期统计，退票回算原日/月 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
+    <footer className="report-footer">按原出票日期统计 · 已排除删除记录 · 仅录利润项目不计出票数量 · 修改账本后报表自动更新</footer>
   </article>
 }
 

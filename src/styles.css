@@ -90,6 +90,7 @@ h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
   .report-paper .report-counts, .report-paper .report-empty, .report-footer { text-align: center; }
   .report-meta { justify-content: center; }
   .report-table th, .report-table td, .report-table .report-number, .report-table .report-money { text-align: center; vertical-align: middle; }
+  .report-record-table tfoot th { text-align: left; }
   .report-table small { text-align: center; }
   .report-record-table td:nth-child(3), .report-record-table .report-guest-name { text-align: center; }
   .report-quantity-table { width: 100%; min-width: 0; table-layout: fixed; }
