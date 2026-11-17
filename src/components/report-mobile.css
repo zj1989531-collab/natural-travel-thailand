@@ -29,10 +29,15 @@
   .report-supplier-card > div { display: flex; align-items: start; justify-content: space-between; gap: 12px; font-size: 14px; line-height: 1.5; }
   .report-supplier-card dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; font-size: 11px; }
   .report-supplier-card dd { margin-top: 5px; font-size: 13px; font-weight: 700; }
+  /* Keep the same column meaning as desktop: short numeric columns and a
+     generous, readable name column. This avoids a name being mistaken for a number. */
   .report-quantity-table { min-width: 0; table-layout: fixed; font-size: 11px; }
-  .report-quantity-table th, .report-quantity-table td { padding: 9px 4px; overflow-wrap: anywhere; }
-  .report-quantity-table th:first-child { width: 34%; }
-  .report-quantity-table .report-number { white-space: normal; }
+  .report-quantity-table th, .report-quantity-table td { padding: 9px 4px; overflow-wrap: anywhere; vertical-align: middle; }
+  .report-quantity-table th:first-child, .report-quantity-table td:first-child { width: 25%; }
+  .report-quantity-table th:nth-child(2), .report-quantity-table td:nth-child(2), .report-quantity-table th:nth-child(3), .report-quantity-table td:nth-child(3) { width: 14%; }
+  .report-quantity-table th:last-child, .report-quantity-table td:last-child { width: 47%; white-space: normal; }
+  .report-quantity-table .report-number { white-space: normal; text-align: center; }
+  .report-quantity-table td.report-project-cell { padding-left: 10px; text-align: left; line-height: 1.5; }
   .report-count-metrics > div { padding: 11px 7px; }
   .report-count-metrics strong { font-size: 17px; }
 }
