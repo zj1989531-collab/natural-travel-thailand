@@ -67,10 +67,12 @@ export const buildReport = (tickets: TicketRecord[], query: ReportQuery) => {
   // A manual commission is not a ticket; missing headcount is never guessed.
   const quantityRecords = selected.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && !isItemQuantity(ticket))
   const itemRecords = selected.filter((ticket) => ticket.entryMode !== 'profit_only' && !getRefundState(ticket).full && isItemQuantity(ticket))
-  const itemDays = new Map<string, { date: string; recordCount: number; quantityCount: number; unknownCount: number }>()
+  const itemDays = new Map<string, { date: string; recordCount: number; quantityCount: number; unknownCount: number; items: string[] }>()
   for (const ticket of itemRecords) {
-    const row = itemDays.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, quantityCount: 0, unknownCount: 0 }
+    const row = itemDays.get(ticket.issueDate) ?? { date: ticket.issueDate, recordCount: 0, quantityCount: 0, unknownCount: 0, items: [] }
     row.recordCount++
+    const itemName = ticket.subItemName?.trim() || ticket.projectName?.trim() || '未命名商品'
+    if (!row.items.includes(itemName)) row.items.push(itemName)
     const count = getEffectivePersonCount(ticket)
     if (Number.isInteger(count) && (count ?? 0) > 0) row.quantityCount += count!
     else row.unknownCount++

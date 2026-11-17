@@ -192,7 +192,7 @@ describe('formatted ledger reports', () => {
     expect(report.summary.profitThb).toBe(490)
     expect(report.summary.count).toBe(4)
     expect(report.quantity).toMatchObject({ recordCount: 3, peopleCount: 8 })
-    expect(report.itemQuantity).toMatchObject({ recordCount: 1, quantityCount: 2 })
+    expect(report.itemQuantity).toMatchObject({ recordCount: 1, quantityCount: 2, days: [{ items: ['普通门票'] }] })
     expect(report.supplierStats).toMatchObject([
       { supplierId: 'supplier-a', accountingRecordCount: 4, effectiveOrderCount: 3, refundedOrderCount: 2, count: 3, profitThb: 400 },
       { supplierId: 'supplier-b', accountingRecordCount: 2, effectiveOrderCount: 1, refundedOrderCount: 0, count: 1, profitThb: 90 }
