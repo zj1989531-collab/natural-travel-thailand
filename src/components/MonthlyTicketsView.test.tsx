@@ -6,7 +6,7 @@ describe('月结票二级表单通道', () => {
   it('shows every monthly channel and a clear return to the homepage', () => {
     const html = renderToStaticMarkup(<MonthlyTicketsView onSelect={() => {}} onBack={() => {}} />)
     for (const label of ['返回首页', '月结票', '69秀', '79秀', '泰拳', '格兰岛一日游', '东方嘉年华', '不计入主账本日报、月报、年报及排行']) expect(html).toContain(label)
-    for (const description of ['独立订单与月度统计', '订单、确认单与 40% / 60% 分账', '亚洲人／欧美人套餐', '独立月结订单']) expect(html).toContain(description)
+    for (const description of ['订单、月度统计与 50% / 50% 分账', '订单、确认单与 40% / 60% 分账', '亚洲人／欧美人套餐与 50% / 50% 分账', '独立订单与 50% / 50% 分账', '独立月结订单']) expect(html).toContain(description)
     expect(html.match(/aria-pressed="false"/g)).toHaveLength(5)
     expect(html).not.toContain('id="monthly-ticket-form"')
   })

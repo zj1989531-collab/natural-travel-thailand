@@ -28,6 +28,7 @@ const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName
 export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onManageProjects }: Props) {
   const title = kind === 'boxing' ? '泰拳' : kind === 'kohlarn' ? '格兰岛一日游' : kind === 'carnival' ? '东方嘉年华' : '69秀'
   const requiresPackage = kind === 'kohlarn' || kind === 'carnival'
+  const hasMonthlySplit = kind === 'show69' || kind === 'boxing' || kind === 'kohlarn'
   const needsFrozenMonthlySnapshot = requiresPackage
   const commandHelpId = `${kind}-command-help`
   const [input, setInput] = useState<Show69RecordInput>(() => initialInput ? { ...initialInput } : emptyInput())
@@ -199,13 +200,15 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     return { dayRecords, records, dayPeople: people(dayRecords), monthPeople: people(records), dayUnknown: unknown(dayRecords), monthUnknown: unknown(records), profitThb, error: '' }
   }, [tickets, kind, date, month])
   const records = (dayOnly ? report.dayRecords : report.records)?.filter(ticket => !search.trim() || `${ticket.guestName ?? ''} ${ticket.note}`.toLowerCase().includes(search.trim().toLowerCase())) ?? []
+  const xiaopangShareThb = Math.round(report.profitThb * 50) / 100
+  const partnersShareThb = Math.round((report.profitThb - xiaopangShareThb) * 100) / 100
 
   return <section className="show79-view show69-view">
     <div className="records-heading"><div><p className="eyebrow">独立账本 · THB · 曼谷时间</p><h1>{title}</h1></div>{onManageProjects && <button type="button" className="secondary-button small" onClick={onManageProjects}>供货商 / 套餐</button>}</div>
     <p className="sheet-copy">{title}的订单、人数和利润独立统计，不计入主账本日报、月报、年报及排行。</p>
     <div className="show79-filters"><label>查询日期<input type="date" value={date} onChange={event => setDate(event.target.value)} /></label><label>报表月份<input type="month" value={month} onChange={event => setMonth(event.target.value)} /></label></div>
     {report.error && <p role="alert" className="form-error">{report.error}</p>}
-    {!report.error && <div className="show79-metrics" aria-label={`${title}统计`}><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replaceAll('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数</span><strong>{report.records.length} 单</strong></div></div>}
+    {!report.error && <><div className="show79-metrics" aria-label={`${title}统计`}><div><span>当日人数 · {date.replaceAll('-', '/')}</span><strong>{report.dayPeople} 人</strong>{report.dayUnknown > 0 && <small>另有{report.dayUnknown}笔人数未填</small>}</div><div><span>月人数 · {month.replaceAll('-', '/')}</span><strong>{report.monthPeople} 人</strong>{report.monthUnknown > 0 && <small>另有{report.monthUnknown}笔人数未填</small>}</div><div><span>月实际利润</span><strong>{formatThb(report.profitThb)}</strong></div><div><span>月订单数</span><strong>{report.records.length} 单</strong></div></div>{hasMonthlySplit && <section className="show79-split" aria-label={`${title}月度分账`}><h2>月度分账</h2><p>{month} · 按实际利润分成</p><div><span>小胖 · 50%</span><strong>{formatThb(xiaopangShareThb)}</strong></div><div><span>大狗二狗合计 · 50%</span><strong>{formatThb(partnersShareThb)}</strong></div><small>按当月净利润统一计算，保留两位小数；退票回算原记录月份。此处为分账计算，不会自动转账。</small></section>}</>}
     <section className="show79-entry"><h2>{editing ? `编辑${title}订单` : `新增${title}订单`}</h2>
       {!editing && <div className="show79-command">
         <label>一键填写信息<textarea ref={commandRef} rows={4} disabled={busy || Boolean(pendingSave)} value={command} aria-invalid={Boolean(commandError)} aria-describedby={commandHelpId} placeholder={`${title}记录格式\n日期：10月23\n名字（所有人）：韩廷富,邵建华,江华兴\n人数：3${kind === 'boxing' ? '\n票种：亚洲人' : requiresPackage ? '\n套餐：C' : ''}`} onChange={event => { cancelPaste(); setCommand(event.target.value); setCommandError(''); setCommandMessage('') }} onPaste={event => {

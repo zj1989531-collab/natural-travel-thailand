@@ -12,10 +12,11 @@ const record = (overrides: Partial<TicketRecord> = {}): TicketRecord => {
 const render = (tickets: TicketRecord[], kind: 'show69' | 'boxing' = 'show69') => renderToStaticMarkup(<Show69View kind={kind} tickets={tickets} onSave={async () => tickets[0]} onDelete={async () => {}} />)
 
 describe('69秀独立记录页面', () => {
-  it('provides record fields and automatic read-only prices without ticket generation or settlement', () => {
+  it('provides record fields, prices, and the agreed monthly split without ticket generation', () => {
     const html = render([record()])
     for (const value of ['69秀', '一键填写信息', '日期', '名字（所有人）', '人数', '保存记录', '不计入主账本日报', '韩廷富,邵建华,江华兴', '3 人', '当日人数', '月人数', '月实际利润', '月订单数']) expect(html).toContain(value)
-    for (const value of ['确认单', '生成图片', '打印', '月度分账', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
+    for (const value of ['确认单', '生成图片', '打印', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
+    for (const value of ['月度分账', '小胖 · 50%', '大狗二狗合计 · 50%']) expect(html).toContain(value)
     expect(html).toContain('自动匹配价格')
     expect(html).toContain('净售价 ' + formatThb(9999))
     expect(html).toContain('净成本 ' + formatThb(8888))
@@ -85,6 +86,7 @@ describe('泰拳独立记录页面', () => {
     for (const value of ['<h1>泰拳</h1>', '新增泰拳订单', '泰拳记录格式', '泰拳客户甲,泰拳客户乙', '2 人', '月订单数', '不计入主账本日报']) expect(html).toContain(value)
     for (const value of ['69秀', '79秀', '六九客户', '七九客户', '已删除泰拳客户', '其他月份泰拳客户', '确认单', '内部供应商不可展示', '内部财务备注不可展示']) expect(html).not.toContain(value)
     expect(html).toContain('aria-describedby="boxing-command-help"')
+    expect(html).toContain('小胖 · 50%')
   })
 
   it('prefills the shared form from a pasted boxing template without changing its names or count', () => {
@@ -109,6 +111,7 @@ describe('独立月结项目页面', () => {
     const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
     for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数']) expect(html).toContain(value)
     expect(html).not.toContain('计入所属月报和年报')
+    if (kind === 'kohlarn') expect(html).toContain('小胖 · 50%')
   })
 })
 
