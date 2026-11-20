@@ -109,7 +109,9 @@ describe('独立月结项目页面', () => {
   ])('uses the same paste-first monthly form and package safeguards for independent $title ledger', ({ kind, title, name, subItemName, agentPriceThb, costThb }) => {
     const monthlyProject = project({ id: kind, name, normalizedName: name, subItemName, normalizedSubItemName: subItemName, defaultAgentPriceThb: agentPriceThb, defaultCostThb: costThb })
     const html = renderToStaticMarkup(<Show69View kind={kind} tickets={[]} projects={[monthlyProject]} initialInput={{ date: getBangkokDate(), guestName: '向绍平', people: 1, projectId: kind }} onSave={async () => record({ projectName: name, subItemName })} onDelete={async () => {}} />)
-    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', '价格套餐：星光旅行社', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数']) expect(html).toContain(value)
+    for (const value of [title, '一键填写信息', '日期', '名字（所有人）', '人数', '独立账本 · THB', '不计入主账本日报、月报、年报及排行', '请写明一个套餐', '套餐', subItemName, formatThb(agentPriceThb), formatThb(costThb), '月订单数']) expect(html).toContain(value)
+    if (kind === 'kohlarn') for (const value of ['套餐分配', '该套餐人数', '＋ 添加套餐', '不同套餐的人数相加必须等于订单总人数']) expect(html).toContain(value)
+    else expect(html).toContain('价格套餐：星光旅行社')
     expect(html).not.toContain('计入所属月报和年报')
     if (kind === 'kohlarn') expect(html).toContain('小胖 · 50%')
   })

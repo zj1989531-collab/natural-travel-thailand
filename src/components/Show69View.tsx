@@ -18,14 +18,16 @@ interface Props {
   projects?: Project[]
   tickets: TicketRecord[]
   onSave: (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => Promise<TicketRecord>
+  onSavePackageAllocations?: (input: Show69RecordInput, allocations: PackageAllocation[], operationIds: string[]) => Promise<TicketRecord>
   onDelete: (ticket: TicketRecord) => Promise<void>
   onManageProjects?: () => void
 }
 
-type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string; snapshot?: TicketInput }
+export type PackageAllocation = { projectId: string; people: number }
+type SaveOperation = { input: Show69RecordInput; existing?: TicketRecord; operationId?: string; snapshot?: TicketInput; allocations?: PackageAllocation[]; operationIds?: string[] }
 const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName: '', people: 1 })
 
-export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onDelete, onManageProjects }: Props) {
+export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onSavePackageAllocations, onDelete, onManageProjects }: Props) {
   const title = kind === 'boxing' ? '泰拳' : kind === 'kohlarn' ? '格兰岛一日游' : kind === 'carnival' ? '东方嘉年华' : '69秀'
   const requiresPackage = kind === 'kohlarn' || kind === 'carnival'
   const hasMonthlySplit = kind === 'show69' || kind === 'boxing' || kind === 'kohlarn'
@@ -46,6 +48,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
   const [date, setDate] = useState(getBangkokDate)
   const [dayOnly, setDayOnly] = useState(false)
   const [search, setSearch] = useState('')
+  const [allocations, setAllocations] = useState<PackageAllocation[]>(() => kind === 'kohlarn' ? [{ projectId: '', people: 1 }] : [])
   const mountedRef = useRef(true)
   const accountRef = useRef({ accountId, kind })
   const accountEpochRef = useRef(0)
@@ -55,12 +58,12 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
   const operationRef = useRef<SaveOperation | null>(null)
   const commandRef = useRef<HTMLTextAreaElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const latest = useRef({ tickets, onSave, onDelete, accountId, kind })
-  latest.current = { tickets, onSave, onDelete, accountId, kind }
+  const latest = useRef({ tickets, onSave, onSavePackageAllocations, onDelete, accountId, kind })
+  latest.current = { tickets, onSave, onSavePackageAllocations, onDelete, accountId, kind }
   const busy = saving || deleting
   const pricingOptions = useMemo(() => editing ? [] : monthlyPricingOptions(kind, projects, input.boxingCategory), [editing, kind, projects, input.boxingCategory])
   const pricingResult = useMemo(() => {
-    if (editing || kind === 'boxing' && !input.boxingCategory) return { pricing: undefined, error: '' }
+    if (editing || kind === 'kohlarn' || kind === 'boxing' && !input.boxingCategory) return { pricing: undefined, error: '' }
     try { return { pricing: resolveMonthlyPricing(kind, input, projects), error: '' } }
     catch (failure) { return { pricing: undefined, error: failure instanceof Error ? failure.message : '请核对所选价格套餐。' } }
   }, [editing, kind, input, projects])
@@ -84,7 +87,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     mutationLock.current = false; pasteLock.current = false; operationRef.current = null
     setInput(emptyInput()); setEditing(undefined); setCommand(''); setCommandError(''); setCommandMessage('')
     setError(''); setMessage(''); setSaving(false); setDeleting(false); setPasting(false); setPendingSave(null)
-    setDayOnly(false); setMonth(getBangkokMonth()); setDate(getBangkokDate()); setSearch('')
+    setDayOnly(false); setMonth(getBangkokMonth()); setDate(getBangkokDate()); setSearch(''); setAllocations(kind === 'kohlarn' ? [{ projectId: '', people: 1 }] : [])
   }, [accountId, kind])
 
   const isCurrent = (epoch: number, owner: string | undefined) => mountedRef.current && epoch === accountEpochRef.current && latest.current.accountId === owner && latest.current.kind === kind
@@ -142,7 +145,9 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     const owner = latest.current.accountId
     mutationLock.current = true; setSaving(true); setError(''); setMessage('')
     try {
-      const saved = await latest.current.onSave(operation.input, operation.existing, operation.operationId, operation.snapshot)
+      const saved = operation.allocations
+        ? await latest.current.onSavePackageAllocations!(operation.input, operation.allocations, operation.operationIds!)
+        : await latest.current.onSave(operation.input, operation.existing, operation.operationId, operation.snapshot)
       if (!isCurrent(epoch, owner)) return
       clearEntry(); setMonth(saved.issueDate.slice(0, 7)); setDate(saved.issueDate); setDayOnly(false); setSearch('')
       setMessage(operation.existing ? `${title}记录已更新。` : `${title}记录已保存，不计入主账本报表。`)
@@ -160,6 +165,15 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
     setError(''); setMessage('')
     try {
       validateShow69Record(input)
+      if (kind === 'kohlarn' && !editing) {
+        if (!onSavePackageAllocations) throw new Error('格兰岛套餐分配暂不可用，请刷新后重试。')
+        if (!allocations.length || allocations.some(row => !row.projectId || !isValidPersonCount(row.people))) throw new Error('请为每一行选择套餐并填写有效人数。')
+        if (allocations.reduce((sum, row) => sum + row.people, 0) !== input.people) throw new Error('各套餐人数合计必须等于订单总人数。')
+        const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim() }, allocations: allocations.map(row => ({ ...row })), operationIds: allocations.map(() => createId()) }
+        operationRef.current = operation
+        await runSave(operation)
+        return
+      }
       const matched = editing ? undefined : resolveMonthlyPricing(kind, input, projects)
       const snapshot = needsFrozenMonthlySnapshot && !editing ? createMonthlyTicketSnapshot(input, matched!, getBangkokTime()) : undefined
       const operation: SaveOperation = { input: { ...input, guestName: input.guestName.trim(), ...(!editing ? { projectId: matched?.project?.id, boxingCategory: matched?.boxingCategory } : {}) }, existing: editing, operationId: editing ? undefined : createId(), snapshot }
@@ -202,6 +216,8 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
   const records = (dayOnly ? report.dayRecords : report.records)?.filter(ticket => !search.trim() || `${ticket.guestName ?? ''} ${ticket.note}`.toLowerCase().includes(search.trim().toLowerCase())) ?? []
   const xiaopangShareThb = Math.round(report.profitThb * 50) / 100
   const partnersShareThb = Math.round((report.profitThb - xiaopangShareThb) * 100) / 100
+  const allocationTotal = allocations.reduce((sum, row) => sum + (Number.isFinite(row.people) ? row.people : 0), 0)
+  const updateAllocation = (index: number, update: Partial<PackageAllocation>) => setAllocations(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...update } : row))
 
   return <section className="show79-view show69-view">
     <div className="records-heading"><div><p className="eyebrow">独立账本 · THB · 曼谷时间</p><h1>{title}</h1></div>{onManageProjects && <button type="button" className="secondary-button small" onClick={onManageProjects}>供货商 / 套餐</button>}</div>
@@ -231,8 +247,8 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
           {kind === 'boxing' && (editing ? <p className="sheet-copy">票种：{categoryLabel(boxingCategoryForTicket(editing))} · 保留原记录</p> : <label>票种<select required value={input.boxingCategory ?? ''} onChange={event => {
             cancelPaste(); setInput(current => ({ ...current, boxingCategory: (event.target.value || undefined) as Show69RecordInput['boxingCategory'], projectId: undefined })); setError(''); setMessage('')
           }}><option value="" disabled>请选择亚洲人或欧美人</option><option value="asian">亚洲人</option><option value="western">欧美人</option></select></label>)}
-          {!editing && (kind !== 'boxing' || input.boxingCategory) && pricingOptions.length > 1 && <label>{requiresPackage ? '套餐' : '供货商套餐'}<select required value={selectedProjectId} onChange={event => update('projectId', event.target.value || undefined)}><option value="" disabled>请选择本次价格套餐</option>{pricingOptions.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name}{project.subItemName ? ` · ${project.subItemName}` : ''}</option>)}</select></label>}
-          {editing ? <p className="sheet-copy">保留原记录的套餐、金额与计价方式，仅修改日期、姓名和人数。</p> : pricing?.project && <p className="sheet-copy">价格套餐：{pricing.project.supplierName} · {pricing.project.name}{pricing.project.subItemName ? ` · ${pricing.project.subItemName}` : ''}</p>}
+          {kind === 'kohlarn' && !editing ? <section className="show69-pricing" aria-label="格兰岛套餐分配"><p>套餐分配：合计 {allocationTotal} / {Number.isFinite(input.people) ? input.people : 0} 人</p>{allocations.map((row, index) => <div className="form-grid" key={index}><label>套餐<select required value={row.projectId} onChange={event => updateAllocation(index, { projectId: event.target.value })}><option value="" disabled>请选择套餐</option>{pricingOptions.map(project => <option key={project.id} value={project.id}>{project.subItemName || project.name} · 售价 {formatThb(project.defaultAgentPriceThb)} · 成本 {formatThb(project.defaultCostThb)} / 人</option>)}</select></label><label>该套餐人数<input type="number" inputMode="numeric" min="1" max={MAX_PERSON_COUNT} step="1" value={Number.isFinite(row.people) ? row.people : ''} onChange={event => updateAllocation(index, { people: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /></label><button type="button" className="text-action" disabled={allocations.length === 1} onClick={() => setAllocations(current => current.filter((_, rowIndex) => rowIndex !== index))}>删除此套餐</button></div>)}<button type="button" className="secondary-button" onClick={() => setAllocations(current => [...current, { projectId: '', people: 1 }])}>＋ 添加套餐</button><p className="sheet-copy">可只填写一个联系人姓名；不同套餐的人数相加必须等于订单总人数。</p></section> : !editing && (kind !== 'boxing' || input.boxingCategory) && pricingOptions.length > 1 && <label>{requiresPackage ? '套餐' : '供货商套餐'}<select required value={selectedProjectId} onChange={event => update('projectId', event.target.value || undefined)}><option value="" disabled>请选择本次价格套餐</option>{pricingOptions.map(project => <option key={project.id} value={project.id}>{project.supplierName} · {project.name}{project.subItemName ? ` · ${project.subItemName}` : ''}</option>)}</select></label>}
+          {editing ? <p className="sheet-copy">保留原记录的套餐、金额与计价方式，仅修改日期、姓名和人数。</p> : kind !== 'kohlarn' && pricing?.project && <p className="sheet-copy">价格套餐：{pricing.project.supplierName} · {pricing.project.name}{pricing.project.subItemName ? ` · ${pricing.project.subItemName}` : ''}</p>}
           {kind === 'boxing' && !editing && !input.boxingCategory && <p className="sheet-copy" role="status">请选择亚洲人或欧美人票种，系统将自动带入对应价格。</p>}
           {pricingResult.error && <p className="form-error" role="alert">{pricingResult.error}</p>}
           {pricingResult.error && invalidProjectSelection && <button type="button" className="secondary-button" onClick={() => update('projectId', undefined)}>重新匹配价格</button>}

@@ -12,6 +12,7 @@ import { SummaryPanel } from './components/SummaryPanel'
 import { useBangkokDate } from './lib/bangkok-clock'
 import { BottomNavigation } from './components/BottomNavigation'
 import { isShow69Project, type Show69RecordInput } from './lib/show69'
+import type { PackageAllocation } from './components/Show69View'
 import { isBoxingProject } from './lib/boxing'
 import { boxingCategoryForTicket, resolveMonthlyPricing } from './lib/monthly-pricing'
 import { createMonthlyTicketSnapshot } from './lib/monthly-ticket-snapshot'
@@ -1036,6 +1037,26 @@ export default function App() {
     return saved
   }
   const saveKohLarn = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveIndependentMonthlyRecord('kohlarn', input, existing, operationId, snapshot)
+  const saveKohLarnAllocations = async (input: Show69RecordInput, allocations: PackageAllocation[], operationIds: string[]): Promise<TicketRecord> => {
+    requireCloudLogin()
+    if (allocations.length !== operationIds.length) throw new Error('套餐保存编号不完整，请重新填写后保存。')
+    const epoch = accountEpochRef.current
+    const saved: TicketRecord[] = []
+    for (let index = 0; index < allocations.length; index++) {
+      const allocation = allocations[index]
+      const allocationInput = { ...input, people: allocation.people, projectId: allocation.projectId }
+      const pricing = resolveMonthlyPricing('kohlarn', allocationInput, projects)
+      const ticket = await ledgerRepository.createOrUpdateTicket(createMonthlyTicketSnapshot(allocationInput, pricing, getBangkokTime()), undefined, operationIds[index])
+      if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+      saved.push(ticket)
+      setTickets(current => [...current.filter(row => row.id !== ticket.id), ticketDisplay(ticket)])
+    }
+    try { await refresh() }
+    catch { if (epoch === accountEpochRef.current) setToast('格兰岛套餐订单已保存；页面刷新未完成，请同步核对，无需再次保存。') }
+    if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
+    reloadAfterRecordSave()
+    return saved[0]
+  }
   const saveCarnival = (input: Show69RecordInput, existing?: TicketRecord, operationId?: string, snapshot?: TicketInput) => saveIndependentMonthlyRecord('carnival', input, existing, operationId, snapshot)
 
   const saveShow79Settlement = async (input: Show79SettlementInput) => {
@@ -1196,7 +1217,7 @@ export default function App() {
           {view === 'show69' ? <Show69View key={`show69:${financialAccountId}:${show69Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show69Draft?.accountId === financialAccountId ? show69Draft.input : undefined} tickets={tickets} projects={projects} onSave={saveShow69} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
             : view === 'boxing' ? <Show69View kind="boxing" key={`boxing:${financialAccountId}:${boxingDraft?.id ?? ''}`} accountId={financialAccountId} initialInput={boxingDraft?.accountId === financialAccountId ? boxingDraft.input : undefined} tickets={tickets} projects={projects} onSave={saveBoxing} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
             : view === 'show79' ? <Show79View key={`show79:${financialAccountId}:${show79Draft?.id ?? ''}`} accountId={financialAccountId} initialInput={show79Draft?.accountId === financialAccountId ? show79Draft.input : undefined} tickets={tickets} projects={projects} settlements={show79Settlements} settlementReviewMessage={financialReviewMessage || undefined} onSaveSettlement={saveShow79Settlement} onSave={saveShow79} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
-              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
+              : view === 'kohlarn' ? <Show69View kind="kohlarn" key={`kohlarn:${financialAccountId}:${monthlyStandardDraft?.kind === 'kohlarn' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'kohlarn' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={kohLarnProjects} onSave={saveKohLarn} onSavePackageAllocations={saveKohLarnAllocations} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} />
                 : view === 'carnival' ? <Show69View kind="carnival" key={`carnival:${financialAccountId}:${monthlyStandardDraft?.kind === 'carnival' ? monthlyStandardDraft.id : ''}`} accountId={financialAccountId} initialInput={monthlyStandardDraft?.accountId === financialAccountId && monthlyStandardDraft.kind === 'carnival' ? monthlyStandardDraft.input : undefined} tickets={tickets} projects={carnivalProjects} onSave={saveCarnival} onDelete={deleteTicket} onManageProjects={() => setSupplierSheetOpen(true)} /> : null}
         </MonthlyTicketsView></Suspense> : view === 'reports' ? <Suspense fallback={<DeferredPage label="报表" />}><ReportView tickets={mainTickets} suppliers={suppliers} projects={projects} onExportLedger={() => void exportTicketsToXlsx(mainTickets)} ledgerCount={activeTickets(mainTickets).length} /></Suspense> : <>
           <section className="records-heading">
