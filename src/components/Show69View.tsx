@@ -94,7 +94,7 @@ export function Show69View({ kind = 'show69', accountId, initialInput, projects 
   const cancelPaste = () => { pasteRequest.current++; pasteLock.current = false; setPasting(false) }
   const clearEntry = () => {
     cancelPaste(); operationRef.current = null; setPendingSave(null); setEditing(undefined); setInput(emptyInput())
-    setCommand(''); setCommandError(''); setCommandMessage(''); setError('')
+    setCommand(''); setCommandError(''); setCommandMessage(''); setError(''); setAllocations(kind === 'kohlarn' ? [{ projectId: '', people: 1 }] : [])
   }
   const update = <K extends keyof Show69RecordInput>(field: K, value: Show69RecordInput[K]) => {
     cancelPaste(); setInput(current => ({ ...current, [field]: value })); setError(''); setMessage('')
