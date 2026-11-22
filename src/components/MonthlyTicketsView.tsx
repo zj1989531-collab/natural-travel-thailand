@@ -7,7 +7,7 @@ const channels: { id: MonthlyTicketChannel; name: string; description: string }[
   { id: 'show79', name: '79秀', description: '订单、确认单与 40% / 60% 分账' },
   { id: 'boxing', name: '泰拳', description: '亚洲人／欧美人套餐与 50% / 50% 分账' },
   { id: 'kohlarn', name: '格兰岛一日游', description: '独立订单与 50% / 50% 分账' },
-  { id: 'carnival', name: '东方嘉年华', description: '独立月结订单' }
+  { id: 'carnival', name: '东方嘉年华', description: '独立订单与 50% / 50% 分账' }
 ]
 
 export function MonthlyTicketsView({ selected, onSelect, onBack, children }: {

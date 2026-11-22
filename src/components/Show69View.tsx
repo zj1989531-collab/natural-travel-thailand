@@ -30,7 +30,7 @@ const emptyInput = (): Show69RecordInput => ({ date: getBangkokDate(), guestName
 export function Show69View({ kind = 'show69', accountId, initialInput, projects = [], tickets, onSave, onSavePackageAllocations, onDelete, onManageProjects }: Props) {
   const title = kind === 'boxing' ? '泰拳' : kind === 'kohlarn' ? '格兰岛一日游' : kind === 'carnival' ? '东方嘉年华' : '69秀'
   const requiresPackage = kind === 'kohlarn' || kind === 'carnival'
-  const hasMonthlySplit = kind === 'show69' || kind === 'boxing' || kind === 'kohlarn'
+  const hasMonthlySplit = kind === 'show69' || kind === 'boxing' || kind === 'kohlarn' || kind === 'carnival'
   const needsFrozenMonthlySnapshot = requiresPackage
   const commandHelpId = `${kind}-command-help`
   const [input, setInput] = useState<Show69RecordInput>(() => initialInput ? { ...initialInput } : emptyInput())
