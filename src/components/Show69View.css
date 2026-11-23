@@ -11,5 +11,10 @@
 .show69-pricing dl > div { display: grid; gap: 7px; min-width: 0; }
 .show69-pricing dt { color: #687b70; font-size: 12px; }
 .show69-pricing dd { margin: 0; color: #176a59; font-size: clamp(14px, 3.6vw, 18px); font-weight: 800; overflow-wrap: anywhere; }
+.show69-allocation-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; color: #435d50; font-size: 13px; font-weight: 700; }
+.show69-allocation-summary .ready { color: #176a59; }.show69-allocation-summary .pending { color: #9a6428; }.show69-allocation-summary strong { margin-left: auto; color: #176a59; }
+.show69-allocation-row { align-items: end; padding: 12px 0; border-top: 1px solid #dbe7de; }.show69-allocation-row:first-of-type { border-top: 0; }
+.show69-allocation-row .text-action { min-height: 44px; }
+@media (max-width: 480px) { .show69-allocation-summary strong { width: 100%; margin-left: 0; }.show69-allocation-row { grid-template-columns: 1fr 1fr; }.show69-allocation-row .text-action { grid-column: 1 / -1; width: 100%; } }
 .show69-record-amounts { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; font-size: 13px; color: #687b70; }
 .show69-record-amounts strong { color: #176a59; }
