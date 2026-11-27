@@ -280,6 +280,7 @@ export function TicketForm({ ticket, projects, projectOptions, suppliers = [], k
           {!medicineMode && form.projectId && <section className={`ticket-order-summary${amountsComplete && profit < 0 ? ' is-loss' : ''}`} aria-label="订单核对摘要">
             <p><strong>{form.guestName?.trim() || '姓名未填写'}</strong> · {form.issueDate.replaceAll('-', '/')} · {form.personCount == null ? `${countLabel}未填写` : `${formatNumber(form.personCount)}${quantityLabels(form).unit}`}</p>
             <p className="ticket-order-project">{form.projectName}{form.subItemName ? ` · ${form.subItemName}` : ''}</p>
+            <p className="ticket-order-basis">供货商：{form.supplierName?.trim() || '待选择'}</p>
             <p className="ticket-order-basis">{perPerson ? `按${countLabel}计算 · ${single}金额 × ${countLabel}` : '整单总额 · 不乘人数／数量'}{form.entryMode === 'profit_only'
               ? ` · ${perPerson ? single : '整单'}返佣 ${typeof form.manualProfitThb === 'number' && Number.isFinite(form.manualProfitThb) ? formatThb(form.manualProfitThb) : '待填写'}`
               : ` · ${perPerson ? single : '整单'}售价 ${Number.isFinite(form.agentPriceThb) ? formatThb(form.agentPriceThb) : '待填写'} · ${perPerson ? single : '整单'}成本 ${Number.isFinite(form.costThb) ? formatThb(form.costThb) : '待填写'}`}</p>
@@ -490,7 +491,7 @@ export function SupplierSheet({ suppliers, projects, onAddSupplier, onAddProject
 
         <section className="management-section">
           <h3>{editingProject ? '2. 修改项目价格' : '2. 录入项目与子项价格'}</h3>
-          {editingProject && <p className="sheet-copy">只更新此套餐的默认价格和规则，不影响历史出票金额、数量、结算及退票归属。</p>}
+          {editingProject && <p className="sheet-copy">修改默认价格和规则只影响之后的新订单；历史订单的供货商、售价、成本、数量和结算保持原样。</p>}
           <form className="project-form" ref={projectFormRef} onSubmit={event => { event.preventDefault(); void saveProject() }}>
             <fieldset className="form-fields" disabled={saving !== null}>
             <label className="checkbox-label"><input type="checkbox" checked={manualSupplier} onChange={event => setManualSupplier(event.target.checked)} disabled={editingProject !== null} />出票时再选择供货商（不预设）</label>
@@ -895,9 +896,9 @@ export default function App() {
             : financialReviewMessage
               ? { label: '分账待核对', detail: financialReviewMessage, tone: 'warning' }
               : unsyncedCount
-              ? { label: '正在补传', detail: `${unsyncedCount} 条本机记录等待上传。`, tone: 'connected' }
+              ? { label: '待同步', detail: `${unsyncedCount} 条记录已保存在本机，等待上传云端。`, tone: 'warning' }
               : syncMessage === '已同步到云端'
-                ? { label: '已同步', detail: '本机与云端已完成核对。', tone: 'connected' }
+                ? { label: '已同步', detail: '本机与云端已完成核对，记录已获云端确认。', tone: 'connected' }
                 : syncMessage
                   ? { label: '同步待重试', detail: syncMessage, tone: 'warning' }
                   : { label: '正在连接', detail: '正在核对云端与本机记录。', tone: 'connected' }
