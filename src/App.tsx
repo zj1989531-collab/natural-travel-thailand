@@ -1042,11 +1042,15 @@ export default function App() {
     if (allocations.length !== operationIds.length) throw new Error('套餐保存编号不完整，请重新填写后保存。')
     const epoch = accountEpochRef.current
     const saved: TicketRecord[] = []
-    for (let index = 0; index < allocations.length; index++) {
-      const allocation = allocations[index]
+    // Validate every selected package before saving any line, so a stale or
+    // invalid later selection cannot leave earlier packages recorded alone.
+    const prepared = allocations.map(allocation => {
       const allocationInput = { ...input, people: allocation.people, projectId: allocation.projectId }
       const pricing = resolveMonthlyPricing('kohlarn', allocationInput, projects)
-      const ticket = await ledgerRepository.createOrUpdateTicket(createMonthlyTicketSnapshot(allocationInput, pricing, getBangkokTime()), undefined, operationIds[index])
+      return createMonthlyTicketSnapshot(allocationInput, pricing, getBangkokTime())
+    })
+    for (let index = 0; index < allocations.length; index++) {
+      const ticket = await ledgerRepository.createOrUpdateTicket(prepared[index], undefined, operationIds[index])
       if (epoch !== accountEpochRef.current) throw new Error('账号已切换，请重新打开当前账本。')
       saved.push(ticket)
       setTickets(current => [...current.filter(row => row.id !== ticket.id), ticketDisplay(ticket)])
